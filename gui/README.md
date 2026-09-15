@@ -129,3 +129,12 @@ and the browser-preview fallback are all present. It is not part of the CI gate
   wire shapes.
 - [protocol-reference](https://docs.antigma.ai/reference/protocol-reference) —
   the rendered protocol reference.
+
+## Troubleshooting
+
+Symptom → cause → fix for the traps above — the browser-preview and stale-dev-server
+banner, the blank `cargo run` window, `cante` not found and the `CANTE_BIN` command
+spec, a daemon that exits mid-session, an empty model picker, the macOS Xcode
+licence and `.dmg` steps, unsigned bundles, and what the fixture does and does
+not simulate — lives in the guide:
+[Desktop GUI → Troubleshooting](https://docs.antigma.ai/usage/gui#troubleshooting).
