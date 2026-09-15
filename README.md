@@ -1,10 +1,10 @@
 
 <p align="center">
-  <img src="docs-site/static/assets/ante-readme-banner-demo2-cinematic-technical-1280x470.png" alt="Ante — One harness to run them all">
+  <img src="docs-site/static/assets/cante-readme-banner-demo2-cinematic-technical-1280x470.png" alt="Cante — One harness to run them all">
 </p>
 
 <p align="center">
-  <a href="https://github.com/AntigmaLabs/ante/releases"><img src="https://img.shields.io/github/v/release/AntigmaLabs/ante?include_prereleases&label=release&color=blueviolet" /></a>
+  <a href="https://github.com/AntigmaLabs/cante/releases"><img src="https://img.shields.io/github/v/release/AntigmaLabs/cante?include_prereleases&label=release&color=blueviolet" /></a>
   <a href="https://antigma.ai/eval"><img src="https://img.shields.io/badge/Terminal--Bench_2.1-live_results-2ea44f?logo=speedtest&logoColor=white" /></a>
   <a href="https://docs.antigma.ai"><img src="https://img.shields.io/badge/Docs-docs.antigma.ai-orange?logo=safari&logoColor=white" /></a>
   <a href="https://discord.gg/CbAsUR434B"><img src="https://img.shields.io/badge/Discord-Join%20Us-5865F2?logo=discord&logoColor=white" /></a>
@@ -13,27 +13,27 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" /></a>
 </p>
 
-# Ante
+# Cante
 
 > [!WARNING]
 > **Beta preview:** Expect breaking changes and incomplete functionality. macOS and Linux only; on Windows, we suggest [WSL](https://learn.microsoft.com/windows/wsl/install).
 
-**A ghost in your shell.** Ante is a self-contained coding agent that lives in your terminal and self-organizes. One ~15MB compressed download from [Antigma Labs](https://antigma.ai) that expands to a single Rust executable with zero runtime dependencies, built to get the most out of any model.
+**A ghost in your shell.** Cante is a self-contained coding agent that lives in your terminal and self-organizes. One ~15MB compressed download from [Antigma Labs](https://antigma.ai) that expands to a single Rust executable with zero runtime dependencies, built to get the most out of any model.
 
 It works like Claude Code or Codex, with none of their dependencies or model constraints. It can also be the optimized core for [building your own harness](examples/mini-tui) and high-performing assistants.
 
 ```sh
-curl -fsSL https://ante.run/install.sh | bash
-ante
+curl -fsSL https://cante.run/install.sh | bash
+cante
 ```
 
 We care about **the harness, not a co-trained model or a secret prompt**. The harness and the model are a dynamic duo: they should evolve together but not be bound together. Prompts belong to the user.
 
-Ante makes this declarative: [one settings profile](#one-binary-many-agents) can define the whole agent, replacement system prompt included.
+Cante makes this declarative: [one settings profile](#one-binary-many-agents) can define the whole agent, replacement system prompt included.
 
 ### 🥇 Continuously evaluated and evolved in public
 
-We evaluate Ante as a harness across different model families instead of coupling it to one hero model. Ante runs [Terminal-Bench 2.1](https://antigma.ai/eval) continuously under official leaderboard constraints: 89 tasks, 5 trials each. Each result pins the exact Ante build you can download and links the raw Harbor run for independent audit. Latest full run: **83.9%** with open-weight **DeepSeek V4.1 Flash** (370/445 trials, Ante 0.preview.98, about $18 of inference).
+We evaluate Cante as a harness across different model families instead of coupling it to one hero model. Cante runs [Terminal-Bench 2.1](https://antigma.ai/eval) continuously under official leaderboard constraints: 89 tasks, 5 trials each. Each result pins the exact Cante build you can download and links the raw Harbor run for independent audit. Latest full run: **83.9%** with open-weight **DeepSeek V4.1 Flash** (370/445 trials, Cante 0.preview.98, about $18 of inference).
 
 #### Same model, different harness
 
@@ -43,7 +43,7 @@ We evaluate Ante as a harness across different model families instead of couplin
 
 ### 🪶 A fraction of the footprint
 
-Ante is hand-written Rust: the heavy parts (`Grep`, `git`) are embedded in one binary and one process, and local inference is handled by a managed llama.cpp. Across the same 20 parallel tasks in Docker, Ante uses **~7× less peak memory**, **~9× less average CPU**, and **~5× less disk I/O** than Claude Code.
+Cante is hand-written Rust: the heavy parts (`Grep`, `git`) are embedded in one binary and one process, and local inference is handled by a managed llama.cpp. Across the same 20 parallel tasks in Docker, Cante uses **~7× less peak memory**, **~9× less average CPU**, and **~5× less disk I/O** than Claude Code.
 
 ![Resource Usage Comparison](docs-site/docs/benchmarks/compare_animated.gif)
 
@@ -51,10 +51,10 @@ Ante is hand-written Rust: the heavy parts (`Grep`, `git`) are embedded in one b
 
 ### 🔌 Natively offline
 
-Ante's inference engine is a pinned, managed version of [llama.cpp](https://github.com/ggml-org/llama.cpp). Point it at a GGUF file and the whole loop runs on your machine: no API key, no account, no internet.
+Cante's inference engine is a pinned, managed version of [llama.cpp](https://github.com/ggml-org/llama.cpp). Point it at a GGUF file and the whole loop runs on your machine: no API key, no account, no internet.
 
 ```sh
-ante --offline-model ~/.ante/models/Qwen3.5-9B-Q4_K_M.gguf \
+cante --offline-model ~/.cante/models/Qwen3.5-9B-Q4_K_M.gguf \
   -p "add error handling to src/main.rs"
 ```
 
@@ -109,75 +109,75 @@ These three properties are one design decision. An agent you can **verify**, **a
 
 ### Installation
 
-Ante is a single, self-contained binary with no external dependencies: download and run.
+Cante is a single, self-contained binary with no external dependencies: download and run.
 
 ```sh
-curl -fsSL https://ante.run/install.sh | bash
+curl -fsSL https://cante.run/install.sh | bash
 
 # Install a specific release channel
-curl -fsSL https://ante.run/install.sh | bash -s -- nightly
+curl -fsSL https://cante.run/install.sh | bash -s -- nightly
 
 # Install into a directory already on PATH
-curl -fsSL https://ante.run/install.sh | ANTE_INSTALL_DIR=/usr/local/bin bash
+curl -fsSL https://cante.run/install.sh | CANTE_INSTALL_DIR=/usr/local/bin bash
 ```
 
 ### Modes
 
 | Mode | Command | Use it for |
 |------|---------|------------|
-| [Interactive TUI](https://docs.antigma.ai/usage/tui) | `ante` | day-to-day work in the terminal (`--fullscreen` for alternate screen) |
-| [Headless](https://docs.antigma.ai/usage/headless) | `ante -p "..."` | one-shot tasks, scripts, CI |
-| [Server](https://docs.antigma.ai/usage/serve) | `ante serve` | editor plugins and integrations, over stdio, socket (`--sock`), or WebSocket |
-| [Gateway](https://docs.antigma.ai/usage/gateway) | `ante gateway` | running Ante as a Slack or Discord bot |
+| [Interactive TUI](https://docs.antigma.ai/usage/tui) | `cante` | day-to-day work in the terminal (`--fullscreen` for alternate screen) |
+| [Headless](https://docs.antigma.ai/usage/headless) | `cante -p "..."` | one-shot tasks, scripts, CI |
+| [Server](https://docs.antigma.ai/usage/serve) | `cante serve` | editor plugins and integrations, over stdio, socket (`--sock`), or WebSocket |
+| [Gateway](https://docs.antigma.ai/usage/gateway) | `cante gateway` | running Cante as a Slack or Discord bot |
 
 ### Headless examples
 
 ```sh
 # Fix a bug
-ante -p "find and fix the failing test in src/auth"
+cante -p "find and fix the failing test in src/auth"
 
 # Review a diff
-git diff | ante -p "review this for security issues"
+git diff | cante -p "review this for security issues"
 
 # Use a different provider
-ante --provider openai --model gpt-5.6 -p "refactor the database module"
+cante --provider openai --model gpt-5.6 -p "refactor the database module"
 
 # Resume a saved session
-ante --resume ses_01ARZ3NDEKTSV4RRFFQ69G5FAV -p "now add tests"
+cante --resume ses_01ARZ3NDEKTSV4RRFFQ69G5FAV -p "now add tests"
 
 # Run fully offline with a local GGUF model
-ante --offline-model ~/.ante/models/Qwen3.5-9B-Q4_K_M.gguf \
+cante --offline-model ~/.cante/models/Qwen3.5-9B-Q4_K_M.gguf \
   -p "add error handling to src/main.rs"
 ```
 
-### Update Ante
+### Update Cante
 
 ```sh
-ante update
+cante update
 
 # One-off update from a different channel
-ante update --channel nightly
+cante update --channel nightly
 
 # Roll back or pin to an exact release
-ante update --version v0.preview.99
+cante update --version v0.preview.99
 ```
 
 ## One binary, many agents
 
-Ante's behavior lives in a settings file, and `--profile <name>` swaps that file per run: system prompt, tool set, skills, memory. The same binary can be a full assistant in one terminal and a minimal agent in the next.
+Cante's behavior lives in a settings file, and `--profile <name>` swaps that file per run: system prompt, tool set, skills, memory. The same binary can be a full assistant in one terminal and a minimal agent in the next.
 
-For project-specific workflows, Ante also respects `.ante/settings.json` at your repository root, layering team settings (such as enabled MCP servers, allowed tools, and default models) right alongside user preferences.
+For project-specific workflows, Cante also respects `.cante/settings.json` at your repository root, layering team settings (such as enabled MCP servers, allowed tools, and default models) right alongside user preferences.
 
 Curated profiles demonstrate how flexible this is:
-- [`pi`](curated/pi.settings.json): Strips Ante down to four tools (Read, Write, Edit, Bash) and a [short replacement system prompt](curated/pi.system-prompt.md); file search runs through `rg`, subagents through `ante -p "<task>"`, web access through `curl`.
+- [`pi`](curated/pi.settings.json): Strips Cante down to four tools (Read, Write, Edit, Bash) and a [short replacement system prompt](curated/pi.system-prompt.md); file search runs through `rg`, subagents through `cante -p "<task>"`, web access through `curl`.
 - [`plan`](curated/plan.settings.json): A read-only research and planning agent with file mutations disabled, designed to produce an implementation plan before you execute.
 
 ```sh
-cp curated/pi.settings.json ~/.ante/
-ante --profile pi
+cp curated/pi.settings.json ~/.cante/
+cante --profile pi
 ```
 
-A profile replaces the whole settings file, so anything it omits falls back to Ante defaults, and explicit CLI flags still win. Ante also ships a built-in `bare` profile for stripped-down runs: no skills, MCP servers, session saving, or auto-memory. Share what you build in [`curated/`](curated).
+A profile replaces the whole settings file, so anything it omits falls back to Cante defaults, and explicit CLI flags still win. Cante also ships a built-in `bare` profile for stripped-down runs: no skills, MCP servers, session saving, or auto-memory. Share what you build in [`curated/`](curated).
 
 **[Named profiles →](https://docs.antigma.ai/configuration/preference#named-profiles)** · [Project settings →](https://docs.antigma.ai/configuration/preference#project-settings) · [Curated profiles →](curated)
 
@@ -198,7 +198,7 @@ Bring your own API key, subscription, or local model; no account required, not e
 | Local (GGUF) | Any GGUF model via built-in llama.cpp |
 | ...and more | Zai, Ali Coding Plan, Antix, OpenAI-compatible |
 
-**A config layer for everything else.** Your own proxy, gateway, or inference engine is one entry in `~/.ante/catalog.json`: a `wire_style` (Ante speaks four API dialects), an auth style (bearer, header, or query, from an env var or OAuth), plus `http_headers` and `extra_body` for whatever else the endpoint expects. The combinations cover most setups without a plugin or a code change:
+**A config layer for everything else.** Your own proxy, gateway, or inference engine is one entry in `~/.cante/catalog.json`: a `wire_style` (Cante speaks four API dialects), an auth style (bearer, header, or query, from an env var or OAuth), plus `http_headers` and `extra_body` for whatever else the endpoint expects. The combinations cover most setups without a plugin or a code change:
 
 ```json
 {
@@ -223,23 +223,23 @@ Bring your own API key, subscription, or local model; no account required, not e
 We open sourced what really matters in the age of agentic coding, all under Apache 2.0:
 
 1. **Detailed documentation, the descriptive truth.** [`docs-site/`](docs-site) is the source for [docs.antigma.ai](https://docs.antigma.ai): a precise description of what the harness does and how to drive it.
-2. **The protocol and client SDKs.** [`crates/protocol-shape`](crates/protocol-shape) defines the wire messages and schema spoken by `ante serve`; [`crates/ante-sdk`](crates/ante-sdk) is the async Rust SDK for controlling Ante over stdio or Unix domain sockets; [`ante-acp`](ante-acp) provides Agent Client Protocol support.
+2. **The protocol and client SDKs.** [`crates/protocol-shape`](crates/protocol-shape) defines the wire messages and schema spoken by `cante serve`; [`crates/cante-sdk`](crates/cante-sdk) is the async Rust SDK for controlling Cante over stdio or Unix domain sockets; [`cante-acp`](cante-acp) provides Agent Client Protocol support.
 3. **Core primitives and execution engine.** As parts of the private core stabilize, they are open-sourced here: [`crates/exec`](crates/exec) provides bounded async process execution, and [`crates/llm`](crates/llm) supplies provider profiles and shared LLM primitives.
-4. **The eval pipeline, constraint and continuous improvement.** [`ante-harbor/`](ante-harbor) is the Harbor agent adapter behind our Terminal-Bench results: use it to reproduce any run at [antigma.ai/eval](https://antigma.ai/eval). [`CHANGELOG.md`](CHANGELOG.md) records the improvement, release by release.
+4. **The eval pipeline, constraint and continuous improvement.** [`cante-harbor/`](cante-harbor) is the Harbor agent adapter behind our Terminal-Bench results: use it to reproduce any run at [antigma.ai/eval](https://antigma.ai/eval). [`CHANGELOG.md`](CHANGELOG.md) records the improvement, release by release.
 
-Alongside these, [`curated/`](curated) is a shared space for reusable pieces from the team and community, laid out to mirror `~/.ante/`: settings profiles like [`pi`](curated/pi.settings.json) and [`plan`](curated/plan.settings.json), and skills.
+Alongside these, [`curated/`](curated) is a shared space for reusable pieces from the team and community, laid out to mirror `~/.cante/`: settings profiles like [`pi`](curated/pi.settings.json) and [`plan`](curated/plan.settings.json), and skills.
 
-The core harness itself is developed in a private repository during the alpha and ships as a prebuilt binary via [releases](https://github.com/AntigmaLabs/ante/releases). Core libraries from it continue to be extracted here as they stabilize; progress is tracked in [issue #21](https://github.com/AntigmaLabs/ante/issues/21).
+The core harness itself is developed in a private repository during the alpha and ships as a prebuilt binary via [releases](https://github.com/AntigmaLabs/cante/releases). Core libraries from it continue to be extracted here as they stabilize; progress is tracked in [issue #21](https://github.com/AntigmaLabs/cante/issues/21).
 
-The protocol surface maps to Ante's client-daemon architecture:
+The protocol surface maps to Cante's client-daemon architecture:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                         Clients                             │
 │                                                             │
 │   ┌───────────┐    ┌───────────┐    ┌────────────────────┐  │
-│   │    TUI    │    │ Headless  │    │    ante serve      │  │
-│   │  (ante)   │    │ (ante -p) │    │   stdio/sock/ws    │  │
+│   │    TUI    │    │ Headless  │    │    cante serve      │  │
+│   │  (cante)   │    │ (cante -p) │    │   stdio/sock/ws    │  │
 │   └─────┬─────┘    └─────┬─────┘    └─────────┬──────────┘  │
 └─────────┼────────────────┼─────────────────────┼────────────┘
           │                │                     │
@@ -264,21 +264,21 @@ The protocol surface maps to Ante's client-daemon architecture:
 
 ## The bigger picture
 
-Ante is designed for **cellular-native** agents: like cells in an organism, tiny, expendable, massively replicated. That thesis is why the three headline claims exist. A cell-scale agent must be *verified* (reliability compounds at scale), *tiny* (every byte is multiplied by thousands), and *self-contained* (no runtime to install, no service to phone home to). Read more in our [philosophy](https://docs.antigma.ai/start/philosophy) and [agent organization patterns](https://docs.antigma.ai/experimental/agent-org).
+Cante is designed for **cellular-native** agents: like cells in an organism, tiny, expendable, massively replicated. That thesis is why the three headline claims exist. A cell-scale agent must be *verified* (reliability compounds at scale), *tiny* (every byte is multiplied by thousands), and *self-contained* (no runtime to install, no service to phone home to). Read more in our [philosophy](https://docs.antigma.ai/start/philosophy) and [agent organization patterns](https://docs.antigma.ai/experimental/agent-org).
 
 ## FAQ
 
 ### Why another terminal agent?
 
-The name is the answer: **An**other **Te**rminal agent, and *ante*, the stake you put on the table to play. Ante is fast, lightweight, and the only terminal agent with native local inference built in. We believe a self-contained agent core that self-organizes is the foundation of the coming agent economy.
+The name is the answer: **An**other **Te**rminal agent, and *cante*, the stake you put on the table to play. Cante is fast, lightweight, and the only terminal agent with native local inference built in. We believe a self-contained agent core that self-organizes is the foundation of the coming agent economy.
 
 <details>
-<summary><b>How is Ante different from other agents?</b></summary>
+<summary><b>How is Cante different from other agents?</b></summary>
 
-Ante has most of the features you expect from agents like Claude Code or Codex: multi-agents, skills, MCP, persistent memory. The difference is the build philosophy.
+Cante has most of the features you expect from agents like Claude Code or Codex: multi-agents, skills, MCP, persistent memory. The difference is the build philosophy.
 
 - Built from scratch in Rust: one executable that downloads as ~15MB compressed and unpacks to 34.1 MiB (the figure our [harness comparison](https://antigma.ai/blog/2026/08/04/harness-matter) tables report). Core components like `Grep` (fully rebuilt and customized) and `git` run in the same process, so nothing is shelled out and no resources leak. Most similar projects ship on Node.js or CPython and carry an order-of-magnitude larger footprint.
-- Local inference is built in: a local GGUF model is all Ante needs to run without any provider.
+- Local inference is built in: a local GGUF model is all Cante needs to run without any provider.
 - No vendor lock-in, not even to ourselves: no account needed, reuse your existing API credentials. An opt-in, fully integrated server-side experience lives at [antix.antigma.ai](https://antix.antigma.ai).
 - Every claim is backed by public, reproducible benchmarks of the exact builds we ship: [antigma.ai/eval](https://antigma.ai/eval).
 
@@ -295,21 +295,21 @@ But our vision is much bigger: millions of agents self-organizing and communicat
 </details>
 
 <details>
-<summary><b>Can I run Ante completely offline?</b></summary>
+<summary><b>Can I run Cante completely offline?</b></summary>
 
-Yes. Ante has a built-in llama.cpp engine that runs GGUF models locally. It handles engine installation, model discovery, and memory management automatically. No API keys or internet connection required.
+Yes. Cante has a built-in llama.cpp engine that runs GGUF models locally. It handles engine installation, model discovery, and memory management automatically. No API keys or internet connection required.
 </details>
 
 <details>
 <summary><b>Can I use my own custom models or providers?</b></summary>
 
-Yes. Create a `~/.ante/catalog.json` file to add or override providers and models with custom endpoints, API keys, and configurations. Any OpenAI-compatible API works.
+Yes. Create a `~/.cante/catalog.json` file to add or override providers and models with custom endpoints, API keys, and configurations. Any OpenAI-compatible API works.
 </details>
 
 <details>
-<summary><b>What is the <code>ante serve</code> mode for?</b></summary>
+<summary><b>What is the <code>cante serve</code> mode for?</b></summary>
 
-Server mode runs Ante as a long-lived daemon that communicates over a structured JSONL protocol. It's ideal for building editor plugins, web UIs, and custom integrations on top of Ante.
+Server mode runs Cante as a long-lived daemon that communicates over a structured JSONL protocol. It's ideal for building editor plugins, web UIs, and custom integrations on top of Cante.
 </details>
 
 ## Documentation
@@ -321,7 +321,7 @@ Full documentation is available at [docs.antigma.ai](https://docs.antigma.ai).
 Source code in this repository (including the SDK and protocol crates) is
 licensed under the [Apache License 2.0](LICENSE).
 
-The prebuilt `ante` binary is free to use — including commercially — during
+The prebuilt `cante` binary is free to use — including commercially — during
 the alpha preview under the [Binary Preview Terms](BINARY-TERMS.md). The core
 harness is currently developed in a private repository and shipped as a
 binary; the SDK and protocol surface you build against here will remain
