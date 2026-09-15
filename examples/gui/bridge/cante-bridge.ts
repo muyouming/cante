@@ -27,6 +27,12 @@ export const MAX_BATCH_BYTES = 96 * 1024;
 export const MAX_POLL_MS = 25_000;
 export const DEFAULT_POLL_MS = 20_000;
 export const RING_CAPACITY = 4096;
+/**
+ * Quiet window before a parked long-poll is answered with delta-only news.
+ * Without it the first token of a burst would be its own round trip; 40 ms is
+ * under a frame budget's worth of visible latency and collects a whole run.
+ */
+export const DELTA_QUIET_MS = 40;
 
 export type DaemonStatus = "idle" | "thinking" | "streaming" | "awaiting" | "error" | "offline";
 
@@ -282,6 +288,7 @@ export class CanteDaemon {
   private ring: EventMsg[] = [];
   private head = 0;
   private waiters: Waiter[] = [];
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private stderrTail: string[] = [];
   state: BridgeState;
 
@@ -379,10 +386,41 @@ export class CanteDaemon {
     const overflow = this.ring.length - this.capacity;
     if (overflow > 0) this.ring.splice(0, overflow);
     this.state = reduceState(this.state, message.event);
+    this.scheduleWake(eventName(message.event));
+  }
+
+  /**
+   * Wake parked polls, giving a delta burst a short quiet window so one
+   * response carries the run rather than its first token. Structural events
+   * (tool calls, turn ends, errors, session changes) flush immediately — the
+   * caller is waiting on those.
+   */
+  private scheduleWake(name: string): void {
+    if (this.waiters.length === 0) return;
+    if (!DELTA_KINDS.has(name)) {
+      this.flushNow();
+      return;
+    }
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      this.wake();
+    }, DELTA_QUIET_MS);
+  }
+
+  private flushNow(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
     this.wake();
   }
 
   private wake(): void {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
     const waiters = this.waiters;
     this.waiters = [];
     for (const waiter of waiters) {
@@ -602,6 +640,18 @@ export function createBridgeServer(options: ServerOptions = {}) {
             ok: true,
             op: daemon.send({ SlashCommand: { name: String(body.name ?? ""), args: String(body.args ?? "") } }),
           });
+        }
+
+        case "POST /goal": {
+          const body = await readJson(request);
+          const command = typeof body.command === "string" ? body.command : "Status";
+          const op =
+            command === "Set"
+              ? { Goal: { Set: String(body.condition ?? "") } }
+              : command === "Clear"
+                ? { Goal: "Clear" }
+                : { Goal: "Status" };
+          return json({ ok: true, op: daemon.send(op) });
         }
 
         case "POST /compact": {

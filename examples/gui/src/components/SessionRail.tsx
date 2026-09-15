@@ -5,13 +5,11 @@
 import { Focusable, Text, View } from "@pocketjs/framework/components";
 import { Show } from "solid-js";
 
-import { EFFORTS, PERMISSION_MODES, modelLabel, providerLabel, type Store } from "../store.ts";
+import { modelLabel, providerLabel, type Store } from "../store.ts";
 import { shortId } from "../protocol.ts";
 
 export interface SessionRailProps {
   store: Store;
-  onPickModel(): void;
-  onNewSession(): void;
 }
 
 function RailButton(props: { label: string; value: string; onPress(): void; tone?: "default" | "accent" }) {
@@ -29,20 +27,6 @@ function RailButton(props: { label: string; value: string; onPress(): void; tone
 export default function SessionRail(props: SessionRailProps) {
   const store = props.store;
 
-  const cycleEffort = () => {
-    const current = store.session()?.model?.effort ?? "Medium";
-    const index = EFFORTS.indexOf(current);
-    const next = EFFORTS[(index + 1) % EFFORTS.length]!;
-    void store.setEffort(next);
-  };
-
-  const cyclePermission = () => {
-    const current = store.session()?.permission_mode ?? "Strict";
-    const index = PERMISSION_MODES.indexOf(current);
-    const next = PERMISSION_MODES[(index + 1) % PERMISSION_MODES.length]!;
-    void store.setPermissionMode(next);
-  };
-
   return (
     <View class="w-[252] h-full flex-col gap-2 p-3 bg-[#0e141b] border-r border-slate-800">
       <View class="flex-col gap-1 pb-2">
@@ -50,33 +34,48 @@ export default function SessionRail(props: SessionRailProps) {
         <Text class="text-xs text-slate-500">coding agent · graphical client</Text>
       </View>
 
-      <RailButton label="session" value={shortId(store.session()?.session_id)} onPress={props.onNewSession} />
-      <RailButton label="model" value={modelLabel(store.session())} onPress={props.onPickModel} tone="accent" />
-      <RailButton label="provider" value={providerLabel(store.session())} onPress={props.onPickModel} />
-      <RailButton label="effort" value={store.session()?.model?.effort ?? "—"} onPress={cycleEffort} />
-      <RailButton label="permissions" value={store.session()?.permission_mode ?? "—"} onPress={cyclePermission} />
+      <RailButton
+        label="session"
+        value={shortId(store.session()?.session_id)}
+        onPress={() => {
+          store.clearTranscript();
+          void store.startSession();
+        }}
+      />
+      <RailButton label="model" value={modelLabel(store.session())} onPress={() => store.openPicker()} tone="accent" />
+      <RailButton label="provider" value={providerLabel(store.session())} onPress={() => store.openPicker()} />
+      <RailButton
+        label="effort"
+        value={store.session()?.model?.effort ?? "—"}
+        onPress={() => void store.cycleEffort()}
+      />
+      <RailButton
+        label="permissions"
+        value={store.session()?.permission_mode ?? "—"}
+        onPress={() => void store.cyclePermission()}
+      />
 
       <View class="flex-col gap-2 pt-2">
         <Focusable
-          onPress={() => {
-            store.clearTranscript();
-          }}
+          onPress={() => store.openPalette()}
+          class="w-full flex-col px-2 py-2 rounded-md bg-slate-900 border-slate-800 focus:border-sky-500 active:bg-slate-800"
+        >
+          <Text class="text-sm text-slate-100">Commands…</Text>
+        </Focusable>
+        <Focusable
+          onPress={() => store.clearTranscript()}
           class="w-full flex-col px-2 py-2 rounded-md bg-slate-900 border-slate-800 focus:border-sky-500 active:bg-slate-800"
         >
           <Text class="text-sm text-slate-100">Clear view</Text>
         </Focusable>
         <Focusable
-          onPress={() => {
-            void store.compact();
-          }}
+          onPress={() => void store.compact()}
           class="w-full flex-col px-2 py-2 rounded-md bg-slate-900 border-slate-800 focus:border-sky-500 active:bg-slate-800"
         >
           <Text class="text-sm text-slate-100">Compact history</Text>
         </Focusable>
         <Focusable
-          onPress={() => {
-            void store.requestContextReport();
-          }}
+          onPress={() => void store.requestContextReport()}
           class="w-full flex-col px-2 py-2 rounded-md bg-slate-900 border-slate-800 focus:border-sky-500 active:bg-slate-800"
         >
           <Text class="text-sm text-slate-100">Context report</Text>

@@ -163,6 +163,71 @@ describe("daemon over real pipes", () => {
     }
   }, 20_000);
 
+  test("holds a parked poll through a delta burst", async () => {
+    const daemon = new CanteDaemon({
+      bin: FAKE_CANTE,
+      cwd: scratch,
+      env: { FAKE_CANTE_SLOW_DELTAS: "1" },
+    });
+    const waitUntil = async (predicate: () => boolean, ms: number): Promise<boolean> => {
+      const deadline = Date.now() + ms;
+      while (!predicate() && Date.now() < deadline) await daemon.wait(daemon.headCursor, 200);
+      return predicate();
+    };
+    try {
+      daemon.start();
+      daemon.send({ StartSession: {} });
+      await waitUntil(() => daemon.state.session !== null, 5_000);
+      const cursor = daemon.headCursor;
+      // Park the poll before the burst so the quiet window is what decides
+      // when it is answered.
+      const parked = daemon.wait(cursor, 5_000);
+      daemon.send({ UserInput: "hi" });
+      await parked;
+      const batch = daemon.batch(cursor);
+      const deltas = batch.events.filter(
+        (message) => typeof message.event === "object" && message.event !== null && "MessageDelta" in message.event,
+      );
+      // One merged delta: the quiet window waited out the burst rather than
+      // answering the poll with just its first token.
+      expect(deltas).toHaveLength(1);
+      expect((deltas[0]!.event as { MessageDelta: string }).MessageDelta).toBe("hello world");
+    } finally {
+      await daemon.shutdown();
+    }
+  }, 20_000);
+
+  test("routes a goal op through to the daemon", async () => {
+    const { server, daemon } = createBridgeServer({ bin: FAKE_CANTE, cwd: scratch, port: 0 });
+    const origin = `http://127.0.0.1:${server.port}`;
+    try {
+      const response = (await (
+        await fetch(`${origin}/goal`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ command: "Set", condition: "tests pass" }),
+        })
+      ).json()) as { ok: boolean };
+
+      const waitUntil = async (predicate: () => boolean, ms: number): Promise<boolean> => {
+        const deadline = Date.now() + ms;
+        while (!predicate() && Date.now() < deadline) await daemon.wait(daemon.headCursor, 200);
+        return predicate();
+      };
+      expect(response.ok).toBe(true);
+      await waitUntil(() => daemon.state.session !== null, 5_000);
+      // The double echoes what it received, which pins the wire shape.
+      const batch = daemon.batch(0);
+      const info = batch.events
+        .map((message) => message.event)
+        .filter((event): event is { Info: string } => typeof event === "object" && event !== null && "Info" in event);
+      expect(info.map((event) => event.Info)).toContain("goal set: tests pass");
+    } finally {
+      await daemon.shutdown();
+      server.stop(true);
+    }
+  }, 20_000);
+
   test("serves the HTTP surface the GUI polls", async () => {
     const { server, daemon } = createBridgeServer({ bin: FAKE_CANTE, cwd: scratch, port: 0 });
     const origin = `http://127.0.0.1:${server.port}`;

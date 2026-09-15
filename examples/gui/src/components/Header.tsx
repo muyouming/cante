@@ -8,7 +8,6 @@ import { shortId } from "../protocol.ts";
 export interface HeaderProps {
   store: Store;
   compact: boolean;
-  onPickModel(): void;
 }
 
 function Chip(props: { label: string; value: string; onPress(): void }) {
@@ -26,19 +25,6 @@ function Chip(props: { label: string; value: string; onPress(): void }) {
 export default function Header(props: HeaderProps) {
   const store = props.store;
 
-  const cycleEffort = () => {
-    const order = ["Min", "Low", "Medium", "High", "XHigh", "Max"] as const;
-    const current = store.session()?.model?.effort ?? "Medium";
-    const index = order.indexOf(current as (typeof order)[number]);
-    const next = order[(index + 1) % order.length]!;
-    void store.setEffort(next);
-  };
-
-  const cyclePermission = () => {
-    const current = store.session()?.permission_mode ?? "Strict";
-    void store.setPermissionMode(current === "Strict" ? "Auto" : current === "Auto" ? "Yolo" : "Strict");
-  };
-
   return (
     <View class="w-full h-[46] flex-row items-center justify-between px-3 bg-[#0e141b] border-b border-slate-800">
       <View class="flex-row items-center gap-3">
@@ -52,12 +38,17 @@ export default function Header(props: HeaderProps) {
       </View>
 
       <View class="flex-row items-center gap-2">
-        <Chip label="model" value={modelLabel(store.session())} onPress={props.onPickModel} />
+        <Chip label="model" value={modelLabel(store.session())} onPress={() => store.openPicker()} />
         <Show when={!props.compact}>
-          <Chip label="provider" value={providerLabel(store.session())} onPress={props.onPickModel} />
+          <Chip label="provider" value={providerLabel(store.session())} onPress={() => store.openPicker()} />
         </Show>
-        <Chip label="effort" value={store.session()?.model?.effort ?? "—"} onPress={cycleEffort} />
-        <Chip label="perm" value={store.session()?.permission_mode ?? "—"} onPress={cyclePermission} />
+        <Chip label="effort" value={store.session()?.model?.effort ?? "—"} onPress={() => void store.cycleEffort()} />
+        <Chip
+          label="perm"
+          value={store.session()?.permission_mode ?? "—"}
+          onPress={() => void store.cyclePermission()}
+        />
+        <Chip label="menu" value="⌘" onPress={() => store.openPalette()} />
       </View>
     </View>
   );
