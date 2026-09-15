@@ -1,4 +1,4 @@
-"""Dependency-free contract tests for the adapter published to AntigmaLabs/cante."""
+"""Dependency-free contract tests for the adapter published to muyouming/cante."""
 from __future__ import annotations
 
 import importlib

@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 description = "Provider profiles and shared LLM primitives for Cante"
 license = "Apache-2.0"
-repository = "https://github.com/AntigmaLabs/cante"
+repository = "https://github.com/muyouming/cante"
 readme = "README.md"
 
 [dependencies]

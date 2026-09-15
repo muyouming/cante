@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.88"
 description = "Protocol schema and wire message shapes for Cante"
 license = "Apache-2.0"
-repository = "https://github.com/AntigmaLabs/cante"
+repository = "https://github.com/muyouming/cante"
 readme = "README.md"
 
 [dependencies]
