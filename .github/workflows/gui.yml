@@ -1,0 +1,65 @@
+name: Cante GUI
+
+on:
+  pull_request:
+    paths:
+      - 'examples/gui/**'
+      - '.github/workflows/gui.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'examples/gui/**'
+      - '.github/workflows/gui.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bridge:
+    name: Bridge tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/gui
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+      - name: Typecheck bridge
+        run: bunx tsc --noEmit -p tsconfig.bridge.json
+      - name: Unit + integration tests
+        run: bun test bridge
+
+  app:
+    name: PocketJS check (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [web-app, psp, macos-app]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install app dependencies
+        working-directory: examples/gui
+        run: bun install --frozen-lockfile
+      # Materializes a PocketJS checkout under .pocketjs/ (npm pack + bun
+      # install), symlinks the app into <checkout>/apps/cante-gui, and runs the
+      # canonical manifest resolver + app typecheck for the target profile.
+      - name: PocketJS check
+        working-directory: examples/gui
+        env:
+          POCKET_TARGET: ${{ matrix.target }}
+        run: ./scripts/pocket.sh check

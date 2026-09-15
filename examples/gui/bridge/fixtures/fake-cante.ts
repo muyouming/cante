@@ -1,0 +1,94 @@
+#!/usr/bin/env bun
+// Test double for `cante serve` — reads `OpMsg` JSON Lines on stdin and
+// answers with a scripted `EventMsg` stream. Only the shapes `bridge.test.ts`
+// asserts on are modeled; it is never shipped.
+export {};
+
+let eventSeq = 0;
+function emit(event: unknown, parent: string | null = null): void {
+  eventSeq += 1;
+  const frame = {
+    timestamp: new Date(1_700_000_000_000 + eventSeq * 1000).toISOString(),
+    id: `evt_FAKEFAKEFAKEFAKEFAKEFAKEFA${String(eventSeq).padStart(2, "0")}`,
+    event,
+    parent,
+  };
+  process.stdout.write(JSON.stringify(frame) + "\n");
+}
+
+const SESSION = {
+  model: { id: "fake-model", display_name: "Fake Model" },
+  provider: { id: "fake", display_name: "Fake", base_url: "http://127.0.0.1" },
+  session_id: "ses_FAKEFAKEFAKEFAKEFAKEFAKEFA0",
+  cwd: process.cwd(),
+  permission_mode: "Strict",
+  skills: [],
+  subagents: [],
+};
+
+function handle(op: unknown, id: string): void {
+  if (typeof op === "string") {
+    switch (op) {
+      case "Interrupt":
+        emit({ TurnEnd: { turn_id: "turn_1", status: "Interrupted", steps: 1 } }, id);
+        return;
+      case "Shutdown":
+        emit("Goodbye", id);
+        process.exit(0);
+        return;
+      default:
+        return;
+    }
+  }
+  const record = op as Record<string, unknown>;
+  if ("StartSession" in record) {
+    emit({ SessionStart: SESSION }, id);
+    return;
+  }
+  if ("UserInput" in record) {
+    const turn_id = "turn_1";
+    emit({ TurnStart: { turn_id } }, id);
+    emit({ ThinkingDelta: "thinking " }, id);
+    emit({ ThinkingDelta: "hard" }, id);
+    emit({ MessageDelta: "hello " }, id);
+    emit({ MessageDelta: "world" }, id);
+    emit({ AgentMessage: "hello world" }, id);
+    emit({ ToolStart: { id: "tool_1", name: "Bash", args: { command: "ls" } } }, id);
+    emit({ ToolUpdate: { tool_use_id: "tool_1", seq: 1, message: "running" } }, id);
+    emit(
+      {
+        TurnPause: {
+          turn_id,
+          reason: { Approval: { tools: [{ id: "tool_1", name: "Bash", args: { command: "ls" } }], message: "Allow?" } },
+        },
+      },
+      id,
+    );
+    return;
+  }
+  if ("ApprovalResponse" in record) {
+    emit({ TurnResume: { turn_id: "turn_1" } }, id);
+    emit({ ToolEnd: { tool_use_id: "tool_1", tool_name: "Bash", status: "Completed", result_json: { content: "ok" } } }, id);
+    emit({ UsageUpdate: { usage: { input_tokens: 10, output_tokens: 2 }, context: { used_tokens: 12, limit_tokens: 100 } } }, id);
+    emit({ TurnEnd: { turn_id: "turn_1", status: "Completed", steps: 2 } }, id);
+    return;
+  }
+}
+
+let buffer = "";
+for await (const chunk of Bun.stdin.stream()) {
+  buffer += new TextDecoder().decode(chunk);
+  for (;;) {
+    const index = buffer.indexOf("\n");
+    if (index < 0) break;
+    const line = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (!line) continue;
+    try {
+      const message = JSON.parse(line) as { op: unknown; id: string };
+      handle(message.op, message.id);
+    } catch {
+      // ignore malformed input, exactly like the real daemon would not see it
+    }
+  }
+}

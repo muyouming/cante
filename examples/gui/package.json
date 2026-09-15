@@ -1,0 +1,22 @@
+{
+  "name": "cante-gui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PocketJS GUI client for Cante, plus the loopback HTTP bridge it talks to.",
+  "scripts": {
+    "bridge": "bun bridge/cante-bridge.ts",
+    "test": "bun test bridge",
+    "typecheck:bridge": "tsc --noEmit -p tsconfig.bridge.json",
+    "check": "bash scripts/pocket.sh check",
+    "dev": "bash scripts/pocket.sh dev"
+  },
+  "dependencies": {
+    "@pocketjs/framework": "0.11.0",
+    "solid-js": "^1.9.15"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.1.14",
+    "typescript": "^5.7.2"
+  }
+}
