@@ -4,7 +4,7 @@ sidebar_label: "模型提供商"
 description: "选择模型提供商、完成身份认证并自定义模型目录"
 ---
 
-Ante 具备跨提供商无关性。每个提供商均实现了统一的提示词发送与流式响应接口，在会话启动时根据目录解析提供商与模型。
+Cante 具备跨提供商无关性。每个提供商均实现了统一的提示词发送与流式响应接口，在会话启动时根据目录解析提供商与模型。
 
 本页介绍日常使用场景：选择提供商、完成认证以及自定义模型目录。关于内置提供商的完整列表、各模型参数以及 `catalog.json` 的完整规范，请参阅[目录参考手册](/reference/catalog-reference)。
 
@@ -12,13 +12,13 @@ Ante 具备跨提供商无关性。每个提供商均实现了统一的提示词
 
 可以通过三种方式指定提供商（优先级由高到低）：
 
-1. **CLI 命令行参数** — `ante --provider anthropic --model claude-sonnet-5`
-2. **配置文件** — 在 `~/.ante/settings.json` 中配置 `provider` 和 `model`
-3. **自动检测** — 若均未指定，Ante 会自动选用已配置凭据的第一个提供商（若均未配置则回退到 `local` 本地模型）。
+1. **CLI 命令行参数** — `cante --provider anthropic --model claude-sonnet-5`
+2. **配置文件** — 在 `~/.cante/settings.json` 中配置 `provider` 和 `model`
+3. **自动检测** — 若均未指定，Cante 会自动选用已配置凭据的第一个提供商（若均未配置则回退到 `local` 本地模型）。
 
 支持传入 `--provider` 的所有键名均在[目录参考手册](/reference/catalog-reference#built-in-providers)中列出。
 
-在 TUI 会话进行中，输入 `/providers`：选择已连接的提供商，然后确认选择模型（与思考深度）。Ante 会自动记住每个提供商上次使用的模型。参见[模型选择、提供商与思考深度](/usage/models-and-thinking#switching-providers)。
+在 TUI 会话进行中，输入 `/providers`：选择已连接的提供商，然后确认选择模型（与思考深度）。Cante 会自动记住每个提供商上次使用的模型。参见[模型选择、提供商与思考深度](/usage/models-and-thinking#switching-providers)。
 
 ## 身份认证 {#authentication}
 
@@ -26,32 +26,32 @@ Ante 具备跨提供商无关性。每个提供商均实现了统一的提示词
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
-ante --provider anthropic --model claude-sonnet-5
+cante --provider anthropic --model claude-sonnet-5
 ```
 
 各提供商具体支持的认证方式（环境变量或 OAuth）可查阅[目录参考手册](/reference/catalog-reference#built-in-providers)。
 
 ### 粘贴 API 密钥 {#paste-an-api-key}
 
-也可以在引导欢迎弹窗中直接粘贴密钥（随时可通过 `/welcome` 重新打开）：选择 **Use API key**，Ante 会根据密钥前缀自动识别提供商、掩码输入，并在通过提供商有效性校验后保存在 `~/.ante/auth/`（仅当前用户可读权限）。环境变量中配置的密钥优先级始终高于本地存储的密钥。
+也可以在引导欢迎弹窗中直接粘贴密钥（随时可通过 `/welcome` 重新打开）：选择 **Use API key**，Cante 会根据密钥前缀自动识别提供商、掩码输入，并在通过提供商有效性校验后保存在 `~/.cante/auth/`（仅当前用户可读权限）。环境变量中配置的密钥优先级始终高于本地存储的密钥。
 
-在配置 Anthropic 密钥步骤时，按 `Tab` 键可直接在浏览器中打开 Anthropic Console 进行授权 —— Ante 会自动为您预配 API 密钥，且密钥无需经过系统剪贴板。
+在配置 Anthropic 密钥步骤时，按 `Tab` 键可直接在浏览器中打开 Anthropic Console 进行授权 —— Cante 会自动为您预配 API 密钥，且密钥无需经过系统剪贴板。
 
 ### 订阅登录（OAuth） {#subscription-login-oauth}
 
-支持订阅方案的提供商（Anthropic、OpenAI、Antix 等）可以通过 OAuth 授权直接登录，复用已有的订阅而无需管理 API 密钥。在 TUI 中输入 `/connect` 打开提供商登录向导。Ante 会自动拉起默认浏览器进行认证，完成后自动绑定当前会话。
+支持订阅方案的提供商（Anthropic、OpenAI、Antix 等）可以通过 OAuth 授权直接登录，复用已有的订阅而无需管理 API 密钥。在 TUI 中输入 `/connect` 打开提供商登录向导。Cante 会自动拉起默认浏览器进行认证，完成后自动绑定当前会话。
 
 <img src="/assets/cookbook/connect.gif" alt="通过 /connect 接入提供商" style={{width: '100%', borderRadius: '8px', margin: '16px 0'}} />
 
-连接成功后，Ante 会为后续会话持久化保存凭证，无需每次重复登录。
+连接成功后，Cante 会为后续会话持久化保存凭证，无需每次重复登录。
 
 :::tip
-使用第三方提供商时，请确保所选模型支持工具调用（Function Calling）—— Ante 依赖该能力实现智能体闭环。如果效果不佳，建议切换为更大参数规模或能力更强的模型。
+使用第三方提供商时，请确保所选模型支持工具调用（Function Calling）—— Cante 依赖该能力实现智能体闭环。如果效果不佳，建议切换为更大参数规模或能力更强的模型。
 :::
 
 ## 自定义模型目录 {#custom-catalog}
 
-创建 `~/.ante/catalog.json` 以添加 Ante 未内置的提供商、修改内置提供商属性或微调模型默认参数。该文件在启动时会合并覆盖到内置预设之上，因此只需声明新增或修改的部分。如果不想手写，可在 TUI 中运行 `/add-provider`：Ante 会发现端点提供的模型、探测每个模型接受的思考深度，并写入配置（重启后加载）。常见示例如下；完整 Schema 请查阅[目录参考手册](/reference/catalog-reference#catalogjson-schema)。
+创建 `~/.cante/catalog.json` 以添加 Cante 未内置的提供商、修改内置提供商属性或微调模型默认参数。该文件在启动时会合并覆盖到内置预设之上，因此只需声明新增或修改的部分。如果不想手写，可在 TUI 中运行 `/add-provider`：Cante 会发现端点提供的模型、探测每个模型接受的思考深度，并写入配置（重启后加载）。常见示例如下；完整 Schema 请查阅[目录参考手册](/reference/catalog-reference#catalogjson-schema)。
 
 ### 添加托管型提供商 {#add-a-hosted-provider}
 
@@ -81,7 +81,7 @@ ante --provider anthropic --model claude-sonnet-5
 
 ```bash
 export TOGETHER_API_KEY="..."
-ante --provider together --model moonshotai/Kimi-K2-Instruct
+cante --provider together --model moonshotai/Kimi-K2-Instruct
 ```
 
 ### 声明模型支持的思考深度 {#declare-supported-efforts}
@@ -117,7 +117,7 @@ ante --provider together --model moonshotai/Kimi-K2-Instruct
 ```
 
 ```bash
-ante --provider ollama --model qwen2.5-coder:7b
+cante --provider ollama --model qwen2.5-coder:7b
 ```
 
 ### 覆盖内置提供商配置 {#patch-a-built-in-provider}
@@ -155,7 +155,7 @@ ante --provider ollama --model qwen2.5-coder:7b
 }
 ```
 
-`extra_body` 只能追加新字段 —— Ante 为选定 wire style 生成的保留键（`model`、`messages`、`stream` 等）在启动时会被自动丢弃并打印提示，提供商仍会正常加载。参见[保留关键字列表](/reference/catalog-reference#extra-request-fields)。
+`extra_body` 只能追加新字段 —— Cante 为选定 wire style 生成的保留键（`model`、`messages`、`stream` 等）在启动时会被自动丢弃并打印提示，提供商仍会正常加载。参见[保留关键字列表](/reference/catalog-reference#extra-request-fields)。
 
 ### 覆盖模型默认参数 {#override-model-defaults}
 
@@ -182,7 +182,7 @@ ante --provider ollama --model qwen2.5-coder:7b
    ```
 3. 调用 [Open Router 模型列表](https://openrouter.ai/models) 中的任意模型：
    ```bash
-   ante --provider openrouter --model deepseek/deepseek-reasoner
+   cante --provider openrouter --model deepseek/deepseek-reasoner
    ```
 
 ### 兼容 OpenAI 格式的提供商 {#openai-compatible-providers}
@@ -199,5 +199,5 @@ ante --provider ollama --model qwen2.5-coder:7b
    ```
 3. 启动调用：
    ```bash
-   ante --provider openai-compatible --model meta-llama/Llama-3-70b-chat-hf
+   cante --provider openai-compatible --model meta-llama/Llama-3-70b-chat-hf
    ```

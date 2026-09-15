@@ -1,21 +1,21 @@
 ---
 title: 自定义推理引擎
 sidebar_label: "自定义引擎"
-description: "使用自编译的 llama.cpp 构建版本、调优托管推理或将 Ante 连接到已有服务端"
+description: "使用自编译的 llama.cpp 构建版本、调优托管推理或将 Cante 连接到已有服务端"
 ---
 
 # 自定义推理引擎
 
-[离线模式](/local/offline)支持开箱即用，由 Ante 自动安装并监管引擎。您可以替换二进制文件、自定义模型与 GPU 选项，或连接到自行运行的服务。
+[离线模式](/local/offline)支持开箱即用，由 Cante 自动安装并监管引擎。您可以替换二进制文件、自定义模型与 GPU 选项，或连接到自行运行的服务。
 
 ## 使用自编译的 llama.cpp 构建 {#use-your-own-llamacpp-build}
 
-Ante 解析引擎二进制的优先级如下：
+Cante 解析引擎二进制的优先级如下：
 
 1. 在 `offline-config.json` 中锁定的二进制路径（见下文）
-2. 托管的 `~/.ante/llama.cpp/current/llama` 多路复用程序
+2. 托管的 `~/.cante/llama.cpp/current/llama` 多路复用程序
 
-托管模式不会自动发现任意 PATH 安装。若要使用自己的构建，请在 `~/.ante/offline-config.json` 中将 `llama_cpp.binaries.server` 指向其 `llama` 多路复用程序：
+托管模式不会自动发现任意 PATH 安装。若要使用自己的构建，请在 `~/.cante/offline-config.json` 中将 `llama_cpp.binaries.server` 指向其 `llama` 多路复用程序：
 
 ```json
 {
@@ -27,17 +27,17 @@ Ante 解析引擎二进制的优先级如下：
 }
 ```
 
-该文件必须存在并支持 `llama serve`。历史配置中以 `llama-server` 结尾的路径会自动解析为同目录的 `llama`，因此现有托管安装无需重写配置即可迁移。若对应多路复用程序不存在，请运行 `ante offline install` 安装受支持引擎，或更新自定义路径。
+该文件必须存在并支持 `llama serve`。历史配置中以 `llama-server` 结尾的路径会自动解析为同目录的 `llama`，因此现有托管安装无需重写配置即可迁移。若对应多路复用程序不存在，请运行 `cante offline install` 安装受支持引擎，或更新自定义路径。
 
 :::note
-Ante 通常会在安装期间自行写入这些字段。若将其指向自定义构建版本，版本检查可能会提示“升级”回固定版本 —— 拒绝提示即可保留自定义构建。
+Cante 通常会在安装期间自行写入这些字段。若将其指向自定义构建版本，版本检查可能会提示“升级”回固定版本 —— 拒绝提示即可保留自定义构建。
 :::
 
 ## 调优托管推理 {#tune-the-launch-command}
 
 可以通过以下两处旋钮调优托管推理：
 
-**模型专属额外参数。** 在模型的[偏好设置](/local/offline#model-preferences)中设置 `extra_args`，添加 llama.cpp 模型选项。字符串采用 Shell 语法解析并转换为该模型的路由器预设；提供的值会覆盖 Ante 模型默认值，无需重启共享服务：
+**模型专属额外参数。** 在模型的[偏好设置](/local/offline#model-preferences)中设置 `extra_args`，添加 llama.cpp 模型选项。字符串采用 Shell 语法解析并转换为该模型的路由器预设；提供的值会覆盖 Cante 模型默认值，无需重启共享服务：
 
 ```json
 {
@@ -50,7 +50,7 @@ Ante 通常会在安装期间自行写入这些字段。若将其指向自定义
 }
 ```
 
-`--host`、`--port`、`--model`、`--alias` 等由路由器拥有或会改变模型身份的选项会被拒绝。格式错误的值也会显式失败，避免有效上下文、温度或推理状态与 Ante 上报内容不一致。
+`--host`、`--port`、`--model`、`--alias` 等由路由器拥有或会改变模型身份的选项会被拒绝。格式错误的值也会显式失败，避免有效上下文、温度或推理状态与 Cante 上报内容不一致。
 
 **GPU 卸载层数。** `llama_cpp.server_defaults.gpu_layers` 控制 `-ngl` 参数。默认 `-1` 代表将所有网络层卸载至 GPU；若显存紧张可适当调小数值：
 
@@ -64,10 +64,10 @@ Ante 通常会在安装期间自行写入这些字段。若将其指向自定义
 
 ## 连接到运行中的服务端 {#attach-to-a-running-server}
 
-您可以完全独立运行 `llama-server` —— 任意构建版本、任意参数 —— 并让 Ante 作为客户端连接。Ante 会自动扫描本地端口 **8080-8179**，也支持在 `/offline-mode` 中按 `Ctrl+A` 手动输入 `host:port` 接入。
+您可以完全独立运行 `llama-server` —— 任意构建版本、任意参数 —— 并让 Cante 作为客户端连接。Cante 会自动扫描本地端口 **8080-8179**，也支持在 `/offline-mode` 中按 `Ctrl+A` 手动输入 `host:port` 接入。
 
 关于端点输入格式、Docker 示例、断开行为及远程主机数据流注意事项，请参见[接入现有服务](/local/existing-servers)。
 
 ## 使用其他完全不同的推理框架 {#a-different-engine-entirely}
 
-任何提供兼容 OpenAI 接口的端点（Ollama、vLLM、LM Studio、局域网 GPU 服务器等），均可通过标准目录提供商机制接入 Ante。该方式提供常规提供商机制（模型选择器、通信协议）；本页中的生命周期管理、内存预估与加载进度展示专属于托管的 llama.cpp 路径。参见[添加本地提供商](/usage/providers#add-a-local-provider-with-no-auth)。
+任何提供兼容 OpenAI 接口的端点（Ollama、vLLM、LM Studio、局域网 GPU 服务器等），均可通过标准目录提供商机制接入 Cante。该方式提供常规提供商机制（模型选择器、通信协议）；本页中的生命周期管理、内存预估与加载进度展示专属于托管的 llama.cpp 路径。参见[添加本地提供商](/usage/providers#add-a-local-provider-with-no-auth)。

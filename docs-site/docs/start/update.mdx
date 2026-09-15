@@ -1,54 +1,54 @@
 ---
 title: Update & Channels
 sidebar_label: "Updating"
-description: "Keep Ante up to date and pick the release channel that fits your appetite for change"
+description: "Keep Cante up to date and pick the release channel that fits your appetite for change"
 ---
 
-Ante ships as a single binary and updates itself in place — the same `install.sh` script that performs the first install is re-run by `ante update` against the channel this binary tracks.
+Cante ships as a single binary and updates itself in place — the same `install.sh` script that performs the first install is re-run by `cante update` against the channel this binary tracks.
 
 ## Update
 
-Check for a newer Ante release on your current channel and install it if one is available:
+Check for a newer Cante release on your current channel and install it if one is available:
 
 ```bash
-ante update
+cante update
 ```
 
-If a newer version exists, Ante runs the installer for the same channel and prints the new version once it is in place. Restart Ante to start using it.
+If a newer version exists, Cante runs the installer for the same channel and prints the new version once it is in place. Restart Cante to start using it.
 
-If you are already on the latest version, Ante prints a confirmation and exits without touching the binary.
+If you are already on the latest version, Cante prints a confirmation and exits without touching the binary.
 
 ### Update from the TUI
 
 When a newer release is available, the running TUI adds an in-chat notice with a preview of its release notes. It never blocks startup with a modal.
 
-- `/update` schedules that release to install when you exit Ante
+- `/update` schedules that release to install when you exit Cante
 - `/update cancel` keeps the offer but cancels a scheduled exit install
 - `/update skip` dismisses that version permanently; a later version can still be offered
 
-The install choice is scoped to the running session. Ante applies an accepted update after restoring the terminal on exit, then the next launch uses the new binary.
+The install choice is scoped to the running session. Cante applies an accepted update after restoring the terminal on exit, then the next launch uses the new binary.
 
 ## Pin or roll back
 
 Install an exact release with `--version`:
 
 ```bash
-ante update --version v0.preview.98
-ante update --version 0.preview.98
+cante update --version v0.preview.98
+cante update --version 0.preview.98
 ```
 
-This bypasses the channel's "newer than current" check, so it can upgrade, reinstall the current version, or roll back to an older published release. When rolling back, Ante remembers the version you left so the next background update notice does not immediately offer to reinstall it.
+This bypasses the channel's "newer than current" check, so it can upgrade, reinstall the current version, or roll back to an older published release. When rolling back, Cante remembers the version you left so the next background update notice does not immediately offer to reinstall it.
 
 ## Channels
 
-A release channel is a named track of builds. Ante publishes two:
+A release channel is a named track of builds. Cante publishes two:
 
 | Channel | Description |
 |---|---|
 | `stable` | Recommended for daily use. Tagged releases published from the release workflow. |
 | `nightly` | Built from the development branch. New features and bugs land here first. |
 
-The default channel is `stable`. The channel a binary tracks is stored in the selected settings file under the `channel` field. `ante update` reads `~/.ante/settings.json` unless you select an existing [named profile](/configuration/preference#named-profiles) with the process-wide `--profile` flag; the TUI uses the same selected profile for its in-app update notices.
+The default channel is `stable`. The channel a binary tracks is stored in the selected settings file under the `channel` field. `cante update` reads `~/.cante/settings.json` unless you select an existing [named profile](/configuration/preference#named-profiles) with the process-wide `--profile` flag; the TUI uses the same selected profile for its in-app update notices.
 
 ```json
 {
@@ -66,16 +66,16 @@ Pass a channel as a positional argument or as `--channel`:
 
 ```bash
 # Positional form
-ante update nightly
+cante update nightly
 
 # Flag form
-ante update --channel nightly
+cante update --channel nightly
 
-# Use the channel from ~/.ante/work.settings.json
-ante --profile work update
+# Use the channel from ~/.cante/work.settings.json
+cante --profile work update
 ```
 
-Both forms fetch the manifest for the requested channel and run the installer against it. The override applies to that single update — to make the switch persistent, set `"channel": "nightly"` in the settings file that future runs will use (`~/.ante/settings.json` by default, or the selected profile file).
+Both forms fetch the manifest for the requested channel and run the installer against it. The override applies to that single update — to make the switch persistent, set `"channel": "nightly"` in the settings file that future runs will use (`~/.cante/settings.json` by default, or the selected profile file).
 
 Channel names may only contain ASCII letters, numbers, `.`, `_`, or `-`.
 
@@ -84,17 +84,17 @@ Channel names may only contain ASCII letters, numbers, `.`, `_`, or `-`.
 The installer accepts the same channel names. To install a non-default channel from a fresh machine:
 
 ```bash
-curl -fsSL https://ante.run/install.sh | bash -s -- nightly
+curl -fsSL https://cante.run/install.sh | bash -s -- nightly
 ```
 
 Without an argument, the installer uses `stable`.
 
-By default the installer writes the binary to `~/.ante/bin`. Set `ANTE_INSTALL_DIR` to install into a directory that is already on your `PATH`:
+By default the installer writes the binary to `~/.cante/bin`. Set `CANTE_INSTALL_DIR` to install into a directory that is already on your `PATH`:
 
 ```bash
-curl -fsSL https://ante.run/install.sh | ANTE_INSTALL_DIR=/usr/local/bin bash
+curl -fsSL https://cante.run/install.sh | CANTE_INSTALL_DIR=/usr/local/bin bash
 ```
 
 ## How update checks work
 
-On launch and during long-running sessions, Ante consults the update cache in the background. Network checks against the channel manifest are shared across running Ante processes and happen at most once per hour; the result and release notes are cached in `~/.ante/versions.json`. When a newer version is available, the TUI adds the in-chat notice described above. `ante update` ignores the cache and always fetches the manifest fresh.
+On launch and during long-running sessions, Cante consults the update cache in the background. Network checks against the channel manifest are shared across running Cante processes and happen at most once per hour; the result and release notes are cached in `~/.cante/versions.json`. When a newer version is available, the TUI adds the in-chat notice described above. `cante update` ignores the cache and always fetches the manifest fresh.

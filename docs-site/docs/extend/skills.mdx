@@ -1,9 +1,9 @@
 ---
 title: Skills
-description: "Give Ante new capabilities with Agent Skills — the open format for portable agent expertise"
+description: "Give Cante new capabilities with Agent Skills — the open format for portable agent expertise"
 ---
 
-Skills are folders of instructions, scripts, and resources that extend Ante's capabilities. They follow the open [Agent Skills](https://agentskills.io) format, making them portable across compatible agent products.
+Skills are folders of instructions, scripts, and resources that extend Cante's capabilities. They follow the open [Agent Skills](https://agentskills.io) format, making them portable across compatible agent products.
 
 ## Creating a skill
 
@@ -61,11 +61,11 @@ Sub-agent frontmatter goes through the same reader with the same rules.
 | Directory | Scope |
 |---|---|
 | `~/.claude/skills/` | User-level (Claude Code compatibility) |
-| `~/.agents/skills/` | User-level (compat — loaded before `~/.ante/skills/`) |
-| `~/.ante/skills/` | User-level (available in all projects) |
+| `~/.agents/skills/` | User-level (compat — loaded before `~/.cante/skills/`) |
+| `~/.cante/skills/` | User-level (available in all projects) |
 | `.claude/skills/` | Project-level (Claude Code compatibility) |
 | `.agents/skills/` | Project-level |
-| `.ante/skills/` | Project-level |
+| `.cante/skills/` | Project-level |
 
 ## SKILL.md frontmatter
 
@@ -97,14 +97,14 @@ Skills are discovered in precedence order (later overrides earlier by skill name
 1. System-level (built-in skills)
 2. `~/.claude/skills/` (user-level, Claude Code compatibility)
 3. `~/.agents/skills/` (user-level, compat)
-4. `~/.ante/skills/` (user-level)
+4. `~/.cante/skills/` (user-level)
 5. `.claude/skills/` (project-level, Claude Code compatibility)
 6. `.agents/skills/` (project-level)
-7. `.ante/skills/` (project-level)
+7. `.cante/skills/` (project-level)
 
 Discovered skills are advertised to the model in a reminder attached to the first user message, and [sub-agents](/extend/subagents) inherit the parent session's skills.
 
-Start Ante with `--no-skills` to skip this discovery entirely. No system, user, or project skills are advertised to the model or exposed as slash commands, and `/resume` preserves that choice for the resumed session. To turn skills off persistently, set `"skills": false` in [`settings.json`](/configuration/preference#settings-file) (`--skills` re-enables them for a run). The built-in `--profile bare` also disables skills.
+Start Cante with `--no-skills` to skip this discovery entirely. No system, user, or project skills are advertised to the model or exposed as slash commands, and `/resume` preserves that choice for the resumed session. To turn skills off persistently, set `"skills": false` in [`settings.json`](/configuration/preference#settings-file) (`--skills` re-enables them for a run). The built-in `--profile bare` also disables skills.
 
 ### Selecting individual skills
 
@@ -122,19 +122,19 @@ Both take exact skill names. `exclude_skills` removes the named skills from ever
 Override either saved list for one run with a comma-separated value or a repeated flag:
 
 ```bash
-ante --include-skills deploy-checklist,release-notes
-ante --exclude-skills noisy-skill --exclude-skills deploy-prod
+cante --include-skills deploy-checklist,release-notes
+cante --exclude-skills noisy-skill --exclude-skills deploy-prod
 ```
 
 `--include-skills` replaces the saved `include_skills` list, and `--exclude-skills` replaces the saved `exclude_skills` list. Exclusions still win after both lists are applied. These are filters, not enable switches: `--no-skills` or `"skills": false` keeps discovery off even when an include list is present.
 
 ## Bundled skills
 
-Ante ships a few skills at the system level:
+Cante ships a few skills at the system level:
 
 | Skill | What it does |
 |---|---|
-| `ante-guide` | Answers questions about Ante itself from the official docs and handles requests to change Ante's own configuration. Model-invoked only |
+| `cante-guide` | Answers questions about Cante itself from the official docs and handles requests to change Cante's own configuration. Model-invoked only |
 | `skill-creator` | Creates, improves, and evaluates skills. Model-invoked only |
 | `tmux` | Drives interactive terminals, servers, and REPLs in named tmux sessions — see [Terminal sessions](/usage/tui#terminal-sessions). Model-invoked only |
 | `resume-claude` | Continues a recent Claude Code session in this directory (`/resume-claude`) |

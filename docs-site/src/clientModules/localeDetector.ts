@@ -1,6 +1,6 @@
 import ExecutionEnvironment from '@docusaurus/ExecutionEnvironment'
 
-const STORAGE_KEY = 'ante_docs_preferred_locale'
+const STORAGE_KEY = 'cante_docs_preferred_locale'
 
 function detectAndRedirect() {
   if (!ExecutionEnvironment.canUseDOM) {

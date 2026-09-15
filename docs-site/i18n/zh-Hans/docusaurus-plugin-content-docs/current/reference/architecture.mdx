@@ -1,12 +1,12 @@
 ---
 title: "系统架构设计"
 sidebar_label: "系统架构"
-description: "Ante 的客户端-守护进程架构、模型提供商系统与工具框架"
+description: "Cante 的客户端-守护进程架构、模型提供商系统与工具框架"
 ---
 
 ## 概览 {#overview}
 
-Ante 采用清晰的职责分离设计，遵循客户端-守护进程（Client-Daemon）架构。展示层与核心执行引擎通过消息传递进行解耦，使得切换终端前端（TUI、无头 CLI）时无需变动底层核心引擎。
+Cante 采用清晰的职责分离设计，遵循客户端-守护进程（Client-Daemon）架构。展示层与核心执行引擎通过消息传递进行解耦，使得切换终端前端（TUI、无头 CLI）时无需变动底层核心引擎。
 
 <img src="/assets/architecture.png" alt="Architecture diagram" />
 
@@ -22,13 +22,13 @@ Ante 采用清晰的职责分离设计，遵循客户端-守护进程（Client-D
 └────────────────┘          └─────────────────────────────┘
 ```
 
-- **Client（客户端）** — 用户面向层。基于 ratatui 的 TUI 终端界面、无头 CLI 运行器，或通过 `ante serve` 连接的外部进程。负责发送 `Op` 操作指令并渲染接收到的 `Evt` 事件。
+- **Client（客户端）** — 用户面向层。基于 ratatui 的 TUI 终端界面、无头 CLI 运行器，或通过 `cante serve` 连接的外部进程。负责发送 `Op` 操作指令并渲染接收到的 `Evt` 事件。
 - **Daemon（守护进程）** — 核心引擎。接收操作指令、管理会话、分发大语言模型请求、调度工具安全执行并分发事件。
-- **Transport（传输层）** — 进程内客户端（TUI、无头模式）使用 Tokio 有界操作通道与无界事件通道；外部客户端使用基于 stdin/stdout 的 JSONL 协议（`ante serve --stdio`）、供本地客户端连入共享宿主的 Unix 域套接字（`ante serve --sock`），或 WebSocket 网络协议（`ante serve --ws`）。通过消息 ID 实现跨进程边界的链路追踪。
+- **Transport（传输层）** — 进程内客户端（TUI、无头模式）使用 Tokio 有界操作通道与无界事件通道；外部客户端使用基于 stdin/stdout 的 JSONL 协议（`cante serve --stdio`）、供本地客户端连入共享宿主的 Unix 域套接字（`cante serve --sock`），或 WebSocket 网络协议（`cante serve --ws`）。通过消息 ID 实现跨进程边界的链路追踪。
 
 ## 架构演进：从以会话为中心到以智能体为中心 {#architecture-direction-session-centric-to-agent-centric}
 
-Ante 最初采用以会话为中心的运行时，其中 `Session` 是核心执行单元。我们正迈向以智能体为中心（Agent-centric）的现代运行时：长寿命的 `Agent` 实例作为执行的所有者并通过消息通信。
+Cante 最初采用以会话为中心的运行时，其中 `Session` 是核心执行单元。我们正迈向以智能体为中心（Agent-centric）的现代运行时：长寿命的 `Agent` 实例作为执行的所有者并通过消息通信。
 
 ```mermaid
 flowchart LR
@@ -67,7 +67,7 @@ flowchart LR
 
 ## 大语言模型提供商 {#llm-providers}
 
-Ante 具备跨提供商无关性。每个提供商均实现了发送提示词与接收响应的通用接口。流式传输过程中的偶发网络闪断会在轮次内自动重连；流式调用若 5 分钟内没有可用事件、缓冲调用若 5 分钟内未完成，都会因超时报错而非无限挂起。该超时窗口支持按提供商配置 —— 可通过 [`stream_idle_timeout_secs`](/reference/catalog-reference#provider-fields) 覆盖。
+Cante 具备跨提供商无关性。每个提供商均实现了发送提示词与接收响应的通用接口。流式传输过程中的偶发网络闪断会在轮次内自动重连；流式调用若 5 分钟内没有可用事件、缓冲调用若 5 分钟内未完成，都会因超时报错而非无限挂起。该超时窗口支持按提供商配置 —— 可通过 [`stream_idle_timeout_secs`](/reference/catalog-reference#provider-fields) 覆盖。
 
 | 提供商 | 通信协议格式 (Wire Format) | 支持模型 |
 |---|---|---|

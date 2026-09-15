@@ -1,11 +1,11 @@
 ---
 title: Offline Mode
-description: "Run local GGUF models through Ante's natively managed llama.cpp engine"
+description: "Run local GGUF models through Cante's natively managed llama.cpp engine"
 ---
 
-Ante runs local GGUF models through a natively managed [llama.cpp](https://github.com/ggml-org/llama.cpp) engine. No API key, no account: point Ante at a model file and the full agent loop runs on your hardware. Once a model is on disk, inference needs no network connection at all.
+Cante runs local GGUF models through a natively managed [llama.cpp](https://github.com/ggml-org/llama.cpp) engine. No API key, no account: point Cante at a model file and the full agent loop runs on your hardware. Once a model is on disk, inference needs no network connection at all.
 
-For a fully disconnected run, set `ANTE_TELEMETRY=off` as well. This disables application metrics and log export independently of local inference; see [Telemetry](/configuration/preference#telemetry).
+For a fully disconnected run, set `CANTE_TELEMETRY=off` as well. This disables application metrics and log export independently of local inference; see [Telemetry](/configuration/preference#telemetry).
 
 :::info
 Offline mode is under active development. Expect rough edges and rapid iteration.
@@ -13,7 +13,7 @@ Offline mode is under active development. Expect rough edges and rapid iteration
 
 ## How it works
 
-When you select offline mode, Ante:
+When you select offline mode, Cante:
 
 1. Checks for llama.cpp and offers to install or upgrade it: a pinned, checksum-verified official build matched to your hardware. macOS uses Metal; Linux chooses the strongest compatible CPU/Vulkan feature tier, prefers a CUDA build matched to the NVIDIA compute capability, and falls back to Vulkan when the pinned release has no compatible CUDA artifact
 2. Discovers GGUF models on your system
@@ -25,15 +25,15 @@ Prefer your own llama.cpp build, extra server flags, or a server you started you
 
 ## Setting up
 
-1. **Launch Ante and open offline mode** — Start Ante normally and use the offline mode selector in the TUI:
+1. **Launch Cante and open offline mode** — Start Cante normally and use the offline mode selector in the TUI:
    ```bash
-   ante
+   cante
 
    # In the TUI
    /offline-mode
    ```
 
-2. **Install llama.cpp** — If not installed, Ante will prompt you to install it automatically to `~/.ante/llama.cpp`. When the pinned version changes in a new Ante release, Ante offers an upgrade. To do the same without the TUI, run [`ante offline install`](/reference/cli-reference#ante-offline): it installs the pinned build, replaces a mismatched one, and is a no-op when already current.
+2. **Install llama.cpp** — If not installed, Cante will prompt you to install it automatically to `~/.cante/llama.cpp`. When the pinned version changes in a new Cante release, Cante offers an upgrade. To do the same without the TUI, run [`cante offline install`](/reference/cli-reference#cante-offline): it installs the pinned build, replaces a mismatched one, and is a no-op when already current.
 
 3. **Select a model** — Choose from:
    - **Verified models** — [curated models](/local/verified-models) downloaded from Hugging Face
@@ -42,9 +42,9 @@ Prefer your own llama.cpp build, extra server flags, or a server you started you
 
 4. **Or pass a model path directly** — skip the TUI and load a GGUF file in one step:
    ```bash
-   ante --offline-model /path/to/model.gguf "your prompt here"
+   cante --offline-model /path/to/model.gguf "your prompt here"
    ```
-   Ante starts the llama.cpp router, loads the model, waits for it to be ready, then runs the session. Useful in scripts or CI.
+   Cante starts the llama.cpp router, loads the model, waits for it to be ready, then runs the session. Useful in scripts or CI.
 
 Once a model is loaded, it is registered as the `local` provider in the catalog, so you can also switch to it with `/providers` or target it with `--provider local`. The entry exists only while a server is registered: when the server stops, `local` leaves the catalog. Starting with a saved `local` selection and no server running gates the session with a notice (run `/offline-mode` to start or attach one); headless runs fail fast with the same message. See [mixing local and frontier](/local/overview#mixing-local-and-frontier).
 
@@ -55,30 +55,30 @@ Once a model is loaded, it is registered as the `local` provider in the catalog,
 Pass `--offline-model` to run a one-shot prompt against a local GGUF file — no TUI required:
 
 ```bash
-ante --offline-model ~/.ante/models/Qwen3.5-9B-Q4_K_M.gguf "Explain this code"
+cante --offline-model ~/.cante/models/Qwen3.5-9B-Q4_K_M.gguf "Explain this code"
 ```
 
 <img src="/assets/offline-headless.gif" alt="Headless offline mode running a one-shot prompt against a local GGUF model" style={{width: '100%', borderRadius: '8px', margin: '16px 0'}} />
 
-Ante starts the `llama serve` router, loads the model, waits for it to become ready, runs the session, then shuts the router down automatically.
+Cante starts the `llama serve` router, loads the model, waits for it to become ready, runs the session, then shuts the router down automatically.
 
-Headless runs never prompt to install the engine. On a machine that doesn't have it yet, the run fails fast and tells you to run `ante offline install` first — useful to bake into scripts and CI images.
+Headless runs never prompt to install the engine. On a machine that doesn't have it yet, the run fails fast and tells you to run `cante offline install` first — useful to bake into scripts and CI images.
 
 ### Serve mode (WebSocket server)
 
-When running `ante serve`, you can load a model once and share it across all connecting clients:
+When running `cante serve`, you can load a model once and share it across all connecting clients:
 
 ```bash
-ante serve --ws 127.0.0.1:9000 --offline-model ~/.ante/models/Qwen3.5-9B-Q4_K_M.gguf
+cante serve --ws 127.0.0.1:9000 --offline-model ~/.cante/models/Qwen3.5-9B-Q4_K_M.gguf
 ```
 
 <img src="/assets/offline-serve.gif" alt="Serve mode with a shared offline model across WebSocket clients" style={{width: '100%', borderRadius: '8px', margin: '16px 0'}} />
 
-The `llama serve` router starts and loads the model before Ante accepts connections, and each WebSocket client uses the same running process. The router shuts down cleanly on `Ctrl+C` or `SIGTERM`.
+The `llama serve` router starts and loads the model before Cante accepts connections, and each WebSocket client uses the same running process. The router shuts down cleanly on `Ctrl+C` or `SIGTERM`.
 
 ## Loading progress
 
-When a model is downloading or being loaded into memory, Ante shows a real-time progress bar in the TUI with status messages:
+When a model is downloading or being loaded into memory, Cante shows a real-time progress bar in the TUI with status messages:
 
 - **Download phase** — progress tracks bytes received against the total file size
 - **Metadata** — model metadata is being read from the GGUF file
@@ -89,11 +89,11 @@ The same progress is reported in headless mode via log output.
 
 ## Model discovery
 
-Ante automatically scans the following directories for GGUF model files:
+Cante automatically scans the following directories for GGUF model files:
 
 | Directory | Description |
 |---|---|
-| `~/.ante/models` | Default model directory (configurable) |
+| `~/.cante/models` | Default model directory (configurable) |
 | `~/.cache/llama.cpp` | llama.cpp cache |
 | `~/.cache/huggingface/hub` | Hugging Face cache |
 | `~/.llama/models` | Common llama model directory |
@@ -111,11 +111,11 @@ Per-model settings, saved automatically in the offline config:
 
 ## Vision models
 
-If a multimodal projector file (`mmproj-*.gguf`) sits next to the model file, Ante attaches it automatically at launch, and the model accepts images in chat.
+If a multimodal projector file (`mmproj-*.gguf`) sits next to the model file, Cante attaches it automatically at launch, and the model accepts images in chat.
 
 ## Memory considerations
 
-Ante estimates memory usage based on model file size, KV cache (scales with context window), and shard count.
+Cante estimates memory usage based on model file size, KV cache (scales with context window), and shard count.
 
 :::tip
 For large models, reduce the context window to lower memory usage. The minimum is 32K tokens.
@@ -129,19 +129,19 @@ For large models, reduce the context window to lower memory usage. The minimum i
 | `Ctrl+G` | Toggle the inference log panel |
 | `Ctrl+K` / `Ctrl+J` | Scroll the log panel up/down while it is open |
 
-When exiting Ante with a server running, you'll be prompted:
+When exiting Cante with a server running, you'll be prompted:
 - **`s`** — Stop the server and exit
 - **`k`** — Keep the server running and exit (prints PID)
-- **`Esc`** — Cancel and stay in Ante
+- **`Esc`** — Cancel and stay in Cante
 
 ## Configuration reference
 
-All offline mode configuration is stored in `~/.ante/offline-config.json`:
+All offline mode configuration is stored in `~/.cante/offline-config.json`:
 
 ```json
 {
   "version": "1.0.0",
-  "model_directory": "~/.ante/models",
+  "model_directory": "~/.cante/models",
   "port": 8080,
   "last_model": "model-name",
   "model_preferences": {
@@ -158,14 +158,14 @@ All offline mode configuration is stored in `~/.ante/offline-config.json`:
 
 | Field | Description | Default |
 |---|---|---|
-| `model_directory` | Where to look for local GGUF models | `~/.ante/models` |
+| `model_directory` | Where to look for local GGUF models | `~/.cante/models` |
 | `port` | Starting port for the managed llama.cpp router or attached server | `8080` |
 | `last_model` | Last used model (auto-saved) | — |
 | `model_preferences` | Per-model settings (see above) | — |
-| `llama_cpp` | Engine install details, binary paths, and server defaults — see [Custom Engines](/local/custom-engines) | managed by Ante |
+| `llama_cpp` | Engine install details, binary paths, and server defaults — see [Custom Engines](/local/custom-engines) | managed by Cante |
 
 ### Environment variables
 
 | Variable | Description |
 |---|---|
-| `ANTE_OFFLINE_CONTEXT` | Override the default context window cap (tokens). Useful when you need a larger context than the 32K default, and your hardware has enough RAM. Example: `ANTE_OFFLINE_CONTEXT=65536 ante --offline-model ...` |
+| `CANTE_OFFLINE_CONTEXT` | Override the default context window cap (tokens). Useful when you need a larger context than the 32K default, and your hardware has enough RAM. Example: `CANTE_OFFLINE_CONTEXT=65536 cante --offline-model ...` |

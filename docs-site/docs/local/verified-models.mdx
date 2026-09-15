@@ -1,12 +1,12 @@
 ---
 title: Verified Models
-description: "Curated local models tested with Ante, and the eval numbers behind them"
+description: "Curated local models tested with Cante, and the eval numbers behind them"
 ---
 
-The **Verified models** list in the [offline mode](/local/offline) selector is curated: GGUF builds we have tested with Ante's agent loop, downloaded from Hugging Face with memory requirements known up front. Each model carries one of two statuses:
+The **Verified models** list in the [offline mode](/local/offline) selector is curated: GGUF builds we have tested with Cante's agent loop, downloaded from Hugging Face with memory requirements known up front. Each model carries one of two statuses:
 
 - **Evaled** — ran the full public benchmark: same Terminal-Bench 2.1 harness, pinned builds, and auditable Harbor runs as our [frontier-model results](/benchmarks/eval). Numbers live at [antigma.ai/eval](https://antigma.ai/eval).
-- **Verified** — tested for compatibility: the model loads, the chat template resolves, and tool calling works in Ante's agent loop. Not yet through the full eval.
+- **Verified** — tested for compatibility: the model loads, the chat template resolves, and tool calling works in Cante's agent loop. Not yet through the full eval.
 
 Models graduate from Verified to Evaled as benchmark runs complete.
 
@@ -25,13 +25,13 @@ Models graduate from Verified to Evaled as benchmark runs complete.
 | Qwen3.5 9B | Q4_K_M | 5.7 GB | 256K | Verified |
 | Gemma 4 E4B-it | Q4_K_M | 4.7 GB | 128K | Verified |
 
-"Max context" is what the model supports; Ante caps the default context window at 32K to keep memory predictable, and you can raise it per model in [preferences](/local/offline#model-preferences) or with `ANTE_OFFLINE_CONTEXT`.
+"Max context" is what the model supports; Cante caps the default context window at 32K to keep memory predictable, and you can raise it per model in [preferences](/local/offline#model-preferences) or with `CANTE_OFFLINE_CONTEXT`.
 
 The one eval so far: Qwen3.6 27B reached **56.2%** accuracy across 89 Terminal-Bench 2.1 tasks with 445 trials — a 17 GB download holding its own on the same benchmark we use for frontier models.
 
 ## Add your own
 
-Ante merges `~/.ante/verified_models.json` on top of the built-in list at startup. Entries with a `filename` matching a built-in override it; new filenames are appended.
+Cante merges `~/.cante/verified_models.json` on top of the built-in list at startup. Entries with a `filename` matching a built-in override it; new filenames are appended.
 
 ```json
 {

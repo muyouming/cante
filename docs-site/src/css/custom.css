@@ -170,7 +170,7 @@
   padding-bottom: 0.3rem;
 }
 
-/* Non-collapsible headers (Getting Started, Using Ante) are labels, not links */
+/* Non-collapsible headers (Getting Started, Using Cante) are labels, not links */
 .theme-doc-sidebar-item-category-level-1 > .menu__list-item-collapsible > .menu__link:not(.menu__link--sublist) {
   cursor: default;
 }

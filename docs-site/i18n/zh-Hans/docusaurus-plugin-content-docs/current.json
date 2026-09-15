@@ -11,9 +11,9 @@
     "message": "基准评测",
     "description": "The label for category 'Benchmarks' in sidebar 'docs'"
   },
-  "sidebar.docs.category.Using Ante": {
-    "message": "使用 Ante",
-    "description": "The label for category 'Using Ante' in sidebar 'docs'"
+  "sidebar.docs.category.Using Cante": {
+    "message": "使用 Cante",
+    "description": "The label for category 'Using Cante' in sidebar 'docs'"
   },
   "sidebar.docs.category.Input": {
     "message": "输入与交互",

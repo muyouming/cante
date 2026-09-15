@@ -3,7 +3,7 @@ title: "Catalog Reference"
 description: "Built-in providers, models, and the catalog.json schema"
 ---
 
-Ante resolves every provider and model from a **catalog**: the built-in presets documented here, with your [`~/.ante/catalog.json`](#catalogjson-schema) merged on top at startup. The catalog is read once per process — restart Ante to pick up edits.
+Cante resolves every provider and model from a **catalog**: the built-in presets documented here, with your [`~/.cante/catalog.json`](#catalogjson-schema) merged on top at startup. The catalog is read once per process — restart Cante to pick up edits.
 
 This page is the exhaustive reference. For how to pick a provider day to day and copy-paste customization recipes, see [Providers](/usage/providers).
 
@@ -33,7 +33,7 @@ The `key` column is what you pass to `--provider`. Providers authenticating via 
 
 ## Models by provider
 
-Each provider ships a set of `preferred_models` — the ids that appear in the model picker. When you select a provider without naming a model, Ante defaults to its **heaviest-weight** model (see [Weight classes](#weight-classes)), not simply the first in the list. Explicit provider choices are authoritative: if you pass `--provider`, Ante sends the model id you supplied to that provider even when it is not listed in `preferred_models` (see [Resolution](#how-a-model-and-provider-are-chosen)).
+Each provider ships a set of `preferred_models` — the ids that appear in the model picker. When you select a provider without naming a model, Cante defaults to its **heaviest-weight** model (see [Weight classes](#weight-classes)), not simply the first in the list. Explicit provider choices are authoritative: if you pass `--provider`, Cante sends the model id you supplied to that provider even when it is not listed in `preferred_models` (see [Resolution](#how-a-model-and-provider-are-chosen)).
 
 ### Anthropic
 
@@ -47,7 +47,7 @@ Each provider ships a set of `preferred_models` — the ids that appear in the m
 | `claude-fable-5-1` | Highest capability for demanding reasoning | 1M |
 
 ```bash
-ante --provider anthropic --model claude-sonnet-5
+cante --provider anthropic --model claude-sonnet-5
 ```
 
 ### OpenAI
@@ -65,7 +65,7 @@ ante --provider anthropic --model claude-sonnet-5
 | `gpt-5.4-nano` | Smallest GPT-5.4 model | 400K |
 
 ```bash
-ante --provider openai --model gpt-5.6-sol
+cante --provider openai --model gpt-5.6-sol
 ```
 
 The `openai-subscription` provider (ChatGPT/Codex OAuth) serves `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna` with 272K context, plus `gpt-5.5`, `gpt-5.4`, and `gpt-5.4-mini` with 400K context.
@@ -84,7 +84,7 @@ WebSocket mode keeps one connection open per session and continues each turn wit
 Opt in via the process-scoped env var (default is `http_sse`):
 
 ```bash
-ANTE_OPENAI_TRANSPORT=websocket_auto ante --provider openai --model gpt-5.4-mini
+CANTE_OPENAI_TRANSPORT=websocket_auto cante --provider openai --model gpt-5.4-mini
 ```
 
 Accepted values: `http_sse`, `websocket_auto`. Unknown values warn and fall back to `http_sse`.
@@ -97,7 +97,7 @@ Notes:
 - To verify which transport is active: in debug builds, toggle the debug panel (`Ctrl+L`) and check the **Info** tab for the `OpenAI Transport:` line. Otherwise grep your session log for `transport selected`:
 
   ```bash
-  grep "transport selected" ~/.ante/logs/*/ante.*.log
+  grep "transport selected" ~/.cante/logs/*/cante.*.log
   ```
 
 ### Gemini
@@ -114,7 +114,7 @@ Notes:
 | `gemini-3.5-flash-lite` | Fastest, lowest-cost Gemini 3.5 model for high-throughput work | 1M |
 
 ```bash
-ante --provider gemini --model gemini-3.1-pro-preview
+cante --provider gemini --model gemini-3.1-pro-preview
 ```
 
 ### Grok (xAI)
@@ -124,7 +124,7 @@ ante --provider gemini --model gemini-3.1-pro-preview
 | `grok-4.6` | Grok 4.6 flagship reasoning model | 500K |
 
 ```bash
-ante --provider xai --model grok-4.6
+cante --provider xai --model grok-4.6
 ```
 
 ### Zai
@@ -135,7 +135,7 @@ ante --provider xai --model grok-4.6
 | `glm-5.3-flash` | Fast, cost-efficient GLM-5.3 multimodal model | 1M |
 
 ```bash
-ante --provider zai --model glm-5.3
+cante --provider zai --model glm-5.3
 ```
 
 ### Open Router
@@ -171,9 +171,9 @@ Open Router ships as three providers sharing one API key, split by wire style: `
 Each provider also accepts any model from Open Router's [full model list](https://openrouter.ai/models) by id, as long as it speaks that provider's wire style.
 
 ```bash
-ante --provider openrouter --model deepseek/deepseek-v4.1-flash
-ante --provider openrouter-responses --model openai/gpt-5.6-sol
-ante --provider openrouter-anthropic --model anthropic/claude-fable-5.1
+cante --provider openrouter --model deepseek/deepseek-v4.1-flash
+cante --provider openrouter-responses --model openai/gpt-5.6-sol
+cante --provider openrouter-anthropic --model anthropic/claude-fable-5.1
 ```
 
 ### DeepSeek
@@ -184,7 +184,7 @@ ante --provider openrouter-anthropic --model anthropic/claude-fable-5.1
 | `deepseek-v4-flash` | Legacy alias for DeepSeek V4.1 Flash | 1M |
 
 ```bash
-ante --provider deepseek --model deepseek-flash
+cante --provider deepseek --model deepseek-flash
 ```
 
 Set `DEEPSEEK_API_KEY`, and optionally `DEEPSEEK_BASE_URL`.
@@ -203,7 +203,7 @@ Set `DEEPSEEK_API_KEY`, and optionally `DEEPSEEK_BASE_URL`.
 | `qwen-plus` | Fast and capable | 1M |
 
 ```bash
-ante --provider ali-coding-plan --model qwen3.5-plus
+cante --provider ali-coding-plan --model qwen3.5-plus
 ```
 
 Requires a [Coding Plan subscription](https://help.aliyun.com/zh/model-studio/coding-plan) and API key (format: `sk-sp-xxxxx`). The built-in provider speaks the Anthropic wire endpoint. Some models are only available on the OpenAI-compatible endpoint — add a custom catalog entry to reach it:
@@ -217,7 +217,7 @@ Requires a [Coding Plan subscription](https://help.aliyun.com/zh/model-studio/co
       "auth": { "bearer": { "env_key": "ALI_CODING_PLAN_API_KEY" } },
       "wire_style": "OpenAiCompatible",
       "http_headers": {
-        "User-Agent": "ante-cli/1.0.0",
+        "User-Agent": "cante-cli/1.0.0",
         "X-DashScope-UserAgent": "coding-agent"
       }
     }
@@ -255,8 +255,8 @@ Requires a [Coding Plan subscription](https://help.aliyun.com/zh/model-studio/co
 | `glm-5.3-flash` | Fast GLM-5.3 Flash for coding and agentic tasks | 1M |
 
 ```bash
-ante --provider antix --model claude-sonnet-5         # OAuth
-ante --provider antix-api-key --model claude-sonnet-5 # ANTIX_API_KEY
+cante --provider antix --model claude-sonnet-5         # OAuth
+cante --provider antix-api-key --model claude-sonnet-5 # ANTIX_API_KEY
 ```
 
 ### Local
@@ -264,12 +264,12 @@ ante --provider antix-api-key --model claude-sonnet-5 # ANTIX_API_KEY
 Run GGUF models locally via the built-in llama.cpp engine — no API key required. `local` is a wildcard provider; the available model depends on what the offline server has loaded, and the entry exists in the catalog only while a live server is registered. Selecting `local` with no server running gates the session with a notice until you start or attach one. See [Offline Mode](/local/offline) for setup.
 
 ```bash
-ante --provider local
+cante --provider local
 ```
 
 ## `catalog.json` schema
 
-`~/.ante/catalog.json` is merged on top of the built-in presets at startup. It has two optional top-level keys, both maps keyed by id:
+`~/.cante/catalog.json` is merged on top of the built-in presets at startup. It has two optional top-level keys, both maps keyed by id:
 
 ```json
 {
@@ -281,7 +281,7 @@ ante --provider local
 A `providers` entry whose key matches a built-in (e.g. `openai`) patches that preset field by field; a new key adds a provider. The map key is the value you pass to `--provider`. An `id` (or legacy `name`) field inside an entry is ignored.
 
 :::note
-`~/.ante` can be relocated with the `ANTE_HOME` environment variable; the catalog is always `$ANTE_HOME/catalog.json`.
+`~/.cante` can be relocated with the `CANTE_HOME` environment variable; the catalog is always `$CANTE_HOME/catalog.json`.
 :::
 
 ### Provider fields
@@ -290,7 +290,7 @@ A `providers` entry whose key matches a built-in (e.g. `openai`) patches that pr
 |---|---|---|
 | `display_name` | New providers: optional | Friendly name shown in the TUI. New providers default to the provider map key when omitted. |
 | `base_url` | New providers: ✅ | API base URL. |
-| `wire_style` | New providers: ✅ | API dialect Ante speaks — `AnthropicMessage`, `OpenAiCompatible`, `OpenAiResponse`, or `Gemini`. |
+| `wire_style` | New providers: ✅ | API dialect Cante speaks — `AnthropicMessage`, `OpenAiCompatible`, `OpenAiResponse`, or `Gemini`. |
 | `auth` | — | How to authenticate (see [Authentication](#authentication)). Omit for a provider that needs no key. |
 | `http_headers` | — | Extra headers sent with every request, as a string→string map. |
 | `extra_body` | — | Provider-specific JSON fields merged into every chat and streaming request body (see [Extra request fields](#extra-request-fields)). |
@@ -356,7 +356,7 @@ The setting never changes reasoning effort or continuation state. OpenAI Respons
 
 ### Extra request fields
 
-Some gateways and proxies require parameters Ante doesn't model — a service tier, a routing hint, a vendor-specific beta block. `extra_body` is a JSON object merged into the top level of every chat and streaming request body Ante sends to that provider:
+Some gateways and proxies require parameters Cante doesn't model — a service tier, a routing hint, a vendor-specific beta block. `extra_body` is a JSON object merged into the top level of every chat and streaming request body Cante sends to that provider:
 
 ```json
 {
@@ -376,7 +376,7 @@ Some gateways and proxies require parameters Ante doesn't model — a service ti
 
 Values are passed through verbatim, so any JSON shape works. On a built-in provider overlay, `extra_body` merges key by key into the preset's — matching keys are replaced, others are left alone.
 
-`extra_body` can only add fields, never override the ones Ante generates for the selected `wire_style`:
+`extra_body` can only add fields, never override the ones Cante generates for the selected `wire_style`:
 
 | `wire_style` | Reserved keys |
 |---|---|
@@ -388,13 +388,13 @@ Values are passed through verbatim, so any JSON shape works. On a built-in provi
 A reserved key is dropped at catalog load and named in the startup notice; the rest of the provider still loads. To change one of these, use the [model fields](#model-fields) or the [environment overrides](#environment-overrides) instead:
 
 ```
-Skipped 1 entry in ~/.ante/catalog.json:
-  - providers.my-gateway.extra_body: ignoring Ante-owned request field(s): model
+Skipped 1 entry in ~/.cante/catalog.json:
+  - providers.my-gateway.extra_body: ignoring Cante-owned request field(s): model
 ```
 
 ### Authentication
 
-`auth` is a tagged object: the tag chooses where the credential goes, and the credential is either an environment variable (`env_key`) or one of Ante's built-in OAuth flows (`oauth_preset`).
+`auth` is a tagged object: the tag chooses where the credential goes, and the credential is either an environment variable (`env_key`) or one of Cante's built-in OAuth flows (`oauth_preset`).
 
 | Form | JSON | Sends |
 |---|---|---|
@@ -425,10 +425,10 @@ The same fields describe a model fully inside a provider's `preferred_models` (w
 | `max_tokens` | Maximum output tokens per turn. On `AnthropicMessage` providers that take an explicit thinking budget, it must exceed 1024 — the API's minimum budget — when an effort level is set. |
 | `stop_sequences` | List of strings that end generation. |
 | `context_limit` | Context window size, in tokens. |
-| `effort` | Default [effort level](/usage/models-and-thinking#effort) — `min`, `low`, `medium`, `high`, `xhigh`, or `max`. Omit for models with no reasoning knob (Ante then sends no effort parameter and hides the effort slider). |
+| `effort` | Default [effort level](/usage/models-and-thinking#effort) — `min`, `low`, `medium`, `high`, `xhigh`, or `max`. Omit for models with no reasoning knob (Cante then sends no effort parameter and hides the effort slider). |
 | `supported_efforts` | The effort levels this model accepts on this provider, ascending (same values as `effort`). Replaces the built-in ladder: the effort slider shows exactly these levels, and OpenAI-compatible providers send the selected level as the same-named `reasoning_effort` (`min` is sent as `minimal`). An empty list declares that the model takes no effort setting. Omit to keep the built-in ladder. |
 | `weight_class` | Size/cost tier — `Feather`, `Middle`, or `Heavy`. Drives automatic default and auxiliary model selection (see [Weight classes](#weight-classes)). |
-| `support_vision` | Whether the model accepts image input. When omitted, Ante infers it from the model id; an image read against a model with no vision support returns the image's metadata instead of its pixels. |
+| `support_vision` | Whether the model accepts image input. When omitted, Cante infers it from the model id; an image read against a model with no vision support returns the image's metadata instead of its pixels. |
 
 The `models` section patches a model by id wherever it is defined, layering on top of the canonical spec at resolve time. The built-in presets leave it empty:
 
@@ -442,7 +442,7 @@ The `models` section patches a model by id wherever it is defined, layering on t
 
 ### Weight classes
 
-Every built-in model carries a `weight_class` — `Feather` (small/fast/cheap), `Middle`, or `Heavy` (largest/most capable). Ante uses it to pick models without you naming one:
+Every built-in model carries a `weight_class` — `Feather` (small/fast/cheap), `Middle`, or `Heavy` (largest/most capable). Cante uses it to pick models without you naming one:
 
 - **Default model** — selecting a provider with no explicit model resolves to its **heaviest** model.
 - **Ambient UI calls** — cosmetic thinking phrases and next-prompt suggestions use the provider's **lightest** model when it is classified as Feather or Middle. WebFetch returns page content directly to the active session model and does not use this path.
@@ -451,17 +451,17 @@ Models with no `weight_class` set fall back to catalog order. Set `weight_class`
 
 ## How a model and provider are chosen
 
-When Ante resolves a model id it layers three sources, last wins:
+When Cante resolves a model id it layers three sources, last wins:
 
 1. **Canonical spec** — the first provider (in catalog order) whose `preferred_models` lists that id. An unknown id falls back to a bare default spec.
 2. **`models` override** — your partial patch for that id, if any.
 3. **Environment overrides** — the process env vars below win over everything.
 
-Providers are matched to models too. If you pass only `--model`, Ante picks an authenticated provider whose `preferred_models` list contains that id, falling back to an authenticated provider with no `preferred_models`, then to the default provider.
+Providers are matched to models too. If you pass only `--model`, Cante picks an authenticated provider whose `preferred_models` list contains that id, falling back to an authenticated provider with no `preferred_models`, then to the default provider.
 
-If you pass both `--provider` and `--model`, the explicit provider choice wins as long as that provider is authenticated. Ante still resolves the model id globally first, so known ids inherit catalog metadata and user overrides even when served by a different provider; unknown ids are passed through as bare model specs.
+If you pass both `--provider` and `--model`, the explicit provider choice wins as long as that provider is authenticated. Cante still resolves the model id globally first, so known ids inherit catalog metadata and user overrides even when served by a different provider; unknown ids are passed through as bare model specs.
 
-When you don't pass `--model`/`--provider`, Ante auto-detects: it uses the first authenticated provider in catalog order and that provider's heaviest-weight model (see [Weight classes](#weight-classes)), falling back to `local` if nothing is authenticated.
+When you don't pass `--model`/`--provider`, Cante auto-detects: it uses the first authenticated provider in catalog order and that provider's heaviest-weight model (see [Weight classes](#weight-classes)), falling back to `local` if nothing is authenticated.
 
 ## Environment overrides
 
@@ -475,20 +475,20 @@ These process env vars override catalog values for the session without editing t
 | `MODEL_MAX_TOKENS` | `max_tokens` |
 | `MODEL_CONTEXT_LIMIT` | `context_limit` |
 
-Effort has no env override — set it per run with the [`--effort` CLI flag](/reference/cli-reference#ante) or per model via the `effort` field.
+Effort has no env override — set it per run with the [`--effort` CLI flag](/reference/cli-reference#cante) or per model via the `effort` field.
 
 Several presets also honor a dedicated base-URL env var that takes precedence over `MODEL_BASE_URL`: `ANTHROPIC_BASE_URL`, `OPENAI_BASE_URL`, `OPENAI_COMPATIBLE_BASE_URL`, `OPENROUTER_BASE_URL`, `DEEPSEEK_BASE_URL`.
 
 ## Error handling
 
-A bad entry doesn't sink the whole file. Ante parses `catalog.json` leniently: any provider or model entry that fails to deserialize is skipped, and the rest still load. Skipped entries are reported at startup, e.g.:
+A bad entry doesn't sink the whole file. Cante parses `catalog.json` leniently: any provider or model entry that fails to deserialize is skipped, and the rest still load. Skipped entries are reported at startup, e.g.:
 
 ```
-Skipped 1 entry in ~/.ante/catalog.json:
+Skipped 1 entry in ~/.cante/catalog.json:
   - providers.my-provider: missing field `base_url`
 ```
 
-Only a file that isn't a JSON object at all is rejected outright. A missing `catalog.json` is fine — Ante just uses the built-in presets.
+Only a file that isn't a JSON object at all is rejected outright. A missing `catalog.json` is fine — Cante just uses the built-in presets.
 
 ## Related
 

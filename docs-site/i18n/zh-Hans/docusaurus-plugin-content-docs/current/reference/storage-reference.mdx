@@ -1,48 +1,48 @@
 ---
 title: "存储与目录结构参考手册"
 sidebar_label: "存储与目录"
-description: "Ante 在本地文件系统中读写配置与状态的存储目录清单"
+description: "Cante 在本地文件系统中读写配置与状态的存储目录清单"
 ---
 
-Ante 将配置与状态持久化保存在本地文件系统中。本页面为 Ante 读取或写入的每个文件系统位置提供完整参考。
+Cante 将配置与状态持久化保存在本地文件系统中。本页面为 Cante 读取或写入的每个文件系统位置提供完整参考。
 
 ## 目录位置 {#locations}
 
 | 路径位置 | 用途说明 |
 |---|---|
-| `~/.ante/settings.json` | 用户偏好设置（模型、提供商、主题、MCP 服务器） |
-| `~/.ante/<name>.settings.json` | 通过 `--profile <name>` 或 `ANTE_PROFILE` 选定的完整设置 Profile 文件 |
-| `~/.ante/catalog.json` | 自定义提供商/模型目录 |
-| `~/.ante/auth/` | OAuth 凭据及应用内粘贴的 API 密钥（仅所有者可读权限；环境变量优先级更高） |
-| `~/.ante/AGENTS.md` | 注入到每个项目会话中的全局行为指引 |
-| `~/.ante/skills/` | 用户级全局技能（Skills） |
-| `~/.ante/agents/` | 用户级全局子智能体（Sub-agents） |
-| `~/.ante/.system/` | 由当前安装的 Ante 版本所管理的内置技能与子智能体 |
-| `~/.ante/sessions/<session-id>/` | 持久化会话数据（供 `/resume` 和 `--resume` 使用） |
-| `~/.ante/projects/<project-id>/memory/` | 各项目的专属自动记忆库 |
-| `~/.ante/cache/` | WebFetch 超大响应溢出暂存文件；启动时会自动清理超过 48 小时的条目 |
-| `~/.ante/run/jobs/<proc-id>/` | 后台 Bash 任务句柄：`status.json`、`stdout.txt` 和 `stderr.txt` |
-| `~/.ante/run/serve.sock` | [`ante serve --sock`](/reference/cli-reference#ante-serve) 的默认 Unix 套接字；同级的 `serve.sock.lock` 持有宿主的排他锁 |
-| `~/.ante/tmp/` | 一次性暂存文件；启动时会自动清理超过 48 小时的条目 |
-| `~/.ante/logs/<YYYY-MM-DD>/` | 应用程序与崩溃日志，按 UTC 日期归档（`ante.<pid>.log` 与 `ante.<pid>.crash.log`） |
-| `~/.ante/logs/llama-server.log` | 本地推理服务器日志 |
-| `~/.ante/models/` | 本地 GGUF 模型的默认存放目录 |
-| `~/.ante/llama.cpp/` | 托管的 llama.cpp 运行时安装目录 |
-| `~/.ante/offline-config.json` | 离线模式引擎、模型与服务端偏好设置 |
-| `~/.ante/verified_models.json` | 用户可选添加与覆盖的验证本地模型列表 |
-| `~/.ante/channels.json` | Slack 与 Discord 机器人网关配置 |
-| `~/.ante/versions.json` | 缓存的版本更新检查与发布说明状态 |
-| `~/.ante/user_input_history.jsonl` | TUI 历史输入提示词记录 |
-| `~/.ante/tip_history.json` | [加载状态技巧提示](/usage/tui#spinner-tips)的展示历史（删除可重置轮播） |
-| `~/.ante/installation-id` | 用于[遥测](/configuration/preference#identity)的随机安装标识（仅在配置遥测时写入；删除可重置身份标识） |
+| `~/.cante/settings.json` | 用户偏好设置（模型、提供商、主题、MCP 服务器） |
+| `~/.cante/<name>.settings.json` | 通过 `--profile <name>` 或 `CANTE_PROFILE` 选定的完整设置 Profile 文件 |
+| `~/.cante/catalog.json` | 自定义提供商/模型目录 |
+| `~/.cante/auth/` | OAuth 凭据及应用内粘贴的 API 密钥（仅所有者可读权限；环境变量优先级更高） |
+| `~/.cante/AGENTS.md` | 注入到每个项目会话中的全局行为指引 |
+| `~/.cante/skills/` | 用户级全局技能（Skills） |
+| `~/.cante/agents/` | 用户级全局子智能体（Sub-agents） |
+| `~/.cante/.system/` | 由当前安装的 Cante 版本所管理的内置技能与子智能体 |
+| `~/.cante/sessions/<session-id>/` | 持久化会话数据（供 `/resume` 和 `--resume` 使用） |
+| `~/.cante/projects/<project-id>/memory/` | 各项目的专属自动记忆库 |
+| `~/.cante/cache/` | WebFetch 超大响应溢出暂存文件；启动时会自动清理超过 48 小时的条目 |
+| `~/.cante/run/jobs/<proc-id>/` | 后台 Bash 任务句柄：`status.json`、`stdout.txt` 和 `stderr.txt` |
+| `~/.cante/run/serve.sock` | [`cante serve --sock`](/reference/cli-reference#cante-serve) 的默认 Unix 套接字；同级的 `serve.sock.lock` 持有宿主的排他锁 |
+| `~/.cante/tmp/` | 一次性暂存文件；启动时会自动清理超过 48 小时的条目 |
+| `~/.cante/logs/<YYYY-MM-DD>/` | 应用程序与崩溃日志，按 UTC 日期归档（`cante.<pid>.log` 与 `cante.<pid>.crash.log`） |
+| `~/.cante/logs/llama-server.log` | 本地推理服务器日志 |
+| `~/.cante/models/` | 本地 GGUF 模型的默认存放目录 |
+| `~/.cante/llama.cpp/` | 托管的 llama.cpp 运行时安装目录 |
+| `~/.cante/offline-config.json` | 离线模式引擎、模型与服务端偏好设置 |
+| `~/.cante/verified_models.json` | 用户可选添加与覆盖的验证本地模型列表 |
+| `~/.cante/channels.json` | Slack 与 Discord 机器人网关配置 |
+| `~/.cante/versions.json` | 缓存的版本更新检查与发布说明状态 |
+| `~/.cante/user_input_history.jsonl` | TUI 历史输入提示词记录 |
+| `~/.cante/tip_history.json` | [加载状态技巧提示](/usage/tui#spinner-tips)的展示历史（删除可重置轮播） |
+| `~/.cante/installation-id` | 用于[遥测](/configuration/preference#identity)的随机安装标识（仅在配置遥测时写入；删除可重置身份标识） |
 | `AGENTS.md` | 与全局指引一同注入的项目级行为规范 |
-| `.ante/settings.json` | 叠加在用户设置之上的[项目设置](/configuration/preference#project-settings)，从会话目录最近的上级目录解析得到 |
-| `.ante/` | 项目本地配置（技能、子智能体） |
+| `.cante/settings.json` | 叠加在用户设置之上的[项目设置](/configuration/preference#project-settings)，从会话目录最近的上级目录解析得到 |
+| `.cante/` | 项目本地配置（技能、子智能体） |
 | `.agents/`, `.claude/` | 兼容的项目本地技能/子智能体目录 |
 
-`<project-id>` 是项目绝对路径的规范化清理形式。环境变量 `ANTE_HOME` 可覆盖 `~/.ante` 路径。
+`<project-id>` 是项目绝对路径的规范化清理形式。环境变量 `CANTE_HOME` 可覆盖 `~/.cante` 路径。
 
-后台任务目录属于运行中进程的状态而非临时草稿。Ante 绝不会因时长原因清理正在运行的活跃任务；在任务结束后，其目录会保留 24 小时，并在随后的启动中完成回收。
+后台任务目录属于运行中进程的状态而非临时草稿。Cante 绝不会因时长原因清理正在运行的活跃任务；在任务结束后，其目录会保留 24 小时，并在随后的启动中完成回收。
 
 ## `settings.json` {#settingsjson}
 
@@ -79,7 +79,7 @@ Ante 将配置与状态持久化保存在本地文件系统中。本页面为 An
 
 命名 Profile 文件具有相同的 Schema，但在运行时全量替换 `settings.json`；它们不会从 `settings.json` 继承缺失的字段。关于 Profile 机制及完整字段参考，请参阅[偏好设置](/configuration/preference#named-profiles)。
 
-项目的 `.ante/settings.json` 使用同一 Schema，但以*叠加*方式作用于用户设置文件：只有它显式设置的键会被覆盖。由于它属于仓库内容，只能收紧或固定、不能放宽，因此 `permission_mode`、`permissions.allow`、`mcp_servers`、`system_prompt`、`model`、`provider` 会被丢弃并给出提示。参见[项目设置](/configuration/preference#project-settings)。
+项目的 `.cante/settings.json` 使用同一 Schema，但以*叠加*方式作用于用户设置文件：只有它显式设置的键会被覆盖。由于它属于仓库内容，只能收紧或固定、不能放宽，因此 `permission_mode`、`permissions.allow`、`mcp_servers`、`system_prompt`、`model`、`provider` 会被丢弃并给出提示。参见[项目设置](/configuration/preference#project-settings)。
 
 ## `catalog.json` {#catalogjson}
 
@@ -107,16 +107,16 @@ Ante 将配置与状态持久化保存在本地文件系统中。本页面为 An
 
 ## `AGENTS.md` {#agentsmd}
 
-存储智能体的持久化行为指引。`~/.ante/AGENTS.md` 全局生效，项目 `AGENTS.md` 作用于该代码仓库。当两者同时存在时，Ante 会在会话首条用户消息中同时注入两者。
+存储智能体的持久化行为指引。`~/.cante/AGENTS.md` 全局生效，项目 `AGENTS.md` 作用于该代码仓库。当两者同时存在时，Cante 会在会话首条用户消息中同时注入两者。
 
 使用指南与优先级规则请参阅 [AGENTS.md](/extend/agents-md)。
 
 ## 目录结构总览 {#layout}
 
-### 用户级目录（`~/.ante/`） {#user-level-ante}
+### 用户级目录（`~/.cante/`） {#user-level-cante}
 
 ```
-~/.ante/
+~/.cante/
 ├── settings.json       # 用户偏好设置
 ├── <name>.settings.json # 命名 Profile 配置文件
 ├── catalog.json        # 自定义提供商/模型目录
@@ -129,7 +129,7 @@ Ante 将配置与状态持久化保存在本地文件系统中。本页面为 An
 ├── channels.json       # 机器人网关配置
 ├── offline-config.json # 离线模式配置
 ├── verified_models.json # 可选的本地验证模型目录覆盖
-├── .system/            # Ante 管理的内置技能与子智能体
+├── .system/            # Cante 管理的内置技能与子智能体
 ├── skills/             # 用户级全局技能
 ├── agents/             # 用户级全局子智能体
 ├── sessions/           # 持久化会话（供 /resume 使用）
@@ -141,11 +141,11 @@ Ante 将配置与状态持久化保存在本地文件系统中。本页面为 An
 ├── run/
 │   ├── jobs/
 │   │   └── <proc-id>/  # 后台 Bash 状态与输出
-│   ├── serve.sock      # `ante serve --sock` 监听套接字
+│   ├── serve.sock      # `cante serve --sock` 监听套接字
 │   └── serve.sock.lock # 上述套接字的所有权锁
 ├── tmp/                # 一次性暂存目录（48 小时）
 ├── logs/
-│   ├── <YYYY-MM-DD>/   # ante.<pid>.log 与崩溃日志
+│   ├── <YYYY-MM-DD>/   # cante.<pid>.log 与崩溃日志
 │   └── llama-server.log
 ├── models/             # 本地 GGUF 模型文件
 └── llama.cpp/          # 托管的本地推理引擎
@@ -156,7 +156,7 @@ Ante 将配置与状态持久化保存在本地文件系统中。本页面为 An
 ```
 AGENTS.md               # 项目行为指引规范
 
-.ante/
+.cante/
 ├── settings.json       # 叠加在用户设置之上的项目设置
 ├── skills/             # 项目专属技能
 └── agents/             # 项目专属子智能体

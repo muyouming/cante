@@ -1,12 +1,12 @@
 ---
 title: "Skills 技能系统"
 sidebar_label: "Skills 技能"
-description: "通过 Agent Skills 开放格式为 Ante 赋予全新能力与专业领域知识"
+description: "通过 Agent Skills 开放格式为 Cante 赋予全新能力与专业领域知识"
 ---
 
 # Skills 技能系统
 
-Skills（技能）是包含指令、脚本和资源的文件夹，用于扩展 Ante 的能力。它们遵循开放的 [Agent Skills](https://agentskills.io) 格式，使其可在兼容的智能体产品之间自由移植。
+Skills（技能）是包含指令、脚本和资源的文件夹，用于扩展 Cante 的能力。它们遵循开放的 [Agent Skills](https://agentskills.io) 格式，使其可在兼容的智能体产品之间自由移植。
 
 ## 创建技能 {#creating-a-skill}
 
@@ -58,11 +58,11 @@ Frontmatter 解析对常见的标量格式容错：包含 `: `、以流式符号
 | 目录位置 | 作用域 |
 |---|---|
 | `~/.claude/skills/` | 用户级（Claude Code 兼容） |
-| `~/.agents/skills/` | 用户级（兼容目录 —— 在 `~/.ante/skills/` 之前加载） |
-| `~/.ante/skills/` | 用户级（在所有项目中可用） |
+| `~/.agents/skills/` | 用户级（兼容目录 —— 在 `~/.cante/skills/` 之前加载） |
+| `~/.cante/skills/` | 用户级（在所有项目中可用） |
 | `.claude/skills/` | 项目级（Claude Code 兼容） |
 | `.agents/skills/` | 项目级 |
-| `.ante/skills/` | 项目级（当前项目专属） |
+| `.cante/skills/` | 项目级（当前项目专属） |
 
 ## SKILL.md Frontmatter 字段 {#skillmd-frontmatter}
 
@@ -94,14 +94,14 @@ my-skill/
 1. 系统级（内置系统技能）
 2. `~/.claude/skills/`（用户级，Claude Code 兼容）
 3. `~/.agents/skills/`（用户级，兼容）
-4. `~/.ante/skills/`（用户级）
+4. `~/.cante/skills/`（用户级）
 5. `.claude/skills/`（项目级，Claude Code 兼容）
 6. `.agents/skills/`（项目级）
-7. `.ante/skills/`（项目级）
+7. `.cante/skills/`（项目级）
 
 发现的技能会在附加到首条用户消息的提醒中声明给模型，[子智能体](/extend/subagents)会自动继承父会话的技能。
 
-启动 Ante 时传入 `--no-skills` 可完全跳过技能发现。不会向模型声明任何系统、用户或项目技能，也不会暴露为斜杠命令，`/resume` 会为恢复的会话保留该选择。若要持久化关闭技能，请在 [`settings.json`](/configuration/preference#settings-file) 中设置 `"skills": false`（`--skills` 可单次重新启用）。内置的 `--profile bare` 同样禁用技能。
+启动 Cante 时传入 `--no-skills` 可完全跳过技能发现。不会向模型声明任何系统、用户或项目技能，也不会暴露为斜杠命令，`/resume` 会为恢复的会话保留该选择。若要持久化关闭技能，请在 [`settings.json`](/configuration/preference#settings-file) 中设置 `"skills": false`（`--skills` 可单次重新启用）。内置的 `--profile bare` 同样禁用技能。
 
 ### 按需选择特定技能 {#selecting-individual-skills}
 
@@ -119,19 +119,19 @@ my-skill/
 可通过逗号分隔值或重复参数，为单次运行覆盖任一已保存列表：
 
 ```bash
-ante --include-skills deploy-checklist,release-notes
-ante --exclude-skills noisy-skill --exclude-skills deploy-prod
+cante --include-skills deploy-checklist,release-notes
+cante --exclude-skills noisy-skill --exclude-skills deploy-prod
 ```
 
 `--include-skills` 替换已保存的 `include_skills` 列表，`--exclude-skills` 替换已保存的 `exclude_skills` 列表；应用两者后仍由排除项优先。这些参数只是过滤器而非启用开关：即使存在包含列表，`--no-skills` 或 `"skills": false` 仍会保持技能发现关闭。
 
 ## 内置系统级技能 {#bundled-skills}
 
-Ante 在系统级别内置了以下技能：
+Cante 在系统级别内置了以下技能：
 
 | 技能 | 功能说明 |
 |---|---|
-| `ante-guide` | 基于官方文档解答关于 Ante 自身的问题，并处理修改 Ante 配置的请求。仅模型自动调用 |
+| `cante-guide` | 基于官方文档解答关于 Cante 自身的问题，并处理修改 Cante 配置的请求。仅模型自动调用 |
 | `skill-creator` | 创建、改进与评测技能。仅模型自动调用 |
 | `tmux` | 在命名 tmux 会话中驱动交互式终端、服务器和 REPL —— 参见[终端会话](/usage/tui#terminal-sessions)。仅模型自动调用 |
 | `resume-claude` | 在当前目录中继续接管最近的 Claude Code 会话（`/resume-claude`） |

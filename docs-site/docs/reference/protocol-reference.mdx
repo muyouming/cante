@@ -1,9 +1,9 @@
 ---
 title: "Protocol Reference"
-description: "Complete reference for Ante's client-daemon message protocol, wire format, and type definitions"
+description: "Complete reference for Cante's client-daemon message protocol, wire format, and type definitions"
 ---
 
-Ante uses a typed message-passing protocol between the client and daemon. In-process clients use a bounded operation channel and an unbounded event channel; external clients exchange the same messages over JSON Lines or WebSocket frames.
+Cante uses a typed message-passing protocol between the client and daemon. In-process clients use a bounded operation channel and an unbounded event channel; external clients exchange the same messages over JSON Lines or WebSocket frames.
 
 ## Wire format
 
@@ -55,7 +55,7 @@ Example: `op_01J5A3B7C9D0E1F2G3H4J5K6M7`
 
 ### StartSession
 
-Initialize a new session, replacing any session already running. A field supplied by the client is pinned; an omitted or `null` field resolves from the host's settings at this session boundary, or from Ante's built-in default when the setting is absent.
+Initialize a new session, replacing any session already running. A field supplied by the client is pinned; an omitted or `null` field resolves from the host's settings at this session boundary, or from Cante's built-in default when the setting is absent.
 
 ```json
 {
@@ -278,7 +278,7 @@ Request a graceful shutdown.
 
 ### RegisterLocalProvider
 
-Register a running local inference endpoint (for example, Ante's managed `llama serve` router or an externally run `llama-server`) as the `local` provider for this daemon. The model is optional — if provided, it pins the local provider to a specific `ModelSpec`; otherwise the local provider serves whatever model the endpoint is hosting.
+Register a running local inference endpoint (for example, Cante's managed `llama serve` router or an externally run `llama-server`) as the `local` provider for this daemon. The model is optional — if provided, it pins the local provider to a specific `ModelSpec`; otherwise the local provider serves whatever model the endpoint is hosting.
 
 ```json
 {
@@ -358,7 +358,7 @@ The embedded `ModelSpec` uses the model fields documented in the [Catalog Refere
 
 The payload type was named `SessionInitialized` before `v0.preview.94` and is now `SessionInfo`. This is a Rust type name only — the event names (`SessionStart`, `SessionUpdated`) and the JSON are unchanged, so no client needs to adapt.
 
-`ProviderSpec` deliberately carries only what a client cannot look up for itself. The provider's model list is not on the wire; it is identical for every session and is published by [`ante catalog`](/reference/cli-reference#ante-catalog). Unknown fields are ignored, so payloads from older daemons that still send `preferred_models` decode fine.
+`ProviderSpec` deliberately carries only what a client cannot look up for itself. The provider's model list is not on the wire; it is identical for every session and is published by [`cante catalog`](/reference/cli-reference#cante-catalog). Unknown fields are ignored, so payloads from older daemons that still send `preferred_models` decode fine.
 
 #### SessionUpdated
 
@@ -784,13 +784,13 @@ When the client and daemon run in the same process (TUI or headless mode), they 
 | Channel | Direction | Capacity |
 |---|---|---|
 | Op channel | Client → Daemon | 256 messages |
-| Event channel | Daemon → Client | Unbounded; Ante warns when the pending backlog reaches 4096 and reports when it drains |
+| Event channel | Daemon → Client | Unbounded; Cante warns when the pending backlog reaches 4096 and reports when it drains |
 
 Events are never dropped or blocked behind a slow in-process client. A client that stops reading accumulates a memory backlog, so consumers should keep draining the event receiver even while handling other work.
 
 ### Stdio transport (JSONL)
 
-For external clients using `ante serve` (or `ante serve --stdio`), `StdioTransport` bridges JSON Lines over stdin/stdout to the internal channel pair:
+For external clients using `cante serve` (or `cante serve --stdio`), `StdioTransport` bridges JSON Lines over stdin/stdout to the internal channel pair:
 
 - **stdin** → Parse each line as `OpMsg` → forward to daemon
 - **daemon events** → Serialize as JSON → write to **stdout** (one line per event)
@@ -800,7 +800,7 @@ For external clients using `ante serve` (or `ante serve --stdio`), `StdioTranspo
 
 ### Unix socket transport
 
-For clients that dial a host someone else is running, `ante serve --sock [PATH]` listens on a Unix domain socket (default `run/serve.sock` in the Ante home) and exchanges the same JSONL protocol over the stream:
+For clients that dial a host someone else is running, `cante serve --sock [PATH]` listens on a Unix domain socket (default `run/serve.sock` in the Cante home) and exchanges the same JSONL protocol over the stream:
 
 - Each client gets its own connection and at most one active session on the shared host
 - `Op::Shutdown` ends only that connection; the host keeps accepting new ones
@@ -809,7 +809,7 @@ For clients that dial a host someone else is running, `ante serve --sock [PATH]`
 
 ### WebSocket transport
 
-For networked or browser-based clients using `ante serve --ws <ADDR>`, `WsTransport` exchanges the same JSONL protocol over WebSocket frames:
+For networked or browser-based clients using `cante serve --ws <ADDR>`, `WsTransport` exchanges the same JSONL protocol over WebSocket frames:
 
 - Each WebSocket client gets its own connection and session on the shared host
 - Messages are the same `OpMsg` and `EventMsg` JSON objects, sent as text frames

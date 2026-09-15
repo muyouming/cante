@@ -6,7 +6,7 @@ description: "Switch models, toggle providers, and adjust effort on the fly"
 
 # Models, Providers & Effort
 
-Ante lets you switch between models, providers, and effort levels mid-session — no restart needed. Two dialogs split the job: `/models` refines the model and effort within your current provider, and `/providers` switches providers.
+Cante lets you switch between models, providers, and effort levels mid-session — no restart needed. Two dialogs split the job: `/models` refines the model and effort within your current provider, and `/providers` switches providers.
 
 <img src="/assets/cookbook/providers.gif" alt="Switching provider, model, and effort with /providers" style={{width: '100%', borderRadius: '8px', margin: '16px 0'}} />
 
@@ -22,11 +22,11 @@ Press `Tab` to hand off to the provider selector when you want to switch provide
 
 Type `/providers` to list every provider with its connection state. Press Enter on a connected provider to drill into its model picker — the same model list and effort slider, preselecting the model you last used on that provider. The switch commits only when you confirm with Enter; `Esc` steps back to the provider list. Enter on an unconnected provider starts its sign-in flow instead (see [Providers](/usage/providers#authentication)).
 
-Ante remembers the last model you used on each provider, so hopping between providers puts you back where you left off.
+Cante remembers the last model you used on each provider, so hopping between providers puts you back where you left off.
 
 ## Effort
 
-Effort is Ante's single knob for how hard the model reasons before responding, on a six-level scale:
+Effort is Cante's single knob for how hard the model reasons before responding, on a six-level scale:
 
 ```
 min · low · medium · high · xhigh · max
@@ -44,18 +44,18 @@ Anthropic exposes `xhigh` on Claude Sonnet 5 and Opus 5, Opus 4.7/4.8, and the a
 Anthropic's API requires `temperature: 1` whenever thinking is active. If you've set a different `temperature` for a Claude model in your [catalog](/reference/catalog-reference#model-fields) or via `MODEL_TEMPERATURE`, turns with thinking on fail with a message saying so — clear the override to fix it.
 :::
 
-Your effort choice is remembered per model in `~/.ante/settings.json`, and you can pin it for a run from the CLI:
+Your effort choice is remembered per model in `~/.cante/settings.json`, and you can pin it for a run from the CLI:
 
 ```bash
-ante --effort high
+cante --effort high
 ```
 
 ## Readable reasoning
 
-Effort controls how much reasoning the model performs; a provider's `thinking_display` controls how much readable reasoning it returns. Set it to `off`, `concise`, or `detailed` in `~/.ante/catalog.json`. Turning the display off does not turn reasoning off, and requesting a detailed display does not raise effort. See [Thinking display](/reference/catalog-reference#thinking-display) for provider mappings and override behavior.
+Effort controls how much reasoning the model performs; a provider's `thinking_display` controls how much readable reasoning it returns. Set it to `off`, `concise`, or `detailed` in `~/.cante/catalog.json`. Turning the display off does not turn reasoning off, and requesting a detailed display does not raise effort. See [Thinking display](/reference/catalog-reference#thinking-display) for provider mappings and override behavior.
 
 :::tip
-You can also set your default model and provider via CLI flags: `ante --provider openai --model gpt-5.6-sol`, or configure defaults in your [preferences](/configuration/preference).
+You can also set your default model and provider via CLI flags: `cante --provider openai --model gpt-5.6-sol`, or configure defaults in your [preferences](/configuration/preference).
 :::
 
-If you pick a provider without naming a model, Ante starts you on that provider's most capable model and may use a lighter, cheaper one for ambient UI hints such as the spinner's thinking phrase and the next-prompt suggestion — see [weight classes](/reference/catalog-reference#weight-classes). WebFetch itself returns page content to the active session model; it does not invoke a helper model. Vision-capable models are detected automatically, so you can drop images straight into the chat.
+If you pick a provider without naming a model, Cante starts you on that provider's most capable model and may use a lighter, cheaper one for ambient UI hints such as the spinner's thinking phrase and the next-prompt suggestion — see [weight classes](/reference/catalog-reference#weight-classes). WebFetch itself returns page content to the active session model; it does not invoke a helper model. Vision-capable models are detected automatically, so you can drop images straight into the chat.

@@ -1,10 +1,10 @@
 ---
 title: "Core Concepts & Protocol"
 sidebar_label: "Core Concepts"
-description: "Ante's fundamental abstractions, and the Op/Evt message protocol that connects them"
+description: "Cante's fundamental abstractions, and the Op/Evt message protocol that connects them"
 ---
 
-Ante models agent interactions as a hierarchy of concepts, connected by a typed message-passing protocol.
+Cante models agent interactions as a hierarchy of concepts, connected by a typed message-passing protocol.
 
 ## Concept hierarchy
 
@@ -19,7 +19,7 @@ Project
 | Concept | Description |
 |---|---|
 | **Project** | A git repo or root directory. Can have multiple sessions. |
-| **Session** | One episode of interaction between user and Ante. Manages dialog state, token usage, and context compaction. |
+| **Session** | One episode of interaction between user and Cante. Manages dialog state, token usage, and context compaction. |
 | **Task** | One piece of work the user wants to accomplish. Can span multiple turns. |
 | **Turn** | One back-and-forth with the agent. Starts with user input, ends with agent message or approval request. |
 | **Step** | One interaction from agent with LLM. Handles tool calls and other mechanics. |
@@ -30,7 +30,7 @@ Generally, if there is no approval interruption, one task consists of one turn.
 
 ## Protocol: Ops and Events
 
-Ante uses a message-passing protocol between the client (TUI or headless runner) and the daemon. Operations (`Op`) flow from client to daemon, and events (`Evt`) flow from daemon to client.
+Cante uses a message-passing protocol between the client (TUI or headless runner) and the daemon. Operations (`Op`) flow from client to daemon, and events (`Evt`) flow from daemon to client.
 
 ### Message IDs
 
@@ -201,12 +201,12 @@ sequenceDiagram
 
 ## Context management
 
-Ante automatically manages context windows:
+Cante automatically manages context windows:
 
 - **Token budget** — Each turn tracks token usage against the model's context limit
-- **Auto-compaction** — When the dialog approaches the context limit, Ante evicts aged tool results first, preserves the newest slice and user messages verbatim, and summarizes only the older prefix the model will no longer see. Manual `/compact` uses a tighter target and usually folds more history. If a provider rejects a request below the advertised limit, the session learns a smaller effective window, rescales the compaction budget, and retries once. On by default; disable with the `auto_compact` [setting](/configuration/preference#settings-file) (manual `/compact` and overflow recovery remain available)
+- **Auto-compaction** — When the dialog approaches the context limit, Cante evicts aged tool results first, preserves the newest slice and user messages verbatim, and summarizes only the older prefix the model will no longer see. Manual `/compact` uses a tighter target and usually folds more history. If a provider rejects a request below the advertised limit, the session learns a smaller effective window, rescales the compaction budget, and retries once. On by default; disable with the `auto_compact` [setting](/configuration/preference#settings-file) (manual `/compact` and overflow recovery remain available)
 - **Tool result trimming** — Large outputs are bounded to fit within budget, and a parallel result batch shares one overall context cap. Older results decay before conversational messages are summarized; a cleared marker names the original `tool_use_id`, whose complete result remains in a saved session's event log
 
 ## Permissions
 
-Ante has a permission system that gates tool execution. Rules are evaluated in first-match-wins order, with three possible decisions: **Allow**, **Ask**, or **Deny**. See the [Permissions](/configuration/permission) page for full details.
+Cante has a permission system that gates tool execution. Rules are evaluated in first-match-wins order, with three possible decisions: **Allow**, **Ask**, or **Deny**. See the [Permissions](/configuration/permission) page for full details.

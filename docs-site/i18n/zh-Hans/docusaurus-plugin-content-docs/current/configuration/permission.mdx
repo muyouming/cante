@@ -1,10 +1,10 @@
 ---
 title: "权限管控系统"
 sidebar_label: "权限控制"
-description: "Ante 如何通过模式、规则与匹配器控制工具的安全执行"
+description: "Cante 如何通过模式、规则与匹配器控制工具的安全执行"
 ---
 
-Ante 拥有完善的权限系统，用于控制工具调用是自动批准、需要用户确认还是直接拦截拒绝。
+Cante 拥有完善的权限系统，用于控制工具调用是自动批准、需要用户确认还是直接拦截拒绝。
 
 ## 权限模式 {#permission-modes}
 
@@ -14,7 +14,7 @@ Ante 拥有完善的权限系统，用于控制工具调用是自动批准、需
 | `auto` | 优先遵循显式规则。若无规则命中，常规工具自动放行，除非 Bash 检测到危险命令（此时会弹窗询问）。 |
 | `yolo` | 所有工具调用均自动批准 —— 无弹窗询问，不计算规则（包括 `deny` 拒绝规则）。 |
 
-在 `~/.ante/settings.json` 中配置默认模式：
+在 `~/.cante/settings.json` 中配置默认模式：
 
 ```json
 {
@@ -30,11 +30,11 @@ Ante 拥有完善的权限系统，用于控制工具调用是自动批准、需
 也可以按会话临时覆盖：
 
 ```bash
-ante --yolo "run cargo clippy and fix all warnings"
-ante --permission-mode auto "update docs and run tests"
+cante --yolo "run cargo clippy and fix all warnings"
+cante --permission-mode auto "update docs and run tests"
 ```
 
-在 TUI 中，按 **Shift+Tab** 可实时循环切换模式：`strict` → `auto` → `yolo` → `strict`。变动立即生效，适用于当前正在运行轮次中的后续工具调用。切换到 `strict` 或 `auto` 还会自动将其保存为 `~/.ante/settings.json` 的全局默认值；切换到 `yolo` 仅对当前会话生效，确保未来的新会话不会在无保护状态下静默启动。
+在 TUI 中，按 **Shift+Tab** 可实时循环切换模式：`strict` → `auto` → `yolo` → `strict`。变动立即生效，适用于当前正在运行轮次中的后续工具调用。切换到 `strict` 或 `auto` 还会自动将其保存为 `~/.cante/settings.json` 的全局默认值；切换到 `yolo` 仅对当前会话生效，确保未来的新会话不会在无保护状态下静默启动。
 
 :::warning
 在无头模式（Headless Mode）下，默认隐式使用 `yolo` 模式 —— 由于没有交互式提示，所有工具调用均会自动放行。
@@ -50,7 +50,7 @@ ante --permission-mode auto "update docs and run tests"
 
 ## 规则机制 {#rules}
 
-权限规则将**判定结果（decision）**与**工具匹配器（tool matcher）**配对。持久化规则位于 `~/.ante/settings.json` 的 `permissions.allow`、`permissions.ask` 与 `permissions.deny` 列表中。
+权限规则将**判定结果（decision）**与**工具匹配器（tool matcher）**配对。持久化规则位于 `~/.cante/settings.json` 的 `permissions.allow`、`permissions.ask` 与 `permissions.deny` 列表中。
 
 优先级固定为：**deny（拒绝） > session grants（会话临时授权） > ask（询问） > allow（允许） > tool defaults（工具默认值）**。在每个层级内，匹配器为无序集合。会话临时授权是在审批时选择“本次会话允许”所添加的临时放行规则（参见[会话临时授权](#session-grants)）。
 
@@ -82,7 +82,7 @@ ante --permission-mode auto "update docs and run tests"
 | `WebSearch` | Ask |
 | `ViewImage` | Allow |
 
-在 `strict` 模式下，对于未配置规则的 Shell 命令，若属于经过安全审计的纯只读程序（包括仅由它们构建的管道或 `&&` / `||` / `;` 序列），Ante 会在最终回退阶段自动放行；任何包含重定向、命令替换或未知命令的调用仍会弹出提示。
+在 `strict` 模式下，对于未配置规则的 Shell 命令，若属于经过安全审计的纯只读程序（包括仅由它们构建的管道或 `&&` / `||` / `;` 序列），Cante 会在最终回退阶段自动放行；任何包含重定向、命令替换或未知命令的调用仍会弹出提示。
 
 在 `auto` 模式下，对于未命中规则的调用实行反向举证：非 Bash 工具直接执行，Bash 命令只要未被危险分类器标记即可直接执行。
 
@@ -92,7 +92,7 @@ ante --permission-mode auto "update docs and run tests"
 
 - **Yes** — 仅批准本次单次调用。
 - **Yes, allow … for this session** — 为本次会话的后续调用添加临时授权。该授权高于 `ask`/`allow` 和工具默认值，但低于 `deny` 规则，且在会话结束时自动销毁。
-- **Yes, always allow … (save to settings)** — 将匹配器追加写入 `~/.ante/settings.json` 的 `permissions.allow` 中，以便应用于未来所有会话。
+- **Yes, always allow … (save to settings)** — 将匹配器追加写入 `~/.cante/settings.json` 的 `permissions.allow` 中，以便应用于未来所有会话。
 
 授权具备智能作用域范围而非无边界放行。单个经批准的 Bash 命令会自动泛化为**双 Token 前缀**，以便同类调用不再重复提示 —— 例如批准 `cargo test -p foo` 会授予 `Bash(cargo test *)`。被风险分类器标记的命令（如 `rm -rf build`）、第二个 Token 为参数标识的命令（如 `ls -la`）以及多阶段复合命令（如 `git add -A && git commit -m wip`）会保持**精确命令**作用域而不做拓宽。`Agent`、`Read`、`Edit` 和 `Write` 以其首要参数（子智能体类型或文件路径）为作用域，`Grep` 和 `Glob` 以搜索模式为作用域；无已知首要参数的工具按工具名授权。
 
@@ -136,7 +136,7 @@ Glob(**/*.rs)
 | `Grep` | `pattern` |
 | `Glob` | `pattern` |
 
-对于文件操作工具，Ante 在匹配权限规则前会自动对调用端路径进行规范化处理：去除外层引号、展开 `~` 并解析 `.` / `..` 相对路径。例如 `Deny(Read(/tmp/secret*))` 在展开后同样适用于形如 `Read("~/../tmp/secret.txt")` 的等效路径。规则中的参数模式仍原样作为 Glob 匹配；仅工具调用端的参数会进行规范化。
+对于文件操作工具，Cante 在匹配权限规则前会自动对调用端路径进行规范化处理：去除外层引号、展开 `~` 并解析 `.` / `..` 相对路径。例如 `Deny(Read(/tmp/secret*))` 在展开后同样适用于形如 `Read("~/../tmp/secret.txt")` 的等效路径。规则中的参数模式仍原样作为 Glob 匹配；仅工具调用端的参数会进行规范化。
 
 `Grep` 和 `Glob` 以搜索模式为作用域，按原样匹配而不做路径规范化；被搜索的目录不参与匹配。
 
@@ -163,10 +163,10 @@ Glob 模式 `safe-cmd:*` **不会**匹配 `safe-cmd --flag`。请使用 `safe-cm
 
 ```bash
 # 精确指定基础工具集
-ante --tools Read,Glob,Grep -p "analyze the code"
+cante --tools Read,Glob,Grep -p "analyze the code"
 
 # 剔除指定工具
-ante --exclude-tools Bash,Write -p "read-only analysis"
+cante --exclude-tools Bash,Write -p "read-only analysis"
 ```
 
 每个过滤参数接收一个逗号分隔的值并可重复使用；`--tools Read Glob` 这类空格分隔列表不被接受。在这些列表中接受 `Bash(cargo test *)` 匹配器语法，但仅会按工具名进行过滤 —— 仍保留整个 `Bash` 工具。若要精确控制工具允许运行的内容，请结合使用 `allow`/`ask`/`deny` 权限规则。

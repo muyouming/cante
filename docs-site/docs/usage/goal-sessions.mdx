@@ -1,12 +1,12 @@
 ---
 title: Goal-Driven Sessions
 sidebar_label: "Goal Sessions"
-description: "Keep Ante working until a concrete success condition is met"
+description: "Keep Cante working until a concrete success condition is met"
 ---
 
 # Goal-Driven Sessions
 
-Use `/goal` when the work is bigger than one prompt. Set a success condition and Ante keeps driving the session until the condition is satisfied:
+Use `/goal` when the work is bigger than one prompt. Set a success condition and Cante keeps driving the session until the condition is satisfied:
 
 ```text
 /goal all tests pass and the docs build succeeds
@@ -14,7 +14,7 @@ Use `/goal` when the work is bigger than one prompt. Set a success condition and
 
 ## How the loop works
 
-Ante starts or continues work toward the condition, then evaluates the conversation after each turn. If the goal is not met, it sends a continuation turn carrying the evaluator's feedback, and the agent keeps working.
+Cante starts or continues work toward the condition, then evaluates the conversation after each turn. If the goal is not met, it sends a continuation turn carrying the evaluator's feedback, and the agent keeps working.
 
 The loop stops when the goal is:
 
@@ -52,4 +52,4 @@ Goal sessions shine when you step away. Two things to set up first:
 
 ## Programmatic use
 
-Goal loops are part of Ante's wire protocol: `Op::Goal` carries set, clear, and status commands, so [server-mode](/usage/serve) clients can drive them the same way the TUI does.
+Goal loops are part of Cante's wire protocol: `Op::Goal` carries set, clear, and status commands, so [server-mode](/usage/serve) clients can drive them the same way the TUI does.

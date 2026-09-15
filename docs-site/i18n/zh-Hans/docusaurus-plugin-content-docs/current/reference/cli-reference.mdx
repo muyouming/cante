@@ -1,48 +1,48 @@
 ---
 title: "CLI 命令行参考手册"
 sidebar_label: "CLI 命令参考"
-description: "Ante 命令行工具的所有命令与参数选项参考手册"
+description: "Cante 命令行工具的所有命令与参数选项参考手册"
 ---
 
-Ante 可以作为交互式 TUI 终端、单次无头命令行任务、长寿命协议服务端或消息渠道网关运行。
+Cante 可以作为交互式 TUI 终端、单次无头命令行任务、长寿命协议服务端或消息渠道网关运行。
 
 ```bash
-ante [OPTIONS] [COMMAND]
+cante [OPTIONS] [COMMAND]
 ```
 
 ## 命令总览 {#commands}
 
 | 命令 | 说明 |
 |---|---|
-| `ante` | 启动交互式 TUI 终端。若提供了 `-p` / `--prompt`，则以无头模式运行。 |
-| `ante auth` | 管理提供商的登录认证，无需拉起完整的智能体对话。 |
-| `ante serve` | 运行长寿命的协议服务端，支持 stdio、Unix 套接字或 WebSocket。 |
-| `ante gateway` | 运行接入 Slack / Discord 的消息网关。 |
-| `ante update` | 检查最新版本的 Ante 并自动安装。 |
-| `ante offline` | 管理离线模式使用的本地推理引擎。 |
-| `ante rage` | 收集脱敏后的排错诊断归档包（日志 + 环境信息），便于提交 Issue。 |
-| `ante catalog` | 以 JSON 格式打印当前生效的提供商与模型目录。 |
-| `ante doctor` | 执行启动自检并输出各启动阶段的耗时与健康报告。 |
-| `ante <name>` | 运行外部 `ante-<name>` 应用。 |
+| `cante` | 启动交互式 TUI 终端。若提供了 `-p` / `--prompt`，则以无头模式运行。 |
+| `cante auth` | 管理提供商的登录认证，无需拉起完整的智能体对话。 |
+| `cante serve` | 运行长寿命的协议服务端，支持 stdio、Unix 套接字或 WebSocket。 |
+| `cante gateway` | 运行接入 Slack / Discord 的消息网关。 |
+| `cante update` | 检查最新版本的 Cante 并自动安装。 |
+| `cante offline` | 管理离线模式使用的本地推理引擎。 |
+| `cante rage` | 收集脱敏后的排错诊断归档包（日志 + 环境信息），便于提交 Issue。 |
+| `cante catalog` | 以 JSON 格式打印当前生效的提供商与模型目录。 |
+| `cante doctor` | 执行启动自检并输出各启动阶段的耗时与健康报告。 |
+| `cante <name>` | 运行外部 `cante-<name>` 应用。 |
 
-## `ante` 主命令 {#ante}
+## `cante` 主命令 {#cante}
 
 ```bash
-ante [OPTIONS]
+cante [OPTIONS]
 ```
 
-不带 `--prompt` 时，Ante 启动交互式 TUI。传入 `--prompt` 时，Ante 执行单次无头任务后退出。
+不带 `--prompt` 时，Cante 启动交互式 TUI。传入 `--prompt` 时，Cante 执行单次无头任务后退出。
 
-TUI 要求 stdout 连接到系统终端。若重定向或通过管道输出（如 `ante > log.txt`），Ante 会在启动时直接拒绝并提示使用[无头模式](/usage/headless)，而非在后续查询游标位置时异常退出。
+TUI 要求 stdout 连接到系统终端。若重定向或通过管道输出（如 `cante > log.txt`），Cante 会在启动时直接拒绝并提示使用[无头模式](/usage/headless)，而非在后续查询游标位置时异常退出。
 
 | 参数标识 | 说明 |
 |---|---|
 | `-m`, `--model <MODEL>` | 覆盖默认模型名称。 |
 | `--provider <PROVIDER>` | 覆盖使用的 API 模型提供商标识。 |
-| `--profile <NAME>` | 在整个进程中使用现有的 `~/.ante/<name>.settings.json` 替代 `settings.json`；可置于任意子命令前后，环境变量 `ANTE_PROFILE` 等效。未知名称会警告并回退到 `settings.json`。内置 `bare` Profile 会禁用技能、MCP 服务器、会话持久化、自动记忆及环境感知 UI 功能。 |
+| `--profile <NAME>` | 在整个进程中使用现有的 `~/.cante/<name>.settings.json` 替代 `settings.json`；可置于任意子命令前后，环境变量 `CANTE_PROFILE` 等效。未知名称会警告并回退到 `settings.json`。内置 `bare` Profile 会禁用技能、MCP 服务器、会话持久化、自动记忆及环境感知 UI 功能。 |
 | `--effort <LEVEL>` | 覆盖本次运行模型的[思考深度等级](/usage/models-and-thinking#effort)：`min`、`low`、`medium`、`high`、`xhigh` 或 `max`。 |
 | `--yolo` | 跳过本次会话的所有工具审批确认提示。 |
-| `--fullscreen` | 仅在本次运行中使用全屏 TUI 聊天：进入备用屏幕并由 Ante 管理滚动历史。不会持久化 `render_mode` 设置，在无头模式中忽略。 |
+| `--fullscreen` | 仅在本次运行中使用全屏 TUI 聊天：进入备用屏幕并由 Cante 管理滚动历史。不会持久化 `render_mode` 设置，在无头模式中忽略。 |
 | `--permission-mode <MODE>` | 覆盖本次运行的权限模式：`strict`、`auto` 或 `yolo`。与 `--yolo` 互斥。无头运行会遵循该覆盖，并立即拒绝需要交互审批的调用。 |
 | `--system-prompt <PROMPT>` | 完全替换默认的系统提示词。与 `--system-prompt-file` 互斥。持久化默认值请配置 `system_prompt` [设置](/configuration/preference)。 |
 | `--system-prompt-file <PATH>` | 从 UTF-8 文件中读取替换的系统提示词。与 `--system-prompt` 互斥。 |
@@ -65,26 +65,26 @@ TUI 要求 stdout 连接到系统终端。若重定向或通过管道输出（�
 | `--no-session-save` | 不保存会话记录与快照，覆盖配置项。与 `--resume` 互斥。 |
 | `--offline-model <PATH>` | 指定用于离线推理的本地 GGUF 模型文件路径。 |
 | `-h`, `--help` | 打印帮助信息。 |
-| `-V`, `--version` | 打印 Ante 版本号。 |
+| `-V`, `--version` | 打印 Cante 版本号。 |
 
-### 使用示例 {#ante-examples}
+### 使用示例 {#cante-examples}
 
 ```bash
-ante
-ante -p "explain what this project does"
-git diff | ante -p "review this diff for bugs"
-ante --provider openai --model gpt-5.6-sol -p "refactor the database module"
-ante --effort max -p "find the race condition in the scheduler"
-ante --profile work
-ante --profile bare -p "review this repository"
-ante --resume ses_01ARZ3NDEKTSV4RRFFQ69G5FAV -p "now add tests"
-ante -p "summarize this repo" --enable-auto-memory
+cante
+cante -p "explain what this project does"
+git diff | cante -p "review this diff for bugs"
+cante --provider openai --model gpt-5.6-sol -p "refactor the database module"
+cante --effort max -p "find the race condition in the scheduler"
+cante --profile work
+cante --profile bare -p "review this repository"
+cante --resume ses_01ARZ3NDEKTSV4RRFFQ69G5FAV -p "now add tests"
+cante -p "summarize this repo" --enable-auto-memory
 ```
 
-## `ante auth` {#ante-auth}
+## `cante auth` {#cante-auth}
 
 ```bash
-ante auth login [PROVIDER] [OPTIONS]
+cante auth login [PROVIDER] [OPTIONS]
 ```
 
 在不启动 TUI 会话的情况下登录 OAuth 提供商。目前支持的提供商为 `antix`（省略 `[PROVIDER]` 时的默认值）。
@@ -95,26 +95,26 @@ ante auth login [PROVIDER] [OPTIONS]
 | `--no-browser` | 打印授权 URL 而非自动拉起浏览器。 |
 | `-h`, `--help` | 打印帮助信息。 |
 
-### 使用示例 {#ante-auth-examples}
+### 使用示例 {#cante-auth-examples}
 
 ```bash
-ante auth login
-ante auth login antix --force
-ante auth login --no-browser
+cante auth login
+cante auth login antix --force
+cante auth login --no-browser
 ```
 
-## `ante serve` {#ante-serve}
+## `cante serve` {#cante-serve}
 
 ```bash
-ante serve [OPTIONS]
+cante serve [OPTIONS]
 ```
 
-服务模式默认在 stdin/stdout 上暴露 Ante 协议；传入 `--sock` 时通过 Unix 域套接字提供服务，传入 `--ws` 时通过 WebSocket 提供服务。
+服务模式默认在 stdin/stdout 上暴露 Cante 协议；传入 `--sock` 时通过 Unix 域套接字提供服务，传入 `--ws` 时通过 WebSocket 提供服务。
 
 | 参数标识 | 说明 |
 |---|---|
 | `--stdio` | 通过 stdin/stdout 提供 JSONL 协议服务（默认传输方式）。三个传输方式参数互斥。 |
-| `--sock [PATH]` | 通过 Unix 域套接字提供服务。未指定路径时默认为 Ante 主目录下的 `run/serve.sock`。 |
+| `--sock [PATH]` | 通过 Unix 域套接字提供服务。未指定路径时默认为 Cante 主目录下的 `run/serve.sock`。 |
 | `--ws <ADDR>` | 在给定的本地回环地址上通过 WebSocket 提供服务。 |
 | `--offline-model <PATH>` | 启动时加载本地 GGUF 模型以供离线模式使用。 |
 | `-h`, `--help` | 打印帮助信息。 |
@@ -128,52 +128,52 @@ ante serve [OPTIONS]
 :::
 
 :::note
-同一时刻只有一个宿主拥有某个套接字路径。`--sock` 会在套接字旁的 `.lock` 文件上获取排他锁，因此同一路径上的第二个 `ante serve --sock` 会拒绝启动，并保持正在运行的宿主的套接字不受影响。崩溃遗留的套接字文件不持有锁，会在下次启动时被替换。
+同一时刻只有一个宿主拥有某个套接字路径。`--sock` 会在套接字旁的 `.lock` 文件上获取排他锁，因此同一路径上的第二个 `cante serve --sock` 会拒绝启动，并保持正在运行的宿主的套接字不受影响。崩溃遗留的套接字文件不持有锁，会在下次启动时被替换。
 
 每个客户端连接驱动各自的会话。某个客户端的 `Shutdown` 只结束该连接 —— 宿主继续监听，并在收到 `SIGINT` 或 `SIGTERM` 时退出。
 :::
 
-### 使用示例 {#ante-serve-examples}
+### 使用示例 {#cante-serve-examples}
 
 ```bash
-ante serve
-ante serve --sock                        # ~/.ante/run/serve.sock
-ante serve --sock /tmp/ante.sock
-ante serve --ws 127.0.0.1:8080
+cante serve
+cante serve --sock                        # ~/.cante/run/serve.sock
+cante serve --sock /tmp/cante.sock
+cante serve --ws 127.0.0.1:8080
 ```
 
-## `ante gateway` {#ante-gateway}
+## `cante gateway` {#cante-gateway}
 
 ```bash
-ante gateway [OPTIONS]
+cante gateway [OPTIONS]
 ```
 
-网关模式根据渠道配置文件将 Ante 接入 Slack、Discord 或两者。
+网关模式根据渠道配置文件将 Cante 接入 Slack、Discord 或两者。
 
 | 参数标识 | 默认值 | 说明 |
 |---|---|---|
-| `--config <PATH>` | `~/.ante/channels.json` | 渠道配置文件的路径。 |
+| `--config <PATH>` | `~/.cante/channels.json` | 渠道配置文件的路径。 |
 | `--model <MODEL>` | `local` | 智能体对话使用的模型。 |
 | `--provider <PROVIDER>` | `local` | 智能体对话使用的提供商。 |
 | `--output-format <FORMAT>` | `minimal` | 网关 stdout 输出格式：`json`、`human` 或 `minimal`。 |
 | `--offline-model <PATH>` | - | 为所有网关对话加载本地 GGUF 模型。 |
 | `-h`, `--help` | - | 打印帮助信息。 |
 
-### 使用示例 {#ante-gateway-examples}
+### 使用示例 {#cante-gateway-examples}
 
 ```bash
-ante gateway
-ante gateway --provider anthropic --model claude-sonnet-5
-ante gateway --config ./channels.json --output-format human
+cante gateway
+cante gateway --provider anthropic --model claude-sonnet-5
+cante gateway --config ./channels.json --output-format human
 ```
 
-## `ante update` {#ante-update}
+## `cante update` {#cante-update}
 
 ```bash
-ante update [OPTIONS] [CHANNEL]
+cante update [OPTIONS] [CHANNEL]
 ```
 
-检查更新并自动安装新版本。无参数时跟踪 `~/.ante/settings.json` 中配置的通道（默认 `stable`）。传入通道名（位置参数或 `--channel`）仅覆盖本次更新。
+检查更新并自动安装新版本。无参数时跟踪 `~/.cante/settings.json` 中配置的通道（默认 `stable`）。传入通道名（位置参数或 `--channel`）仅覆盖本次更新。
 
 | 位置参数 | 说明 |
 |---|---|
@@ -185,56 +185,56 @@ ante update [OPTIONS] [CHANNEL]
 | `--version <VERSION>` | 安装指定的具体发布版本而非通道最新版。支持带或不带前缀 `v`（如 `v0.preview.98` 或 `0.preview.98`）。与通道参数互斥。 |
 | `-h`, `--help` | 打印帮助信息。 |
 
-### 使用示例 {#ante-update-examples}
+### 使用示例 {#cante-update-examples}
 
 ```bash
-ante update
-ante update nightly
-ante update --channel stable
-ante update --version v0.preview.98
+cante update
+cante update nightly
+cante update --channel stable
+cante update --version v0.preview.98
 ```
 
-## `ante offline` {#ante-offline}
+## `cante offline` {#cante-offline}
 
 ```bash
-ante offline <COMMAND>
+cante offline <COMMAND>
 ```
 
 管理[离线模式](/local/offline)使用的本地推理引擎，无需拉起智能体对话。
 
 | 子命令 | 说明 |
 |---|---|
-| `install` | 下载并安装 Ante 固定版本的 llama.cpp 运行时。 |
+| `install` | 下载并安装 Cante 固定版本的 llama.cpp 运行时。 |
 
 `install` 会将引擎收敛到固定版本：若已安装当前固定版本则为无操作（no-op），否则会替换为对应版本并打印进度。
 
-### 使用示例 {#ante-offline-examples}
+### 使用示例 {#cante-offline-examples}
 
 ```bash
-ante offline install
+cante offline install
 ```
 
-## `ante rage` {#ante-rage}
+## `cante rage` {#cante-rage}
 
 ```bash
-ante rage [OPTIONS]
+cante rage [OPTIONS]
 ```
 
-发生故障时，`ante rage` 会收集排查所需的上下文信息并打包为一个脱敏归档，便于附加到 GitHub Issue。默认生成 `./ante-rage-<timestamp>.tar.gz` 并打印简要总结。不会自动上传任何数据 —— 归档始终保存在本地。
+发生故障时，`cante rage` 会收集排查所需的上下文信息并打包为一个脱敏归档，便于附加到 GitHub Issue。默认生成 `./cante-rage-<timestamp>.tar.gz` 并打印简要总结。不会自动上传任何数据 —— 归档始终保存在本地。
 
-所有敏感信息在写入前均会脱敏处理。API 密钥和 OAuth Token 仅记录存在状态（`<SET>` / `<UNSET>`），URL 中的凭据被掩码，对话记录与系统提示词被排除，且 `~/.ante/auth/*.json` 与 `channels.json` 绝不会被打包。
+所有敏感信息在写入前均会脱敏处理。API 密钥和 OAuth Token 仅记录存在状态（`<SET>` / `<UNSET>`），URL 中的凭据被掩码，对话记录与系统提示词被排除，且 `~/.cante/auth/*.json` 与 `channels.json` 绝不会被打包。
 
 归档包含：
 
 | 文件 | 内容说明 |
 |---|---|
-| `report.md` | Ante 版本、操作系统架构、Shell、Git 分支、解析的模型/提供商、认证状态表、[遥测安装 ID](/configuration/preference#identity) 及脱敏说明。 |
+| `report.md` | Cante 版本、操作系统架构、Shell、Git 分支、解析的模型/提供商、认证状态表、[遥测安装 ID](/configuration/preference#identity) 及脱敏说明。 |
 | `env.txt` | 相关的环境变量。安全值原样显示；敏感密钥显示为 `<SET>` / `<UNSET>`。 |
-| `settings.redacted.json` | 移除敏感信息后的 `~/.ante/settings.json`（剥离 MCP 凭证和自定义提示词）。 |
-| `catalog.redacted.json` | 移除敏感信息后的 `~/.ante/catalog.json`（存在自定义目录时包含）。 |
+| `settings.redacted.json` | 移除敏感信息后的 `~/.cante/settings.json`（剥离 MCP 凭证和自定义提示词）。 |
+| `catalog.redacted.json` | 移除敏感信息后的 `~/.cante/catalog.json`（存在自定义目录时包含）。 |
 | `logs/` | 最近的应用程序与崩溃日志（过滤剥离 `DEBUG`/`TRACE`，避免请求体进入归档）。 |
 
-当收集目录适用某个[项目设置](/configuration/preference#project-settings)文件时，其 `.ante/settings.json` 也会一并收录，脱敏方式与用户设置文件相同 —— 使问题报告能反映实际生效的配置。
+当收集目录适用某个[项目设置](/configuration/preference#project-settings)文件时，其 `.cante/settings.json` 也会一并收录，脱敏方式与用户设置文件相同 —— 使问题报告能反映实际生效的配置。
 
 默认收集最新的日志文件（最多 10 个文件或 10 MB，崩溃日志优先）。使用 `--since` 可指定时间窗口。
 
@@ -246,45 +246,45 @@ ante rage [OPTIONS]
 | `--since <DURATION>` | 收集指定时间窗口内的所有日志，忽略文件数量与大小限制（如 `7d`、`48h`、`90m`、`2`）。 |
 | `-h`, `--help` | 打印帮助信息。 |
 
-### 使用示例 {#ante-rage-examples}
+### 使用示例 {#cante-rage-examples}
 
 ```bash
-ante rage
-ante rage --output ./ante-bug.tar.gz
-ante rage --since 7d
-ante rage --no-compress
+cante rage
+cante rage --output ./cante-bug.tar.gz
+cante rage --since 7d
+cante rage --no-compress
 ```
 
-## `ante catalog` {#ante-catalog}
+## `cante catalog` {#cante-catalog}
 
 ```bash
-ante catalog
+cante catalog
 ```
 
-将合并后的提供商目录（内置预设加上 `~/.ante/catalog.json`）以 JSON 格式打印到 stdout（包含单个 `providers` 数组）。每个提供商内嵌了应用了用户模型覆盖后的推荐模型列表。警告信息输出至 stderr，因此 stdout 保持干净的 JSON 文档，可直接通过管道传给 `jq`。
+将合并后的提供商目录（内置预设加上 `~/.cante/catalog.json`）以 JSON 格式打印到 stdout（包含单个 `providers` 数组）。每个提供商内嵌了应用了用户模型覆盖后的推荐模型列表。警告信息输出至 stderr，因此 stdout 保持干净的 JSON 文档，可直接通过管道传给 `jq`。
 
-### 使用示例 {#ante-catalog-examples}
+### 使用示例 {#cante-catalog-examples}
 
 ```bash
-ante catalog
-ante catalog | jq '.providers[].id'
+cante catalog
+cante catalog | jq '.providers[].id'
 ```
 
-## `ante doctor` {#ante-doctor}
+## `cante doctor` {#cante-doctor}
 
 ```bash
-ante doctor
+cante doctor
 ```
 
-启动与真实运行相同的运行时 —— 加载合并目录、初始化守护进程会话并渲染首帧 TUI —— 随后打印各阶段耗时的就绪报告。用于确认 Ante 是否安装配置正确，或作为 CI 冒烟测试。
+启动与真实运行相同的运行时 —— 加载合并目录、初始化守护进程会话并渲染首帧 TUI —— 随后打印各阶段耗时的就绪报告。用于确认 Cante 是否安装配置正确，或作为 CI 冒烟测试。
 
-无需 TTY 和 API 密钥：跳过 MCP 预热，直接基于目录进入就绪状态。报告包含五项检查 —— `home`（Ante 目录与输入历史可写性）、`project`（适用于当前目录的[项目设置](/configuration/preference#project-settings)文件，或提示未找到）、`catalog`（提供商/模型计数）、`session`（解析的提供商/模型）以及 `first frame`（无头渲染），最后输出总耗时。警告（例如未认证的提供商、被跳过的目录条目、`settings.json` 解析提示，或项目设置文件中被丢弃的键）列在表格下方。若任何硬性检查失败（如目录不可写），`doctor` 会返回非零退出码。
+无需 TTY 和 API 密钥：跳过 MCP 预热，直接基于目录进入就绪状态。报告包含五项检查 —— `home`（Cante 目录与输入历史可写性）、`project`（适用于当前目录的[项目设置](/configuration/preference#project-settings)文件，或提示未找到）、`catalog`（提供商/模型计数）、`session`（解析的提供商/模型）以及 `first frame`（无头渲染），最后输出总耗时。警告（例如未认证的提供商、被跳过的目录条目、`settings.json` 解析提示，或项目设置文件中被丢弃的键）列在表格下方。若任何硬性检查失败（如目录不可写），`doctor` 会返回非零退出码。
 
-### 使用示例 {#ante-doctor-examples}
+### 使用示例 {#cante-doctor-examples}
 
 ```bash
-ante doctor
-ante doctor || echo "ante is not healthy"
+cante doctor
+cante doctor || echo "cante is not healthy"
 ```
 
 ## 输出格式 {#output-formats}

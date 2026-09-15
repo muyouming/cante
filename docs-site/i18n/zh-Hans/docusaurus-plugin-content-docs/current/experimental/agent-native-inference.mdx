@@ -1,13 +1,13 @@
 ---
 title: "智能体原生推理（实验性）"
 sidebar_label: "智能体原生推理"
-description: "Ante 本地模型的演进方向：直接嵌入在智能体运行时内部的推理引擎"
+description: "Cante 本地模型的演进方向：直接嵌入在智能体运行时内部的推理引擎"
 ---
 
-目前，[离线模式](/local/offline)通过管理外部 llama.cpp 服务端实现：Ante 安装、启动、监控并在退出时关闭它。这能够良好工作，并且是目前官方支持的本地推理方式。而下一步演进方向，则是将推理引擎直接运行在智能体进程**内部（In-Process）**。
+目前，[离线模式](/local/offline)通过管理外部 llama.cpp 服务端实现：Cante 安装、启动、监控并在退出时关闭它。这能够良好工作，并且是目前官方支持的本地推理方式。而下一步演进方向，则是将推理引擎直接运行在智能体进程**内部（In-Process）**。
 
 :::warning
-本页面描述的是技术演进方向，而非现已正式发布的特性。此处提及的内容尚未包含在任何已发布的 Ante 构建版本中。
+本页面描述的是技术演进方向，而非现已正式发布的特性。此处提及的内容尚未包含在任何已发布的 Cante 构建版本中。
 :::
 
 ## 为什么需要进程内原生推理 {#why-in-process}
@@ -32,4 +32,4 @@ cargo run --release --features metal -- -p "write 100 words"
 
 ## 当前状态 {#status}
 
-目前运行本地模型的官方支持方式仍然是使用[离线模式](/local/offline)的托管 llama.cpp 引擎，或[接入自建推理服务](/local/custom-engines)。进程内原生引擎的研发进展将公布在[更新日志](https://ante.run/changelog)和 [Discord](https://discord.gg/pqhj3DNGz2) 中。
+目前运行本地模型的官方支持方式仍然是使用[离线模式](/local/offline)的托管 llama.cpp 引擎，或[接入自建推理服务](/local/custom-engines)。进程内原生引擎的研发进展将公布在[更新日志](https://cante.run/changelog)和 [Discord](https://discord.gg/pqhj3DNGz2) 中。

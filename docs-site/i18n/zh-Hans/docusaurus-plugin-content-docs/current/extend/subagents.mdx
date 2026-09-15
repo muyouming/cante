@@ -10,7 +10,7 @@ Sub-Agents（子智能体）是主智能体在处理复杂、多步骤任务时�
 
 ## 内置子智能体 {#built-in-sub-agents}
 
-Ante 内置了两个开箱即用的子智能体：
+Cante 内置了两个开箱即用的子智能体：
 
 ### general（通用研究子智能体） {#general}
 
@@ -20,11 +20,11 @@ Ante 内置了两个开箱即用的子智能体：
 
 针对代码库探索高度优化的快速智能体。能快速按模式定位文件、按关键字搜索代码并回答关于代码库结构的问题。
 
-关于 Ante 自身的问题由内置的 `ante-guide` [技能](/extend/skills#bundled-skills)处理，而非子智能体。
+关于 Cante 自身的问题由内置的 `cante-guide` [技能](/extend/skills#bundled-skills)处理，而非子智能体。
 
 ## 创建自定义子智能体 {#creating-custom-sub-agents}
 
-在 `~/.ante/agents/`（用户级）或以下任何项目级位置创建带有 YAML Frontmatter 的 Markdown 文件：
+在 `~/.cante/agents/`（用户级）或以下任何项目级位置创建带有 YAML Frontmatter 的 Markdown 文件：
 
 ```markdown
 ---
@@ -90,9 +90,9 @@ Frontmatter 的读取规则与[技能 Frontmatter](/extend/skills#creating-a-ski
 子智能体按以下优先级顺序发现（同名智能体后者覆盖前者）：
 
 1. 内置智能体（`general`、`explorer`）
-2. `~/.ante/agents/`（用户级）
+2. `~/.cante/agents/`（用户级）
 3. `.agents/agents/`（项目级）
-4. `.ante/agents/`（项目级）
+4. `.cante/agents/`（项目级）
 5. `.claude/agents/`（项目级，Claude Code 兼容）
 
 用户级和项目级智能体会与内置智能体一同加载。所有可用智能体在会话初始化时注册，并在附加到首条用户消息的提醒中声明给模型，通过 `ExtensionRefreshed` 协议事件保持刷新。

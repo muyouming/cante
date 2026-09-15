@@ -6,7 +6,7 @@ description: "在智能体生成过程中及时调整方向，节省时间与 To
 
 # 中断与实时引导
 
-无需等待智能体在错误的方向上完成整轮执行。Ante 支持在执行过程中随时中断并重新定向。
+无需等待智能体在错误的方向上完成整轮执行。Cante 支持在执行过程中随时中断并重新定向。
 
 ## 中断执行 {#interrupting}
 
@@ -23,7 +23,7 @@ description: "在智能体生成过程中及时调整方向，节省时间与 To
 - 按 `Ctrl+S` 进行**实时引导（steer）**：将排队的消息即时注入正在运行的轮次中作为实时指引，且不会打断当前执行。
 - 或者不做任何操作 —— 排队的消息会在当前轮次结束后自动提交。
 
-<img src="/assets/cookbook/steering.gif" alt="通过排队指引实时引导正在运行的 Ante 轮次" style={{width: '100%', borderRadius: '8px', margin: '16px 0'}} />
+<img src="/assets/cookbook/steering.gif" alt="通过排队指引实时引导正在运行的 Cante 轮次" style={{width: '100%', borderRadius: '8px', margin: '16px 0'}} />
 
 实时引导可以在不破坏智能体执行连贯性的同时微调方向，特别适合在思路正确但遗漏细节时（如“顺便更新对应的测试”、“复用现有的 helper 函数”）提供补充。
 

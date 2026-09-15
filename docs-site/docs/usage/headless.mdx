@@ -1,22 +1,22 @@
 ---
 title: "Headless Mode"
-description: "Run Ante as a non-interactive CLI for scripting and CI pipelines"
+description: "Run Cante as a non-interactive CLI for scripting and CI pipelines"
 ---
 
-Headless mode runs Ante without the TUI — it processes a prompt, executes the task, and exits. This is ideal for scripting, CI/CD pipelines, and automated workflows.
+Headless mode runs Cante without the TUI — it processes a prompt, executes the task, and exits. This is ideal for scripting, CI/CD pipelines, and automated workflows.
 
 ## Basic usage
 
 Use the `-p` / `--prompt` flag to pass a prompt:
 
 ```bash
-ante -p "explain what this project does"
+cante -p "explain what this project does"
 ```
 
 Or with the long form:
 
 ```bash
-ante --prompt "add tests for the auth module"
+cante --prompt "add tests for the auth module"
 ```
 
 ## Stdin input
@@ -24,23 +24,23 @@ ante --prompt "add tests for the auth module"
 Pipe content from stdin:
 
 ```bash
-cat src/main.rs | ante -p "review this code for bugs"
+cat src/main.rs | cante -p "review this code for bugs"
 ```
 
 Combine stdin with a prompt:
 
 ```bash
-echo "function add(a, b) { return a + b }" | ante -p "add TypeScript types"
+echo "function add(a, b) { return a + b }" | cante -p "add TypeScript types"
 ```
 
 When both stdin and a prompt argument are provided, they are concatenated (stdin first, then the prompt).
 
-Redirected stdout is headless-only. Plain `ante > out.txt` with no prompt refuses to start, because the TUI draws to stdout and boots by asking the terminal where the cursor is. Pass a prompt, or pipe one in, to capture output to a file.
+Redirected stdout is headless-only. Plain `cante > out.txt` with no prompt refuses to start, because the TUI draws to stdout and boots by asking the terminal where the cursor is. Pass a prompt, or pipe one in, to capture output to a file.
 
 ## CLI reference
 
 ```
-ante [OPTIONS] [--prompt <PROMPT>]
+cante [OPTIONS] [--prompt <PROMPT>]
 ```
 
 | Flag | Description |
@@ -48,7 +48,7 @@ ante [OPTIONS] [--prompt <PROMPT>]
 | `-p`, `--prompt <PROMPT>` | The prompt to run |
 | `-m`, `--model <MODEL>` | Override the model name |
 | `--provider <PROVIDER>` | Override the API provider (e.g. `anthropic`, `openai`, `gemini`, `xai`, `openrouter`, `local`) |
-| `--profile <NAME>` | Process-wide selection of an existing `~/.ante/<name>.settings.json`; `ANTE_PROFILE` is equivalent, an unknown name falls back to `settings.json`, and the built-in `bare` profile disables ambient features, skills, MCP servers, session saving, and auto-memory |
+| `--profile <NAME>` | Process-wide selection of an existing `~/.cante/<name>.settings.json`; `CANTE_PROFILE` is equivalent, an unknown name falls back to `settings.json`, and the built-in `bare` profile disables ambient features, skills, MCP servers, session saving, and auto-memory |
 | `--effort <LEVEL>` | Override the model's [effort level](/usage/models-and-thinking#effort): `min`, `low`, `medium`, `high`, `xhigh`, or `max` |
 | `--yolo` | Use `yolo` permission mode, auto-approving tool calls |
 | `--permission-mode <MODE>` | Use `strict`, `auto`, or `yolo`. Headless defaults to `yolo`; under `strict` or `auto`, a call that would require an interactive approval is denied immediately instead of pausing forever |
@@ -76,7 +76,7 @@ ante [OPTIONS] [--prompt <PROMPT>]
 Shows only agent messages, info, and errors:
 
 ```bash
-ante -p "what does this project do"
+cante -p "what does this project do"
 ```
 
 ### Human
@@ -84,7 +84,7 @@ ante -p "what does this project do"
 Shows all events in a human-readable format with ANSI colors:
 
 ```bash
-ante --output-format human -p "fix the type error in main.rs"
+cante --output-format human -p "fix the type error in main.rs"
 ```
 
 ### JSON
@@ -92,7 +92,7 @@ ante --output-format human -p "fix the type error in main.rs"
 Outputs every event as a JSON object (one per line), suitable for machine consumption:
 
 ```bash
-ante --output-format json -p "list all TODO comments" | jq '.event'
+cante --output-format json -p "list all TODO comments" | jq '.event'
 ```
 
 ## Verification check
@@ -100,7 +100,7 @@ ante --output-format json -p "list all TODO comments" | jq '.event'
 The `--check` flag runs a second pass after the main task, asking the agent to review its own work:
 
 ```bash
-ante --check -p "refactor the auth module to use async/await"
+cante --check -p "refactor the auth module to use async/await"
 ```
 
 The verification pass will:
@@ -110,26 +110,26 @@ The verification pass will:
 
 ## Context enrichment
 
-In headless mode, Ante automatically appends the current directory's folder structure to your prompt. This gives the agent awareness of the project layout without you needing to describe it.
+In headless mode, Cante automatically appends the current directory's folder structure to your prompt. This gives the agent awareness of the project layout without you needing to describe it.
 
 ## Headless behavior notes
 
 - **Raw streaming deltas are suppressed** — Output shows complete messages, not the incremental chunks, so logs stay clean
 - **Unattended policy is explicit** — The default is `yolo`. An explicit `--permission-mode strict` or `auto` is honored, but any call that would need a prompt is denied at admission because no one can answer it
-- **Authentication is checked eagerly** — If the provider isn't authenticated, Ante exits immediately with an error
-- **Fails fast if the daemon dies** — If the agent process exits before finishing the task, Ante reports an error instead of a success exit code
+- **Authentication is checked eagerly** — If the provider isn't authenticated, Cante exits immediately with an error
+- **Fails fast if the daemon dies** — If the agent process exits before finishing the task, Cante reports an error instead of a success exit code
 
 ## Resuming a session
 
-Pass `--resume <SESSION_ID>` to continue a previously saved session. Ante replays the persisted history, then applies the new prompt as the next turn:
+Pass `--resume <SESSION_ID>` to continue a previously saved session. Cante replays the persisted history, then applies the new prompt as the next turn:
 
 ```bash
-ante --resume ses_01ARZ3NDEKTSV4RRFFQ69G5FAV -p "now add tests"
+cante --resume ses_01ARZ3NDEKTSV4RRFFQ69G5FAV -p "now add tests"
 ```
 
 The saved model, provider, effort, and dialog are restored directly; settings the snapshot did not pin resolve from the host's current defaults. Headless resume therefore does not need the current default provider to match the session's provider.
 
-The session ID is printed when a TUI session exits (`Resume this session with: ante --resume ses_...`).
+The session ID is printed when a TUI session exits (`Resume this session with: cante --resume ses_...`).
 
 Sessions started with `--no-session-save` are never persisted, so they cannot be resumed later.
 
@@ -138,13 +138,13 @@ Sessions started with `--no-session-save` are never persisted, so they cannot be
 ### CI: lint and fix
 
 ```bash
-ante --yolo -p "run cargo clippy and fix all warnings"
+cante --yolo -p "run cargo clippy and fix all warnings"
 ```
 
 ### Code generation
 
 ```bash
-ante --model claude-sonnet-5 --check \
+cante --model claude-sonnet-5 --check \
   -p "add comprehensive unit tests for src/core/session.rs"
 ```
 
@@ -152,12 +152,12 @@ ante --model claude-sonnet-5 --check \
 
 ```bash
 # Read-only analysis — no file writes or shell access
-ante --tools Read,Glob,Grep \
+cante --tools Read,Glob,Grep \
   -p "analyze the codebase architecture and summarize it"
 ```
 
 ### Pipe a diff for review
 
 ```bash
-git diff HEAD~1 | ante -p "review this diff for bugs and security issues"
+git diff HEAD~1 | cante -p "review this diff for bugs and security issues"
 ```

@@ -2,7 +2,7 @@ import React from 'react'
 import OriginalComponentTypes from '@theme-original/NavbarItem/ComponentTypes'
 import LocaleDropdownNavbarItem from '@theme/NavbarItem/LocaleDropdownNavbarItem'
 
-const STORAGE_KEY = 'ante_docs_preferred_locale'
+const STORAGE_KEY = 'cante_docs_preferred_locale'
 
 function ConditionalLocaleDropdownNavbarItem(props: React.ComponentProps<typeof LocaleDropdownNavbarItem>) {
   const handleClick = (e: React.MouseEvent<HTMLDivElement>) => {

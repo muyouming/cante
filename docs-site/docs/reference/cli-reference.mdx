@@ -1,48 +1,48 @@
 ---
 title: "CLI Reference"
-description: "Command and flag reference for the Ante command line interface"
+description: "Command and flag reference for the Cante command line interface"
 ---
 
-Ante can run as an interactive TUI, a one-shot headless command, a long-lived protocol server, or a channel gateway.
+Cante can run as an interactive TUI, a one-shot headless command, a long-lived protocol server, or a channel gateway.
 
 ```bash
-ante [OPTIONS] [COMMAND]
+cante [OPTIONS] [COMMAND]
 ```
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `ante` | Start the interactive TUI. If `-p` / `--prompt` is provided, run in headless mode instead. |
-| `ante auth` | Manage provider sign-in without starting an agent session. |
-| `ante serve` | Run a long-lived protocol server over stdio, a Unix socket, or WebSocket. |
-| `ante gateway` | Run the Slack / Discord channel gateway. |
-| `ante update` | Check for the latest Ante release and install it if available. |
-| `ante offline` | Manage the local inference engine used by offline mode. |
-| `ante rage` | Collect a redacted bug-report bundle (logs + environment) to share with the Ante team. |
-| `ante catalog` | Print the loaded provider catalog as JSON. |
-| `ante doctor` | Run a boot-time self-check and report startup phase timings. |
-| `ante <name>` | Run an external `ante-<name>` application. |
+| `cante` | Start the interactive TUI. If `-p` / `--prompt` is provided, run in headless mode instead. |
+| `cante auth` | Manage provider sign-in without starting an agent session. |
+| `cante serve` | Run a long-lived protocol server over stdio, a Unix socket, or WebSocket. |
+| `cante gateway` | Run the Slack / Discord channel gateway. |
+| `cante update` | Check for the latest Cante release and install it if available. |
+| `cante offline` | Manage the local inference engine used by offline mode. |
+| `cante rage` | Collect a redacted bug-report bundle (logs + environment) to share with the Cante team. |
+| `cante catalog` | Print the loaded provider catalog as JSON. |
+| `cante doctor` | Run a boot-time self-check and report startup phase timings. |
+| `cante <name>` | Run an external `cante-<name>` application. |
 
 ## Global option
 
-`--profile <NAME>` selects an existing `~/.ante/<name>.settings.json` as the settings file for the whole process, reads and writes alike. It can appear before or after any subcommand, and `ANTE_PROFILE` is equivalent. An unknown profile warns and falls back to `~/.ante/settings.json` rather than creating a new file. The bundled `bare` profile is seeded as a real file on first use and disables skills, MCP servers, session saving, auto-memory, and ambient UI features.
+`--profile <NAME>` selects an existing `~/.cante/<name>.settings.json` as the settings file for the whole process, reads and writes alike. It can appear before or after any subcommand, and `CANTE_PROFILE` is equivalent. An unknown profile warns and falls back to `~/.cante/settings.json` rather than creating a new file. The bundled `bare` profile is seeded as a real file on first use and disables skills, MCP servers, session saving, auto-memory, and ambient UI features.
 
 ```bash
-ante --profile work
-ante update --profile work
-ANTE_PROFILE=work ante doctor
+cante --profile work
+cante update --profile work
+CANTE_PROFILE=work cante doctor
 ```
 
-## `ante`
+## `cante`
 
 ```bash
-ante [OPTIONS]
+cante [OPTIONS]
 ```
 
-Without `--prompt`, Ante starts the interactive TUI. With `--prompt`, Ante runs one headless task and exits.
+Without `--prompt`, Cante starts the interactive TUI. With `--prompt`, Cante runs one headless task and exits.
 
-The TUI needs stdout attached to a terminal. Redirecting or piping it (`ante > log.txt`) is refused up front with a message pointing at [headless mode](/usage/headless), rather than failing later on a cursor-position query.
+The TUI needs stdout attached to a terminal. Redirecting or piping it (`cante > log.txt`) is refused up front with a message pointing at [headless mode](/usage/headless), rather than failing later on a cursor-position query.
 
 | Flag | Description |
 |---|---|
@@ -50,7 +50,7 @@ The TUI needs stdout attached to a terminal. Redirecting or piping it (`ante > l
 | `--provider <PROVIDER>` | Override the API provider by catalog provider name. |
 | `--effort <LEVEL>` | Override the model's [effort level](/usage/models-and-thinking#effort) for this run: `min`, `low`, `medium`, `high`, `xhigh`, or `max`. |
 | `--yolo` | Skip tool approval prompts for the session. |
-| `--fullscreen` | Start the TUI chat on the alternate screen with Ante-managed scrollback for this run. Does not persist the `render_mode` setting and is ignored in headless mode. |
+| `--fullscreen` | Start the TUI chat on the alternate screen with Cante-managed scrollback for this run. Does not persist the `render_mode` setting and is ignored in headless mode. |
 | `--permission-mode <MODE>` | Override the permission mode for this run: `strict`, `auto`, or `yolo`. Conflicts with `--yolo`. Headless runs honor the override and deny calls that would require an interactive approval. |
 | `--system-prompt <PROMPT>` | Replace the default system prompt entirely. Conflicts with `--system-prompt-file`. Persist a default with the `system_prompt` [setting](/configuration/preference). |
 | `--system-prompt-file <PATH>` | Read the replacement system prompt from a UTF-8 file. Conflicts with `--system-prompt`. |
@@ -73,28 +73,28 @@ The TUI needs stdout attached to a terminal. Redirecting or piping it (`ante > l
 | `--no-session-save` | Do not save the session transcript or resumable snapshot, overriding the `session_save` setting. Conflicts with `--resume`. |
 | `--offline-model <PATH>` | Path to a local GGUF model file for offline inference. |
 | `-h`, `--help` | Print command help. |
-| `-V`, `--version` | Print the Ante version. |
+| `-V`, `--version` | Print the Cante version. |
 
 The session flags in this table configure the default TUI/headless run. Supplying one alongside a subcommand is an error rather than a silently ignored option; the process-wide `--profile` flag above is the exception.
 
 ### Examples
 
 ```bash
-ante
-ante -p "explain what this project does"
-git diff | ante -p "review this diff for bugs"
-ante --provider openai --model gpt-5.6-sol -p "refactor the database module"
-ante --effort max -p "find the race condition in the scheduler"
-ante --profile work
-ante --profile bare -p "review this repository"
-ante --resume ses_01ARZ3NDEKTSV4RRFFQ69G5FAV -p "now add tests"
-ante -p "summarize this repo" --enable-auto-memory
+cante
+cante -p "explain what this project does"
+git diff | cante -p "review this diff for bugs"
+cante --provider openai --model gpt-5.6-sol -p "refactor the database module"
+cante --effort max -p "find the race condition in the scheduler"
+cante --profile work
+cante --profile bare -p "review this repository"
+cante --resume ses_01ARZ3NDEKTSV4RRFFQ69G5FAV -p "now add tests"
+cante -p "summarize this repo" --enable-auto-memory
 ```
 
-## `ante auth`
+## `cante auth`
 
 ```bash
-ante auth login [PROVIDER] [OPTIONS]
+cante auth login [PROVIDER] [OPTIONS]
 ```
 
 Sign in to an OAuth provider without starting a TUI session. Today the supported provider is `antix`, and it is the default when `[PROVIDER]` is omitted.
@@ -108,23 +108,23 @@ Sign in to an OAuth provider without starting a TUI session. Today the supported
 ### Examples
 
 ```bash
-ante auth login
-ante auth login antix --force
-ante auth login --no-browser
+cante auth login
+cante auth login antix --force
+cante auth login --no-browser
 ```
 
-## `ante serve`
+## `cante serve`
 
 ```bash
-ante serve [OPTIONS]
+cante serve [OPTIONS]
 ```
 
-Server mode exposes the Ante protocol over stdin/stdout by default, over a Unix domain socket when `--sock` is provided, or over WebSocket when `--ws` is provided.
+Server mode exposes the Cante protocol over stdin/stdout by default, over a Unix domain socket when `--sock` is provided, or over WebSocket when `--ws` is provided.
 
 | Flag | Description |
 |---|---|
 | `--stdio` | Serve the JSONL protocol over stdin/stdout. This is the default transport. The three transport flags are mutually exclusive. |
-| `--sock [PATH]` | Serve the protocol over a Unix domain socket. Defaults to `run/serve.sock` in the Ante home when no path is given. |
+| `--sock [PATH]` | Serve the protocol over a Unix domain socket. Defaults to `run/serve.sock` in the Cante home when no path is given. |
 | `--ws <ADDR>` | Serve the protocol over WebSocket on the given loopback socket address. |
 | `--offline-model <PATH>` | Load a local GGUF model at startup for offline mode. |
 | `-h`, `--help` | Print command help. |
@@ -140,7 +140,7 @@ The global `--profile` flag remains accepted and selects the settings file used 
 :::
 
 :::note
-One host owns a socket at a time. `--sock` takes an exclusive lock on a `.lock` file beside the socket, so a second `ante serve --sock` on the same path refuses to start and leaves the running host's socket untouched. A socket file left behind by a crashed host holds no lock and is replaced on the next start.
+One host owns a socket at a time. `--sock` takes an exclusive lock on a `.lock` file beside the socket, so a second `cante serve --sock` on the same path refuses to start and leaves the running host's socket untouched. A socket file left behind by a crashed host holds no lock and is replaced on the next start.
 
 Each client connection drives its own session. A client's `Shutdown` ends only that connection — the host keeps listening, and exits on `SIGINT` or `SIGTERM`.
 :::
@@ -148,23 +148,23 @@ Each client connection drives its own session. A client's `Shutdown` ends only t
 ### Examples
 
 ```bash
-ante serve
-ante serve --sock                        # ~/.ante/run/serve.sock
-ante serve --sock /tmp/ante.sock
-ante serve --ws 127.0.0.1:8080
+cante serve
+cante serve --sock                        # ~/.cante/run/serve.sock
+cante serve --sock /tmp/cante.sock
+cante serve --ws 127.0.0.1:8080
 ```
 
-## `ante gateway`
+## `cante gateway`
 
 ```bash
-ante gateway [OPTIONS]
+cante gateway [OPTIONS]
 ```
 
-Gateway mode connects Ante to Slack, Discord, or both using the channels config file.
+Gateway mode connects Cante to Slack, Discord, or both using the channels config file.
 
 | Flag | Default | Description |
 |---|---|---|
-| `--config <PATH>` | `~/.ante/channels.json` | Path to the channels configuration file. |
+| `--config <PATH>` | `~/.cante/channels.json` | Path to the channels configuration file. |
 | `--model <MODEL>` | `local` | Model to use for agent sessions. |
 | `--provider <PROVIDER>` | `local` | Provider to use for agent sessions. |
 | `--output-format <FORMAT>` | `minimal` | Gateway stdout format: `json`, `human`, or `minimal`. |
@@ -174,18 +174,18 @@ Gateway mode connects Ante to Slack, Discord, or both using the channels config 
 ### Examples
 
 ```bash
-ante gateway
-ante gateway --provider anthropic --model claude-sonnet-5
-ante gateway --config ./channels.json --output-format human
+cante gateway
+cante gateway --provider anthropic --model claude-sonnet-5
+cante gateway --config ./channels.json --output-format human
 ```
 
-## `ante update`
+## `cante update`
 
 ```bash
-ante update [OPTIONS] [CHANNEL]
+cante update [OPTIONS] [CHANNEL]
 ```
 
-The update command checks for a newer Ante release and installs it when one is available. Without arguments, it follows the channel in the active settings file (defaults to `stable`); select a named settings file with the global `--profile` flag. Passing a channel — either as a positional argument or via `--channel` — overrides the tracked channel for this run only. See [Update & Channels](/start/update) for the full list of channels.
+The update command checks for a newer Cante release and installs it when one is available. Without arguments, it follows the channel in the active settings file (defaults to `stable`); select a named settings file with the global `--profile` flag. Passing a channel — either as a positional argument or via `--channel` — overrides the tracked channel for this run only. See [Update & Channels](/start/update) for the full list of channels.
 
 | Argument | Description |
 |---|---|
@@ -200,60 +200,60 @@ The update command checks for a newer Ante release and installs it when one is a
 ### Examples
 
 ```bash
-ante update
-ante update nightly
-ante update --channel stable
-ante update --version v0.preview.98
-ante --profile work update
+cante update
+cante update nightly
+cante update --channel stable
+cante update --version v0.preview.98
+cante --profile work update
 ```
 
-## `ante offline`
+## `cante offline`
 
 ```bash
-ante offline <COMMAND>
+cante offline <COMMAND>
 ```
 
 Manage the local inference engine used by [offline mode](/local/offline), without starting a session.
 
 | Subcommand | Description |
 |---|---|
-| `install` | Download and install Ante's pinned llama.cpp build. |
+| `install` | Download and install Cante's pinned llama.cpp build. |
 
 `install` converges the engine on the pinned build: it is a no-op when the pin is already installed, and replaces a different (or unrecorded) build otherwise, printing progress as it goes. It installs the same pinned, checksum-verified build as the TUI's `/offline-mode` dialog; running an offline model on a machine without the engine fails fast and points here.
 
 ### Examples
 
 ```bash
-ante offline install
+cante offline install
 ```
 
-## `ante rage`
+## `cante rage`
 
 ```bash
-ante rage [OPTIONS]
+cante rage [OPTIONS]
 ```
 
-When something goes wrong, `ante rage` gathers the context the Ante team needs to investigate into a single shareable archive that you can attach to a GitHub issue. By default it writes `./ante-rage-<timestamp>.tar.gz` and prints a short summary. Nothing is uploaded — the bundle stays local until you share it.
+When something goes wrong, `cante rage` gathers the context the Cante team needs to investigate into a single shareable archive that you can attach to a GitHub issue. By default it writes `./cante-rage-<timestamp>.tar.gz` and prints a short summary. Nothing is uploaded — the bundle stays local until you share it.
 
-Secrets are redacted before anything is written. API keys and OAuth tokens are reported only as present/absent (never their values), credentials embedded in URLs and known token shapes are masked, conversation transcripts and system prompts are excluded, and `~/.ante/auth/*.json` and `channels.json` are never included.
+Secrets are redacted before anything is written. API keys and OAuth tokens are reported only as present/absent (never their values), credentials embedded in URLs and known token shapes are masked, conversation transcripts and system prompts are excluded, and `~/.cante/auth/*.json` and `channels.json` are never included.
 
 The archive contains:
 
 | File | Contents |
 |---|---|
-| `report.md` | Ante version, OS/architecture, shell, git branch, the resolved model/provider, a provider authentication table (present/absent), the [telemetry installation id](/configuration/preference#identity) if one exists, and a redaction notice. |
-| `env.txt` | Ante-relevant environment variables. Safe values are shown verbatim; known secrets appear as `<SET>` / `<UNSET>` only. |
-| `settings.redacted.json` | `~/.ante/settings.json` with secrets removed (MCP server credentials and custom `system_prompt` / `append_system_prompt` text are stripped). |
-| `catalog.redacted.json` | `~/.ante/catalog.json` with secrets removed, included only when a custom catalog exists. |
+| `report.md` | Cante version, OS/architecture, shell, git branch, the resolved model/provider, a provider authentication table (present/absent), the [telemetry installation id](/configuration/preference#identity) if one exists, and a redaction notice. |
+| `env.txt` | Cante-relevant environment variables. Safe values are shown verbatim; known secrets appear as `<SET>` / `<UNSET>` only. |
+| `settings.redacted.json` | `~/.cante/settings.json` with secrets removed (MCP server credentials and custom `system_prompt` / `append_system_prompt` text are stripped). |
+| `catalog.redacted.json` | `~/.cante/catalog.json` with secrets removed, included only when a custom catalog exists. |
 | `logs/` | Recent application and crash logs, filtered and scrubbed; each copy is prefixed with its date (`<date>-<name>`). `DEBUG`/`TRACE` lines are dropped so request bodies never enter the bundle. |
 
-When a [project settings](/configuration/preference#project-settings) file applies to the directory you collect from, its `.ante/settings.json` is included too, redacted the same way as the user file — so the bundle shows the settings that were actually in effect.
+When a [project settings](/configuration/preference#project-settings) file applies to the directory you collect from, its `.cante/settings.json` is included too, redacted the same way as the user file — so the bundle shows the settings that were actually in effect.
 
 By default the newest logs are collected, up to 10 files or 10 MB (crash logs are always prioritized). Use `--since` to collect everything within a time window instead.
 
 | Flag | Description |
 |---|---|
-| `--output <PATH>` | Write the bundle to this path instead of `./ante-rage-<timestamp>.tar.gz`. |
+| `--output <PATH>` | Write the bundle to this path instead of `./cante-rage-<timestamp>.tar.gz`. |
 | `--no-compress` | Leave the staging folder uncompressed instead of producing a `.tar.gz`. |
 | `--verbose-logs` | Also include `DEBUG`/`TRACE` log lines. Conversation transcripts and system prompts are still excluded. |
 | `--since <DURATION>` | Collect every log modified within the window, ignoring the file-count and size limits. Accepts `<n>d`, `<n>h`, `<n>m`, or a bare number of days (for example `7d`, `48h`, `90m`, `2`). |
@@ -262,56 +262,56 @@ By default the newest logs are collected, up to 10 files or 10 MB (crash logs ar
 ### Examples
 
 ```bash
-ante rage
-ante rage --output ./ante-bug.tar.gz
-ante rage --since 7d
-ante rage --no-compress
+cante rage
+cante rage --output ./cante-bug.tar.gz
+cante rage --since 7d
+cante rage --no-compress
 ```
 
-## `ante catalog`
+## `cante catalog`
 
 ```bash
-ante catalog
+cante catalog
 ```
 
-Print the merged provider catalog (built-in presets plus `~/.ante/catalog.json`) to stdout as a JSON document with a single `providers` array, in catalog order. Each provider embeds its preferred models with user model overrides applied, so the output is a published view for consumers; it is not the config-file schema and does not round-trip into `~/.ante/catalog.json`. Warnings for skipped catalog entries go to stderr, so stdout stays a clean JSON document that pipes into `jq`. See the [Catalog Reference](/reference/catalog-reference) for the config-file schema.
+Print the merged provider catalog (built-in presets plus `~/.cante/catalog.json`) to stdout as a JSON document with a single `providers` array, in catalog order. Each provider embeds its preferred models with user model overrides applied, so the output is a published view for consumers; it is not the config-file schema and does not round-trip into `~/.cante/catalog.json`. Warnings for skipped catalog entries go to stderr, so stdout stays a clean JSON document that pipes into `jq`. See the [Catalog Reference](/reference/catalog-reference) for the config-file schema.
 
 ### Examples
 
 ```bash
-ante catalog
-ante catalog | jq '.providers[].id'
+cante catalog
+cante catalog | jq '.providers[].id'
 ```
 
-## `ante doctor`
+## `cante doctor`
 
 ```bash
-ante doctor
+cante doctor
 ```
 
-Boot the same runtime a real launch uses — load the merged catalog, start a daemon session, and render the first TUI frame — then print a readiness report with per-phase timings. Use it to confirm Ante is installed and configured correctly, or as a CI smoke test ("does Ante boot, does the first frame render").
+Boot the same runtime a real launch uses — load the merged catalog, start a daemon session, and render the first TUI frame — then print a readiness report with per-phase timings. Use it to confirm Cante is installed and configured correctly, or as a CI smoke test ("does Cante boot, does the first frame render").
 
-It needs no TTY and no API key: MCP warm-up is skipped and the session reaches readiness from the catalog alone. The report lists five checks — `home` (the Ante home and input history are writable), `project` (the [project settings](/configuration/preference#project-settings) file that applies to this directory, or that none was found), `catalog` (provider/model counts), `session` (the resolved `provider/model`), and `first frame` (the headless render) — followed by a total. Warnings (such as no authenticated provider, a skipped catalog entry, a `settings.json` parse notice, or a key dropped from a project settings file) are listed below the table. `doctor` exits non-zero if any hard check fails, including an unwritable Ante home, so it works in scripts.
+It needs no TTY and no API key: MCP warm-up is skipped and the session reaches readiness from the catalog alone. The report lists five checks — `home` (the Cante home and input history are writable), `project` (the [project settings](/configuration/preference#project-settings) file that applies to this directory, or that none was found), `catalog` (provider/model counts), `session` (the resolved `provider/model`), and `first frame` (the headless render) — followed by a total. Warnings (such as no authenticated provider, a skipped catalog entry, a `settings.json` parse notice, or a key dropped from a project settings file) are listed below the table. `doctor` exits non-zero if any hard check fails, including an unwritable Cante home, so it works in scripts.
 
 ### Examples
 
 ```bash
-ante doctor
-ante doctor || echo "ante is not healthy"
+cante doctor
+cante doctor || echo "cante is not healthy"
 ```
 
 ## External applications
 
-An unrecognized command name dispatches to an executable named `ante-<name>`, following the same convention as `git` subcommands:
+An unrecognized command name dispatches to an executable named `cante-<name>`, following the same convention as `git` subcommands:
 
 ```bash
-# Runs ~/.ante/bin/ante-deploy or ante-deploy from PATH
-ante deploy --target production
+# Runs ~/.cante/bin/cante-deploy or cante-deploy from PATH
+cante deploy --target production
 ```
 
-Ante searches `~/.ante/bin` before `PATH`, passes remaining arguments through unchanged, and mirrors the application's exit status. Built-in subcommands always win, so an external executable cannot shadow `ante update` or another built-in. If no executable is found, Ante reports exit status `127` and still suggests a similarly named built-in for likely typos.
+Cante searches `~/.cante/bin` before `PATH`, passes remaining arguments through unchanged, and mirrors the application's exit status. Built-in subcommands always win, so an external executable cannot shadow `cante update` or another built-in. If no executable is found, Cante reports exit status `127` and still suggests a similarly named built-in for likely typos.
 
-External applications receive `ANTE` (the absolute path to the Ante binary), `ANTE_APP` (the resolved app name), and the selected `ANTE_PROFILE` when one is active. Like help and usage errors, dispatch occurs before Ante starts its runtime, logging, telemetry, or crash hook.
+External applications receive `CANTE` (the absolute path to the Cante binary), `CANTE_APP` (the resolved app name), and the selected `CANTE_PROFILE` when one is active. Like help and usage errors, dispatch occurs before Cante starts its runtime, logging, telemetry, or crash hook.
 
 ## Output Formats
 
