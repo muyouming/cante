@@ -36,6 +36,19 @@
     ],
     "category": "DeveloperTool",
     "shortDescription": "Cante desktop client",
-    "longDescription": "A graphical client for the Cante coding agent: session rail, streaming transcript, tool cards and approvals."
+    "longDescription": "A graphical client for the Cante coding agent: session rail, streaming transcript, tool cards and approvals.",
+    "copyright": "Copyright © 2026 Antigma Labs",
+    "licenseFile": "../../LICENSE",
+    "macOS": {
+      "minimumSystemVersion": "11.0"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }
