@@ -68,6 +68,18 @@ cargo test --manifest-path src-tauri/Cargo.toml   # Rust shell
 
 [`gui/fixtures/fake-cante.ts`](https://github.com/muyouming/cante/tree/main/gui/fixtures) is a scripted `cante serve` double: point `CANTE_BIN` at it to exercise the UI without a provider or an API key.
 
+### Bundles
+
+```bash
+cd gui
+bun run build          # .app + .dmg (macOS) or .msi + NSIS .exe (Windows)
+bun run build:app      # macOS: .app only
+```
+
+The bundles are unsigned — Gatekeeper warns on first launch and SmartScreen asks
+for confirmation. `.github/workflows/gui-release.yml` builds both platforms and
+attaches the images to a release (push a `gui-v*` tag, or run it manually).
+
 ## What it drives
 
 Everything the GUI does becomes one of the protocol operations below. Each is a Tauri `invoke` that returns `ok` or a human-readable error string.
