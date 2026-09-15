@@ -1,6 +1,6 @@
 //! Effort ladder resolution shared by provider profiles.
 
-use ante_protocol_shape::Effort;
+use cante_protocol_shape::Effort;
 
 /// Round `requested` down to the nearest rung's setting; below the lowest
 /// rung, the lowest applies. `rungs` must be non-empty and sorted ascending by level.

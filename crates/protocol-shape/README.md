@@ -1,7 +1,7 @@
-# ante-protocol-shape
+# cante-protocol-shape
 
-The public wire messages and shared protocol types used by Ante clients and
-the Ante daemon.
+The public wire messages and shared protocol types used by Cante clients and
+the Cante daemon.
 
 The crate contains serializable operations, events, identifiers, model
 descriptors, tool-call records, and usage accounting. These types define an
@@ -11,7 +11,7 @@ versions when updating clients.
 ## Example
 
 ```rust
-use ante_protocol_shape::{Id, Op, OpMsg};
+use cante_protocol_shape::{Id, Op, OpMsg};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let message = OpMsg { op: Op::Interrupt, id: Id::op() };

@@ -1,5 +1,5 @@
 use crate::effort;
-use ante_protocol_shape::Effort;
+use cante_protocol_shape::Effort;
 use serde::Serialize;
 use serde_json::{Map, Value};
 

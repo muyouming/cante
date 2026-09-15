@@ -22,7 +22,7 @@ history and tool state until `shutdown` is called.
 ## Usage
 
 ```no_run
-use ante_sdk::claude::{Claude, ClaudeMessage, ClaudeOptions};
+use cante_sdk::claude::{Claude, ClaudeMessage, ClaudeOptions};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -49,8 +49,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 The `claude_code` example supports one-shot prompts and an interactive REPL:
 
 ```bash
-cargo run -p ante-sdk --example claude_code -- "What is 2 + 2?"
-cargo run -p ante-sdk --example claude_code -- --model claude-sonnet-4-5
+cargo run -p cante-sdk --example claude_code -- "What is 2 + 2?"
+cargo run -p cante-sdk --example claude_code -- --model claude-sonnet-4-5
 ```
 
 ## Requirements and limitations

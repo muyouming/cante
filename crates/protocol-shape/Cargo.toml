@@ -1,11 +1,11 @@
 [package]
-name = "ante-protocol-shape"
+name = "cante-protocol-shape"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Protocol schema and wire message shapes for Ante"
+description = "Protocol schema and wire message shapes for Cante"
 license = "Apache-2.0"
-repository = "https://github.com/AntigmaLabs/ante"
+repository = "https://github.com/AntigmaLabs/cante"
 readme = "README.md"
 
 [dependencies]

@@ -1,6 +1,6 @@
-# ante-exec
+# cante-exec
 
-Standalone asynchronous process execution utilities used by Ante.
+Standalone asynchronous process execution utilities used by Cante.
 
 The crate provides bounded output collection, timeouts, interactive stdin,
 background process polling, and Unix process-group cleanup.
@@ -10,7 +10,7 @@ background process polling, and Unix process-group cleanup.
 ```rust
 use std::time::Duration;
 
-use ante_exec::{CommandOptions, run_with_timeout};
+use cante_exec::{CommandOptions, run_with_timeout};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,5 +26,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Ante targets macOS and Linux. Process-group behavior is implemented on Unix;
+Cante targets macOS and Linux. Process-group behavior is implemented on Unix;
 non-Unix fallbacks do not provide equivalent lifecycle guarantees.

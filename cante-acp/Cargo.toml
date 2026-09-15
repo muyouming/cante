@@ -1,0 +1,11 @@
+[package]
+name = "cante-acp"
+version = "0.1.0"
+edition = "2024"
+description = "Agent Client Protocol support for Cante"
+license = "Apache-2.0"
+documentation = "https://docs.rs/cante-acp"
+homepage = "https://antigma.ai"
+repository = "https://github.com/AntigmaLabs/cante"
+
+[dependencies]
