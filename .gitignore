@@ -33,6 +33,3 @@ target
 # Python bytecode (cante-harbor agent adapter)
 __pycache__/
 *.pyc
-
-# PocketJS checkout materialized by examples/gui/scripts/pocket.sh
-/.pocketjs/
