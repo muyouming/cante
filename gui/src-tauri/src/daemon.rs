@@ -581,26 +581,66 @@ fn stderr_loop(stderr: ChildStderr, emitter: Arc<dyn Emitter>) {
     }
 }
 
-fn finalize_exit(inner: &Arc<Mutex<Inner>>, emitter: &Arc<dyn Emitter>) {
-    let (code, state) = {
-        let mut guard = inner.lock().unwrap();
-        let code = if let Some(mut proc) = guard.proc.take() {
-            drop(proc.stdin.take());
-            match proc.child.wait() {
-                Ok(status) => status.code(),
-                Err(_) => None,
+/// How long a daemon that closed its pipes may keep running before it is killed.
+const EXIT_GRACE: Duration = Duration::from_secs(2);
+
+/// Wait for a child that already lost its pipes, killing it if it lingers.
+///
+/// Called from the stdout reader on EOF, never while the daemon mutex is held:
+/// a process that closes stdout but stays alive is not unusual (a wrapper, a
+/// wedged daemon), and blocking on it would wedge every later command.
+fn reap(child: &mut Child) -> Option<i32> {
+    let deadline = Instant::now() + EXIT_GRACE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.code(),
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
             }
-        } else {
-            guard.exit_code
-        };
-        guard.exit_code = code;
+        }
+    }
+}
+
+fn finalize_exit(inner: &Arc<Mutex<Inner>>, emitter: &Arc<dyn Emitter>) {
+    let (taken, code, state) = {
+        let mut guard = inner.lock().unwrap();
+        let taken = guard.proc.take();
+        let code = if taken.is_none() { guard.exit_code } else { None };
         guard.state.status = "offline".to_string();
         guard.state.session = None;
         guard.state.pending_approval = None;
-        (code, Daemon::state_payload(&guard))
+        (taken, code, Daemon::state_payload(&guard))
     };
     emitter.state(&state);
-    emitter.exit(code);
+
+    let Some(mut proc) = taken else {
+        // Already finalized (for example by `shutdown`): report the last code.
+        emitter.exit(code);
+        return;
+    };
+
+    // Closing stdin is how the daemon converges when it ignores `Shutdown`.
+    drop(proc.stdin.take());
+    let reaper_inner = Arc::clone(inner);
+    let reaper_emitter = Arc::clone(emitter);
+    let fallback_emitter = Arc::clone(emitter);
+    let spawned = thread::Builder::new()
+        .name("cante-reap".to_string())
+        .spawn(move || {
+            let code = reap(&mut proc.child);
+            if let Ok(mut guard) = reaper_inner.lock() {
+                guard.exit_code = code;
+            }
+            reaper_emitter.exit(code);
+        });
+    if spawned.is_err() {
+        // No thread available: report the exit rather than blocking this reader
+        // on a process that may never die. The next command spawns a fresh one.
+        fallback_emitter.exit(None);
+    }
 }
 
 // ---------------------------------------------------------------------------
