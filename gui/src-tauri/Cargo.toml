@@ -1,0 +1,19 @@
+[package]
+name = "cante-gui"
+version = "0.1.0"
+edition = "2021"
+description = "Cante desktop client"
+license = "Apache-2.0"
+# The window/plugin/bundle sections are shared; workstream A may add entries to
+# [dependencies] but must not change [package], [lib] or [build-dependencies].
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[lib]
+name = "cante_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]

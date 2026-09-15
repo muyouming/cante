@@ -1,0 +1,58 @@
+name: GUI
+
+on:
+  pull_request:
+    paths:
+      - 'gui/**'
+      - '.github/workflows/gui.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'gui/**'
+      - '.github/workflows/gui.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: GUI gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+
+      # Tauri 2 renders in WebKitGTK on Linux and the webkit2gtk crate links
+      # against its C libraries, so `cargo test` cannot even compile the shell
+      # without Tauri's documented Linux prerequisites.
+      - name: Install Tauri Linux prerequisites (WebKitGTK dev packages)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.17.0
+        with:
+          toolchain: stable
+          cache-workspaces: gui/src-tauri -> target
+
+      # One command, the same one a developer runs: `gui/scripts/e2e.sh` installs
+      # deps, runs the frontend tests and typecheck, builds the web assets (which
+      # `tauri::generate_context!` reads at compile time), runs the fixture tests,
+      # and finally `cargo test`. Driving CI through the script is deliberate —
+      # a hand-written step list drifts from the local gate, which is exactly how
+      # a missing `vite build` before `cargo test` slipped through once.
+      - name: Run the app's e2e gate
+        run: bash gui/scripts/e2e.sh

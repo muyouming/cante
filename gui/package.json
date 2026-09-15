@@ -1,0 +1,31 @@
+{
+  "name": "cante-gui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Cante desktop client \u2014 Tauri shell around the `cante serve` protocol",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "dev:web": "vite",
+    "build:web": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src",
+    "test:fixture": "bun test fixtures",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "e2e": "bash scripts/e2e.sh"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "solid-js": "^1.9.15"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4",
+    "@tauri-apps/cli": "^2",
+    "@types/bun": "^1.4.2",
+    "tailwindcss": "^4",
+    "typescript": "^5.7.2",
+    "vite": "^7",
+    "vite-plugin-solid": "^2.11.0"
+  }
+}

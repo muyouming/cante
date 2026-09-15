@@ -1,0 +1,105 @@
+---
+title: Desktop GUI
+description: "Build and run the Tauri desktop client that drives cante serve"
+---
+
+The Cante desktop GUI is a graphical client for [`cante serve`](/usage/serve). It does not reimplement the agent: it spawns a `cante` binary as a child process, speaks the same [JSONL protocol](/reference/protocol-reference) as every other client, and renders the event stream as a window-shaped conversation.
+
+The client lives in [`gui/`](https://github.com/muyouming/cante/tree/main/gui) in this repository. It is a preview and is built from source — the downloadable release is the `cante` binary only — so expect rough edges alongside the rest of the beta.
+
+## Stack
+
+| Layer | Choice |
+| --- | --- |
+| Shell | Tauri 2 (Rust) |
+| Frontend | Vite + SolidJS + TypeScript |
+| Styles | Tailwind CSS v4 (`@tailwindcss/vite`) |
+| Tests | `bun test` for the pure TypeScript modules, `cargo test` for the Rust shell |
+
+The Rust side is a thin bridge. It spawns the daemon, frames the protocol over stdio, and forwards each event **verbatim** to the webview — it never re-serializes a typed event, so unknown fields and future variants survive the trip. Interpreting events into rows, transcript lines, and commands is pure TypeScript, which is why it unit-tests without a window.
+
+## Running it
+
+The client needs [Bun](https://bun.sh) and a `cante` binary. From the repository root:
+
+```bash
+cd gui
+bun install
+bun run dev
+```
+
+`bun run dev` launches `tauri dev`: Vite serves the frontend on port 1420 and Tauri opens the native window pointed at it. The first run compiles the Rust shell. On Linux that build needs Tauri's [WebKitGTK prerequisites](https://tauri.app/start/prerequisites/) — the CI workflow installs them explicitly for the same reason.
+
+### Pointing at a binary
+
+The shell resolves `cante` on `PATH` unless `CANTE_BIN` overrides it:
+
+```bash
+CANTE_BIN=/path/to/cante bun run dev
+```
+
+The daemon starts **lazily**, on the first command that needs it, so the window opens even when no binary is found. The header and status bar then show the bridge as `offline`, and `health` reports the path it tried.
+
+To produce a local bundle:
+
+```bash
+bun run build
+```
+
+`bun run build` runs `tauri build`, which needs the platform's bundling tools (and, on macOS, code-signing setup). It is a local step only — CI stops at tests.
+
+### Tests
+
+```bash
+cd gui
+bun test src                              # frontend unit tests
+bunx tsc --noEmit                         # frontend typecheck
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust shell
+```
+
+[`gui/fixtures/fake-cante.ts`](https://github.com/muyouming/cante/tree/main/gui/fixtures) is a scripted `cante serve` double: point `CANTE_BIN` at it to exercise the UI without a provider or an API key.
+
+## What it drives
+
+Everything the GUI does becomes one of the protocol operations below. Each is a Tauri `invoke` that returns `ok` or a human-readable error string.
+
+| Command | What it does in the UI |
+| --- | --- |
+| `health` | Resolves the `cante` binary, reports the working directory, whether the daemon is up, and the current status |
+| `events_since` | Polls the event ring from a cursor; returns the events, the new cursor, and whether a cursor fell off the front (`truncated`) |
+| `start_session` | Opens a session with an optional model, provider, effort, permission mode, working directory, or a session to resume |
+| `update_session` | Changes the model, permission mode, or title of the running session |
+| `send_input` | Sends a prompt, a mid-turn steer, or a shell-style line |
+| `approve` | Answers a pending approval with per-tool decisions |
+| `interrupt` | Stops the running turn |
+| `compact` | Compacts the conversation, optionally with instructions |
+| `context_report` | Requests a context/token report |
+| `slash` | Runs a slash command by name with its arguments |
+| `goal` | Sets, clears, or shows the session's goal condition |
+| `catalog` | Fetches the provider and model catalog the model picker is built from |
+| `set_cwd` | Chooses the directory the daemon is spawned in |
+| `shutdown` | Stops the daemon and closes the connection |
+
+The shell feeds the window four events: `cante://event` (one protocol event), `cante://state` (status, session, pending approval), `cante://log` (a stdout/stderr/app line), and `cante://exit` (the daemon died). Status moves through `idle`, `thinking`, `streaming`, `awaiting`, `error`, and `offline`; an approval request parks the turn in `awaiting` until the approval panel answers it.
+
+## The window
+
+- **Header** — the product mark, the session title or working directory, chips for model / provider / effort / permissions, and a `MENU` chip that opens the command palette.
+- **Session rail** — session id, model, provider, effort, permissions, `Commands…`, `Clear view`, `Compact history`, `Context report`, the working directory, and daemon status. Hidden below 900 px wide.
+- **Transcript** — a virtualized list of 20 px rows: user, agent, thinking, tool, info, error, and turn entries. Diffs are coloured, fenced code is monospaced, and tool output is capped. Click a row for the full entry.
+- **Composer** — multiline input with Send and Stop. `Enter` sends, `Shift+Enter` inserts a newline, a leading `/` opens the command palette, and `↑`/`↓` walk prompt history.
+- **Approval panel** — per-call `Once`, `Session`, `Always`, or `Deny`.
+- **Model picker** — built from the catalog, with the current model marked.
+- **Status bar** — turn status, tokens in and out, context usage, step count, and the last notice.
+
+Keyboard: `Cmd/Ctrl+K` opens the command palette, `Cmd/Ctrl+M` the model picker, `Esc` closes an overlay, and `Cmd/Ctrl+.` interrupts the turn.
+
+## Limits
+
+- **Preview, built from source.** No GUI installer is published; run it from a checkout as above.
+- **It needs its own `cante`.** The window and the daemon are separate processes, and the shell only spawns `cante serve` over stdio. Unix-socket and WebSocket hosts are not connectable from the GUI.
+- **One connection per window.** Closing the window drops the child daemon.
+- **The event ring is bounded.** The bridge keeps the last 4096 events with a monotonic cursor; a client that falls too far behind is told `truncated` and reloads the transcript from state.
+- **Approvals need a human.** A turn paused for approval stays paused until the panel — or some other client — answers it.
+- **No fabricated events.** The bridge never synthesizes protocol messages, so the window shows exactly what the daemon emitted.
+- **Platform.** Same macOS and Linux support as Cante itself; on Windows, use WSL.

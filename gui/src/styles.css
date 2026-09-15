@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+/* The shell paints its own chrome; these are only the base reset + a dark,
+   unobtrusive scrollbar so the virtualized transcript looks native in the
+   Tauri webview. */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background: #0b0f14;
+  color: #e2e8f0;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+textarea,
+input {
+  font: inherit;
+}
+
+::selection {
+  background: #0c4a6e;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1e293b;
+  border: 2px solid #0b0f14;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #334155;
+}
