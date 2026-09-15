@@ -329,6 +329,34 @@ describe("the command surface", () => {
     dispose();
   });
 
+  test("a long session stays bounded and cheap", async () => {
+    const { store, dispose } = await setup();
+    const started = performance.now();
+
+    // 4000 deltas in one turn: the open row grows, the transcript does not.
+    for (let i = 0; i < 4000; i++) emit("event", event("MessageDelta", `chunk ${i} `));
+    expect(store.rows()).toHaveLength(1);
+    expect(store.rows()[0]!.text.length).toBeLessThanOrEqual(8_000);
+
+    // 300 tool calls: rows are capped, so the oldest entries fall off the top.
+    for (let i = 0; i < 300; i++) {
+      emit("event", event("ToolStart", { id: `t${i}`, name: "Bash", args: { command: `echo ${i}` } }));
+      emit("event", event("ToolEnd", { tool_use_id: `t${i}`, status: "Completed", result_json: { content: `out ${i}` } }));
+    }
+    expect(store.rows().length).toBeLessThanOrEqual(400);
+    expect(store.rows().every((row) => row.text.length <= 8_000)).toBe(true);
+
+    // 2000 info rows: still capped.
+    for (let i = 0; i < 2000; i++) emit("event", event("Info", `line ${i}`));
+    expect(store.rows().length).toBeLessThanOrEqual(400);
+    expect(store.rows()[store.rows().length - 1]!.text).toBe("line 1999");
+
+    // Generous ceiling: this is a guard against a quadratic regression, not a
+    // benchmark (locally the whole loop is a few milliseconds).
+    expect(performance.now() - started).toBeLessThan(2_000);
+    dispose();
+  });
+
   test("catalog loads into the picker's model list", async () => {
     const { store, dispose } = await setup();
     await store.loadCatalog();
