@@ -16,43 +16,85 @@ use serde_json::{json, Value};
 // JSONL framing
 // ---------------------------------------------------------------------------
 
+/// Largest unterminated line the splitter will hold. A JSON event from the
+/// daemon is tiny; anything past this is a protocol violation (or a broken
+/// child), and buffering it forever would let the bridge grow without bound.
+/// The oversized line is dropped up to its next newline, then framing resumes.
+pub const MAX_LINE_BYTES: usize = 16 * 1024 * 1024;
+
 /// Incremental line splitter.
 ///
 /// Chunk boundaries land anywhere — including inside a multi-byte UTF-8
 /// sequence — so the pending buffer is kept as bytes and only decoded once a
-/// whole line is available.
+/// whole line is available. `scanned` remembers how much of `pending` has
+/// already been searched for a newline, so feeding a long line one byte at a
+/// time stays linear instead of rescanning the whole buffer on every push.
 #[derive(Default)]
 pub struct LineSplitter {
     pending: Vec<u8>,
+    /// Bytes of `pending` already known to contain no `\n`.
+    scanned: usize,
+    /// Set while an oversized line is being skipped up to its next newline.
+    discarding: bool,
 }
 
 impl LineSplitter {
     /// Feed a chunk; return every complete, non-blank, trimmed line it produced.
     pub fn push(&mut self, chunk: &[u8]) -> Vec<String> {
+        // While dropping an oversized line, consume bytes up to (and including)
+        // the newline that ends it, without buffering them.
+        if self.discarding {
+            return match chunk.iter().position(|&b| b == b'\n') {
+                Some(pos) => {
+                    self.discarding = false;
+                    self.push(&chunk[pos + 1..])
+                }
+                None => Vec::new(),
+            };
+        }
         self.pending.extend_from_slice(chunk);
         let mut out = Vec::new();
         let mut start = 0usize;
-        for i in 0..self.pending.len() {
+        let mut i = self.scanned;
+        while i < self.pending.len() {
             if self.pending[i] == b'\n' {
                 if let Some(line) = decode_line(&self.pending[start..i]) {
                     out.push(line);
                 }
                 start = i + 1;
             }
+            i += 1;
         }
         if start > 0 {
             self.pending.drain(..start);
         }
+        // `pending` now holds only the unterminated tail. If a single line has
+        // grown past the cap, drop it rather than buffer without bound.
+        if self.pending.len() > MAX_LINE_BYTES {
+            self.pending.clear();
+            self.scanned = 0;
+            self.discarding = true;
+            return out;
+        }
+        self.scanned = self.pending.len();
         out
+    }
+
+    /// Bytes currently buffered for the unterminated line.
+    pub fn buffered(&self) -> usize {
+        self.pending.len()
     }
 
     /// Flush a trailing line that arrived without a terminating newline.
     pub fn finish(&mut self) -> Option<String> {
-        if self.pending.is_empty() {
-            return None;
-        }
-        let line = decode_line(&self.pending);
+        let line = if self.discarding || self.pending.is_empty() {
+            None
+        } else {
+            decode_line(&self.pending)
+        };
         self.pending.clear();
+        self.scanned = 0;
+        self.discarding = false;
         line
     }
 }
@@ -238,7 +280,14 @@ pub fn reduce_state(state: &mut CanteState, event: &Value) {
         }
         "TurnPause" => {
             if let Some(payload) = event_payload(event, "TurnPause") {
-                if let Some(approval) = payload.get("reason").and_then(|reason| reason.get("Approval")) {
+                // A `reason.Approval` that is present but not an object (null,
+                // a string, …) carries no approval payload, so it must not
+                // open an empty approval prompt.
+                if let Some(approval) = payload
+                    .get("reason")
+                    .and_then(|reason| reason.get("Approval"))
+                    .filter(|approval| approval.is_object())
+                {
                     state.status = "awaiting".to_string();
                     state.pending_approval = Some(pending_approval(payload, approval));
                 }
