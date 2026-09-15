@@ -11,6 +11,7 @@ import type { ReviewDecision } from "./protocol.ts";
 import type { Row } from "./rows.ts";
 import { createStore } from "./store.ts";
 import { isBridgeAvailable } from "./tauri.ts";
+import type { VirtualListApi } from "./components/VirtualList.tsx";
 import ApprovalPanel from "./components/ApprovalPanel.tsx";
 import CommandPalette from "./components/CommandPalette.tsx";
 import Composer from "./components/Composer.tsx";
@@ -28,6 +29,10 @@ export default function App(): JSX.Element {
   const store = createStore();
   const [width, setWidth] = createSignal(typeof window === "undefined" ? 1180 : window.innerWidth);
   const [detail, setDetail] = createSignal<Row | null>(null);
+  // Whether the transcript is following the newest line; the status bar offers
+  // a jump back when it is not.
+  const [following, setFollowing] = createSignal(true);
+  let transcript: VirtualListApi | undefined;
 
   const compact = (): boolean => width() < COMPACT_WIDTH;
   // The webview is the desktop app when the Tauri host is present; a plain
@@ -101,6 +106,10 @@ export default function App(): JSX.Element {
             connection={store.connection()}
             hasSession={store.session() !== null}
             bridge={bridge}
+            onPinnedChange={setFollowing}
+            apiRef={(api) => {
+              transcript = api;
+            }}
           />
           <Composer
             store={store}
@@ -109,7 +118,11 @@ export default function App(): JSX.Element {
         </main>
       </div>
 
-      <StatusBar store={store} />
+      <StatusBar
+        store={store}
+        following={following()}
+        onJumpToLatest={() => transcript?.scrollToBottom()}
+      />
 
       <ApprovalPanel
         approval={store.approval()}

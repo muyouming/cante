@@ -83,3 +83,28 @@ input {
 ::-webkit-scrollbar-thumb:hover {
   background: #334155;
 }
+
+/* The virtual list restores the reader's anchor line itself after a re-wrap.
+   Chrome's scroll anchoring would fight that restore (it re-anchors on content
+   growth), so it is off for the transcript scroller only. */
+.virtual-scroll {
+  overflow-anchor: none;
+}
+
+/* "Jump to latest": a fade on hover/focus only, and nothing at all when the
+   platform asks for reduced motion. */
+.jump-pill {
+  transition:
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .jump-pill {
+    transition: none;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}
