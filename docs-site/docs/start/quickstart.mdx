@@ -1,6 +1,6 @@
 ---
 title: Quickstart
-description: "Install Ante and start using it in under a minute"
+description: "Install Cante and start using it in under a minute"
 ---
 
 ## Prerequisites
@@ -9,19 +9,19 @@ description: "Install Ante and start using it in under a minute"
 
 ## Installation
 
-Ante is distributed as a single, self-contained binary with no external dependencies — just download and run.
+Cante is distributed as a single, self-contained binary with no external dependencies — just download and run.
 
 ```sh
-curl -fsSL https://ante.run/install.sh | bash
+curl -fsSL https://cante.run/install.sh | bash
 ```
 
-By default this installs to `~/.ante/bin`. To install somewhere else, set `ANTE_INSTALL_DIR`:
+By default this installs to `~/.cante/bin`. To install somewhere else, set `CANTE_INSTALL_DIR`:
 
 ```sh
-curl -fsSL https://ante.run/install.sh | ANTE_INSTALL_DIR=/usr/local/bin bash
+curl -fsSL https://cante.run/install.sh | CANTE_INSTALL_DIR=/usr/local/bin bash
 ```
 
-Run the default installer as your normal user, not with `sudo`. A sudoed home-directory install would leave `~/.ante` root-owned and prevent Ante from saving settings and input history, so the installer refuses that combination.
+Run the default installer as your normal user, not with `sudo`. A sudoed home-directory install would leave `~/.cante` root-owned and prevent Cante from saving settings and input history, so the installer refuses that combination.
 
 macOS release binaries are Developer ID-signed and notarized, so Gatekeeper accepts them without a manual security bypass.
 
@@ -31,55 +31,55 @@ macOS release binaries are Developer ID-signed and notarized, so Gatekeeper acce
 
 ```bash
 # Launch the TUI — chat with the agent, approve tool calls, view diffs
-ante
+cante
 ```
 
 ### Headless one-shot
 
 ```bash
 # Run a task and exit
-ante -p "add error handling to src/main.rs"
+cante -p "add error handling to src/main.rs"
 ```
 
 ### Pipe input from stdin
 
 ```bash
 # Pipe file contents for analysis
-cat src/lib.rs | ante -p "review this code for bugs"
+cat src/lib.rs | cante -p "review this code for bugs"
 ```
 
 ### Use a different provider
 
 ```bash
 # Override model and provider
-ante --provider openai --model gpt-5.6-sol -p "refactor this function"
+cante --provider openai --model gpt-5.6-sol -p "refactor this function"
 ```
 
 ### Skip tool approvals
 
 ```bash
 # YOLO mode — auto-approve all tool calls
-ante --yolo -p "fix all clippy warnings"
+cante --yolo -p "fix all clippy warnings"
 ```
 
 ### Run as a server
 
 ```bash
 # Start a long-lived daemon for programmatic integration
-ante serve
+cante serve
 ```
 
 ### Update to the latest version
 
 ```bash
 # Check for a new release and install it
-ante update
+cante update
 
 # Try the development channel for one update
-ante update nightly
+cante update nightly
 
 # Roll back or pin to an exact release
-ante update --version v0.preview.98
+cante update --version v0.preview.98
 ```
 
 ## What's next?
@@ -98,9 +98,9 @@ ante update --version v0.preview.98
     Run models on your own hardware.
   </Card>
   <Card title="Server Mode" icon="server" href="/usage/serve">
-    Drive Ante programmatically via JSONL.
+    Drive Cante programmatically via JSONL.
   </Card>
   <Card title="Skills" icon="scroll" href="/extend/skills">
-    Extend Ante with portable Agent Skills.
+    Extend Cante with portable Agent Skills.
   </Card>
 </CardGroup>

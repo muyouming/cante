@@ -26,7 +26,7 @@ const antixSidebar: SidebarsConfig[string] = [
     label: 'Identity & Agents',
     collapsed: false,
     items: [
-      'antix/concepts/ante-integration',
+      'antix/concepts/cante-integration',
     ],
   },
 ]
@@ -53,7 +53,7 @@ const sidebars: SidebarsConfig = {
     },
     {
       type: 'category',
-      label: 'Using Ante',
+      label: 'Using Cante',
       className: 'sidebar-section sidebar-section--use',
       collapsible: false,
       items: [

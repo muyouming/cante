@@ -26,7 +26,7 @@ const docsFooterItems = isZhHansBuild
 
 const footerCommunityItems = [
   { label: 'Discord', href: 'https://discord.gg/pqhj3DNGz2' },
-  { label: 'GitHub', href: 'https://github.com/AntigmaLabs/ante' },
+  { label: 'GitHub', href: 'https://github.com/AntigmaLabs/cante' },
 ]
 
 const footerCompanyItems = isZhHansBuild
@@ -39,7 +39,7 @@ const footerCompanyItems = isZhHansBuild
       { label: 'Live Eval', href: 'https://antigma.ai/eval' },
     ]
 
-const legacyAnteRedirects = [
+const legacyCanteRedirects = [
   { from: '/usage/offline', to: '/local/offline' },
   { from: '/experimental/offline', to: '/local/offline' },
   { from: '/configuration/providers', to: '/usage/providers' },
@@ -57,13 +57,13 @@ const legacyAnteRedirects = [
 
 const changelogRedirect = {
   from: '/changelog',
-  to: 'https://ante.run/changelog',
+  to: 'https://cante.run/changelog',
 }
 
 const config: Config = {
-  title: 'Ante',
+  title: 'Cante',
   tagline: 'a ghost in your shell: self-contained, self-organizing, benchmarked in public',
-  favicon: 'assets/ante2.png',
+  favicon: 'assets/cante2.png',
   url: 'https://docs.antigma.ai',
   baseUrl: '/',
 
@@ -129,7 +129,7 @@ const config: Config = {
       '@docusaurus/plugin-client-redirects',
       {
         redirects: [
-          ...(isZhHansBuild ? [] : legacyAnteRedirects),
+          ...(isZhHansBuild ? [] : legacyCanteRedirects),
           changelogRedirect,
         ],
       },
@@ -140,9 +140,9 @@ const config: Config = {
     !isZhHansBuild && [
       'docusaurus-plugin-llms',
       {
-        title: 'Ante',
+        title: 'Cante',
         description:
-          'Ante is a ghost in your shell: self-contained, self-organizing, benchmarked in public.',
+          'Cante is a ghost in your shell: self-contained, self-organizing, benchmarked in public.',
         // Mirrors the docs preset's routeBasePath: '/' — without this the
         // plugin assumes docs are served under /docs and mislinks the root page.
         docsDir: [{ path: 'docs', routeBasePath: '/' }],
@@ -164,10 +164,10 @@ const config: Config = {
 
   themeConfig: {
     navbar: {
-      title: 'Ante',
+      title: 'Cante',
       logo: {
-        alt: 'Ante',
-        src: 'assets/ante.png',
+        alt: 'Cante',
+        src: 'assets/cante.png',
         href: '/',
       },
       items: [
@@ -193,7 +193,7 @@ const config: Config = {
           position: 'right',
         },
         {
-          href: 'https://github.com/AntigmaLabs/ante',
+          href: 'https://github.com/AntigmaLabs/cante',
           html: socialLinkHtml('GitHub', githubIcon),
           position: 'right',
         },

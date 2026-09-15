@@ -7,7 +7,7 @@ Sub-agents are specialized agents that the main agent can spawn to handle comple
 
 ## Built-in sub-agents
 
-Ante ships with two built-in sub-agents:
+Cante ships with two built-in sub-agents:
 
 ### general
 
@@ -17,11 +17,11 @@ A general-purpose agent for researching complex questions, searching for code, a
 
 A fast agent specialized for codebase exploration. It can quickly find files by patterns, search code for keywords, and answer structural questions about the codebase.
 
-Questions about Ante itself are handled by the bundled `ante-guide` [skill](/extend/skills#bundled-skills), not a sub-agent.
+Questions about Cante itself are handled by the bundled `cante-guide` [skill](/extend/skills#bundled-skills), not a sub-agent.
 
 ## Creating custom sub-agents
 
-Create a markdown file in `~/.ante/agents/` (user-level) or any of the project-level locations below with YAML frontmatter:
+Create a markdown file in `~/.cante/agents/` (user-level) or any of the project-level locations below with YAML frontmatter:
 
 ```markdown
 ---
@@ -87,9 +87,9 @@ Token and cache usage from a sub-agent is forwarded into the parent session's to
 Sub-agents are discovered in precedence order (later overrides earlier by name):
 
 1. Built-in agents (`general`, `explorer`)
-2. `~/.ante/agents/` (user-level)
+2. `~/.cante/agents/` (user-level)
 3. `.agents/agents/` (project-level)
-4. `.ante/agents/` (project-level)
+4. `.cante/agents/` (project-level)
 5. `.claude/agents/` (project-level, Claude Code compatibility)
 
 User and project agents are loaded alongside the built-in ones. All available agents are registered at session initialization time, advertised to the model in a reminder attached to the first user message, and refreshed via the `ExtensionRefreshed` protocol event.

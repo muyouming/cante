@@ -8,7 +8,7 @@ sidebar_position: 1
 
 **Antix** 是 Antigma 的 LLM 代理、身份提供商和组织管理器——它是让 AI 为团队提供可扩展、安全且可靠体验的协作后端。
 
-虽然 Ante 为您的本地终端带来了自主 AI 能力，但 Antix 是控制平面：一个统一的网关，可以跨多个网络协议路由模型、管理组织、签发具有预算上限的密钥，并追踪您公司的 AI 支出。
+虽然 Cante 为您的本地终端带来了自主 AI 能力，但 Antix 是控制平面：一个统一的网关，可以跨多个网络协议路由模型、管理组织、签发具有预算上限的密钥，并追踪您公司的 AI 支出。
 
 ### 核心功能 {#key-features}
 
@@ -19,8 +19,8 @@ sidebar_position: 1
   <Card title="带有硬预算的虚拟密钥" icon="shield-halved">
     签发具有原子级 `max_budget` 上限且限定范围的 `sk-antix-…` 密钥。严格的执行会在调用上游之前阻断超支。
   </Card>
-  <Card title="Ante 控制平面" icon="plug">
-    针对本地编码代理的治理。启动 `ante`，输入 `/connect`，并选择 Antix 以安全地验证您的本地代理，记录每个提示的归属。
+  <Card title="Cante 控制平面" icon="plug">
+    针对本地编码代理的治理。启动 `cante`，输入 `/connect`，并选择 Antix 以安全地验证您的本地代理，记录每个提示的归属。
   </Card>
   <Card title="自带密钥（BYOK）" icon="key">
     在 `Authorization` 中发送您自己的提供商凭据，并通过 `X-Antix-Provider` 声明提供商。Antix 进行路由和计量，且不会重新计费。

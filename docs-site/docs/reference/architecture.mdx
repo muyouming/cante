@@ -1,11 +1,11 @@
 ---
 title: "Architecture"
-description: "Ante's client-daemon architecture, provider system, and tool framework"
+description: "Cante's client-daemon architecture, provider system, and tool framework"
 ---
 
 ## Overview
 
-Ante follows a clean separation of concerns with a client-daemon architecture. The UI and core logic are decoupled through message passing, making it possible to swap frontends (TUI, headless) without changing the underlying engine.
+Cante follows a clean separation of concerns with a client-daemon architecture. The UI and core logic are decoupled through message passing, making it possible to swap frontends (TUI, headless) without changing the underlying engine.
 
 <img src="/assets/architecture.png" alt="Architecture diagram" />
 
@@ -21,13 +21,13 @@ Ante follows a clean separation of concerns with a client-daemon architecture. T
 └────────────────┘          └─────────────────────────────┘
 ```
 
-- **Client** — The user-facing layer. The ratatui-based TUI, headless CLI runner, or an external process connected via `ante serve`. Sends `Op` operations and renders `Evt` events.
+- **Client** — The user-facing layer. The ratatui-based TUI, headless CLI runner, or an external process connected via `cante serve`. Sends `Op` operations and renders `Evt` events.
 - **Daemon** — The core engine. Receives operations, manages sessions, dispatches to LLM providers, schedules tool execution, and emits events.
-- **Transport** — A bounded operation channel and unbounded event channel (Tokio) for in-process clients (TUI, headless), JSONL over stdin/stdout for external clients (`ante serve --stdio`), a Unix domain socket for local clients that dial a shared host (`ante serve --sock`), or WebSocket for networked clients (`ante serve --ws`). Message IDs enable tracing across the boundary.
+- **Transport** — A bounded operation channel and unbounded event channel (Tokio) for in-process clients (TUI, headless), JSONL over stdin/stdout for external clients (`cante serve --stdio`), a Unix domain socket for local clients that dial a shared host (`cante serve --sock`), or WebSocket for networked clients (`cante serve --ws`). Message IDs enable tracing across the boundary.
 
 ## Architecture direction: Session-centric to Agent-centric
 
-Ante started with a session-centric runtime where `Session` is the primary execution owner. We are moving toward an agent-centric runtime, where long-lived `Agent` instances own execution and communicate through messages.
+Cante started with a session-centric runtime where `Session` is the primary execution owner. We are moving toward an agent-centric runtime, where long-lived `Agent` instances own execution and communicate through messages.
 
 ```mermaid
 flowchart LR
@@ -67,7 +67,7 @@ In this direction, `Session` remains important, but as a container for user inte
 
 ## LLM providers
 
-Ante is provider-agnostic. Each provider implements a common interface for sending prompts and receiving responses. Transient mid-stream failures reconnect within the turn. Streaming calls that produce no usable event and buffered calls that do not finish within five minutes fail with a timeout instead of hanging indefinitely. That window is per provider — override it with [`stream_idle_timeout_secs`](/reference/catalog-reference#provider-fields).
+Cante is provider-agnostic. Each provider implements a common interface for sending prompts and receiving responses. Transient mid-stream failures reconnect within the turn. Streaming calls that produce no usable event and buffered calls that do not finish within five minutes fail with a timeout instead of hanging indefinitely. That window is per provider — override it with [`stream_idle_timeout_secs`](/reference/catalog-reference#provider-fields).
 
 | Provider | Wire Format | Models |
 |---|---|---|

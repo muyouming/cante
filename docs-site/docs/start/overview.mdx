@@ -1,22 +1,22 @@
 ---
-title: Ante
+title: Cante
 sidebar_label: Overview
-description: "Ante — a ghost in your shell: self-contained, self-organizing, benchmarked in public"
+description: "Cante — a ghost in your shell: self-contained, self-organizing, benchmarked in public"
 slug: /
 ---
 
-# Ante
+# Cante
 
-**A ghost in your shell.** Ante is a self-contained coding agent that lives in your terminal and self-organizes. One ~15MB compressed download from [Antigma Labs](https://antigma.ai) that expands to a single Rust executable with zero runtime dependencies, built to get the most out of any model.
+**A ghost in your shell.** Cante is a self-contained coding agent that lives in your terminal and self-organizes. One ~15MB compressed download from [Antigma Labs](https://antigma.ai) that expands to a single Rust executable with zero runtime dependencies, built to get the most out of any model.
 
-It works like Claude Code or Codex, with none of their dependencies or model constraints. It can also be the optimized core for [building your own harness](https://github.com/AntigmaLabs/ante/tree/main/examples/mini-tui) and high-performing assistants.
+It works like Claude Code or Codex, with none of their dependencies or model constraints. It can also be the optimized core for [building your own harness](https://github.com/AntigmaLabs/cante/tree/main/examples/mini-tui) and high-performing assistants.
 
 <CardGroup cols={3}>
   <Card title="Continuously evaled, in public" icon="chart-line" href="https://antigma.ai/eval">
     #1 same-model agent on Terminal-Bench 2.1: for every model we run, no other harness scores higher with that model. Every result pins the exact downloadable build and links the raw Harbor run. Live at antigma.ai/eval.
   </Card>
   <Card title="A fraction of the footprint" icon="feather" href="/benchmarks/compare_table">
-    Across the same 20 parallel tasks, Ante uses ~7× less peak memory, ~9× less average CPU, and ~5× less disk I/O than Claude Code.
+    Across the same 20 parallel tasks, Cante uses ~7× less peak memory, ~9× less average CPU, and ~5× less disk I/O than Claude Code.
   </Card>
   <Card title="Natively offline" icon="wifi-slash" href="/local/overview">
     A built-in inference engine runs GGUF models locally. No API key, no account, and model calls stay on your machine.
@@ -34,21 +34,21 @@ The three are one design decision. An agent you can verify, afford, and run anyw
 
 ### How it works
 
-Ante runs as a client-daemon architecture. The daemon manages structured turn lifecycles — prompt, tool calls, confirmation, execution — channeling model power through a safe, predictable loop. The client can be an interactive TUI, a headless CLI, an external process, or a channel bot via `ante gateway`.
+Cante runs as a client-daemon architecture. The daemon manages structured turn lifecycles — prompt, tool calls, confirmation, execution — channeling model power through a safe, predictable loop. The client can be an interactive TUI, a headless CLI, an external process, or a channel bot via `cante gateway`.
 
-Architecturally, Ante is moving toward an agent-centric runtime where long-lived agents coordinate through message passing — an actor model with hierarchical supervision, isolated state, and clear ownership of resources per agent.
+Architecturally, Cante is moving toward an agent-centric runtime where long-lived agents coordinate through message passing — an actor model with hierarchical supervision, isolated state, and clear ownership of resources per agent.
 
-Ante can also run as a long-lived server (`ante serve`) that external clients drive through a structured JSONL protocol — ideal for building editor plugins, web UIs, and custom integrations.
+Cante can also run as a long-lived server (`cante serve`) that external clients drive through a structured JSONL protocol — ideal for building editor plugins, web UIs, and custom integrations.
 
 :::warning
-Ante is currently in **preview** and under active development. Expect breaking changes, experimental features, and incomplete functionality. Currently only **macOS** and **Linux** are supported.
+Cante is currently in **preview** and under active development. Expect breaking changes, experimental features, and incomplete functionality. Currently only **macOS** and **Linux** are supported.
 :::
 
 ## Next steps
 
 <CardGroup cols={2}>
   <Card title="Quickstart" icon="bolt" href="/start/quickstart">
-    Install Ante and run your first prompt in under a minute.
+    Install Cante and run your first prompt in under a minute.
   </Card>
   <Card title="Benchmarks" icon="chart-line" href="/benchmarks/eval">
     How we benchmark what we ship — and the live Terminal-Bench results.
@@ -63,10 +63,10 @@ Ante is currently in **preview** and under active development. Expect breaking c
     Run local models natively, from just-a-provider to fully self-contained.
   </Card>
   <Card title="Server Mode" icon="server" href="/usage/serve">
-    Drive Ante programmatically over stdio, a Unix socket, or WebSocket.
+    Drive Cante programmatically over stdio, a Unix socket, or WebSocket.
   </Card>
   <Card title="Gateway Mode" icon="message-square" href="/usage/gateway">
-    Run Ante as a Slack or Discord bot.
+    Run Cante as a Slack or Discord bot.
   </Card>
   <Card title="Everyday Recipes" icon="book-marked" href="/usage/providing-context">
     Task-focused guides for common TUI workflows.
@@ -78,7 +78,7 @@ Ante is currently in **preview** and under active development. Expect breaking c
     Understand sessions, tasks, turns, and the protocol.
   </Card>
   <Card title="Agent Organization" icon="sitemap" href="/experimental/agent-org">
-    How Ante self-organizes agents for complex tasks.
+    How Cante self-organizes agents for complex tasks.
   </Card>
   <Card title="Antix Enterprise" icon="server" href="/antix/introduction">
     Scale your AI with Antigma's enterprise LLM Proxy and Identity Provider.

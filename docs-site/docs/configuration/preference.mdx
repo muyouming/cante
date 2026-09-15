@@ -5,7 +5,7 @@ description: "Settings file, environment variables, and directory structure"
 
 ## Settings file
 
-Ante stores user preferences in `~/.ante/settings.json`. A repository can layer its own `.ante/settings.json` on top for everyone working in it — see [Project settings](#project-settings).
+Cante stores user preferences in `~/.cante/settings.json`. A repository can layer its own `.cante/settings.json` on top for everyone working in it — see [Project settings](#project-settings).
 
 Most of these settings can also be viewed and changed interactively with the `/config` command in the TUI — a searchable settings dialog with in-place toggles (tips, ambient predictions, grouped tool activity, chat render mode, short prompt, auto compact, resize reflow, default permission mode, update channel) and shortcuts into the dedicated dialogs (theme, model, provider, status line, MCP servers, offline mode). Changes are persisted to `settings.json` immediately; render-mode changes apply live, while settings consumed at startup, such as `resize_reflow`, are marked "(next session)" and take effect on the next session.
 
@@ -40,7 +40,7 @@ An example `settings.json`:
   "render_mode": "inline",
   "status_line": ["model-name", "current-dir"],
   "status_line_command": {
-    "command": "~/.config/ante/statusline.sh",
+    "command": "~/.config/cante/statusline.sh",
     "padding": 1,
     "refresh_interval": 5
   },
@@ -66,7 +66,7 @@ An example `settings.json`:
 | `model` | Default model name |
 | `provider` | Default API provider |
 | `theme` | TUI color theme |
-| `system_prompt` | Replacement system prompt for fresh sessions. The `--system-prompt` / `--system-prompt-file` CLI flags override it for a run. Persisted prompt text is redacted from `ante rage` bundles |
+| `system_prompt` | Replacement system prompt for fresh sessions. The `--system-prompt` / `--system-prompt-file` CLI flags override it for a run. Persisted prompt text is redacted from `cante rage` bundles |
 | `append_system_prompt` | Extra text appended to the system prompt of fresh sessions. `--append-system-prompt` overrides it for a run |
 | `tools` | Base tool set for fresh sessions, replacing the default set (an empty list selects no tools). `--tools` overrides it for a run; `--include-tools` / `--exclude-tools` still apply on top |
 | `auto_memory` | Whether [auto-memory](/extend/memory) is on. When unset, the launch mode decides: on in the TUI, off in headless runs. `--enable-auto-memory` / `--disable-auto-memory` override it for a run |
@@ -83,9 +83,9 @@ An example `settings.json`:
 | `group_tool_activity` | Collapse contiguous quiet tool calls into a single activity summary in the chat. On unless set to `false`; full per-call details remain in the **Ctrl+O** transcript. Changes apply to new tool activity only |
 | `short_prompt` | Use the compact prompt set — a condensed system prompt and shorter built-in tool descriptions — for new and resumed sessions. Off unless set to `true`; the `--short-prompt` CLI flag enables it for a single run |
 | `auto_compact` | Proactively reduce older history as the dialog nears the context limit: aged tool results are evicted first, then only the older prefix the model will no longer see is summarized. Manual `/compact` targets a tighter working set than this automatic path. On unless set to `false`; `/compact` and overflow recovery still work when disabled. Toggling it in `/config` applies to the running session |
-| `channel` | Release channel `ante update` tracks (`stable` or `nightly`). Defaults to `stable`; legacy `latest` values are treated as `stable`. See [Update & Channels](/start/update). |
+| `channel` | Release channel `cante update` tracks (`stable` or `nightly`). Defaults to `stable`; legacy `latest` values are treated as `stable`. See [Update & Channels](/start/update). |
 | `resize_reflow` | Scrollback strategy on terminal resize: `conservative` (default) or `purge` (see below) |
-| `render_mode` | Chat rendering strategy: `inline` (default, terminal-owned scrollback) or `fullscreen` (alternate screen with Ante-managed scrolling). Changes in `/config` apply live; `--fullscreen` overrides startup for one run without persisting |
+| `render_mode` | Chat rendering strategy: `inline` (default, terminal-owned scrollback) or `fullscreen` (alternate screen with Cante-managed scrolling). Changes in `/config` apply live; `--fullscreen` overrides startup for one run without persisting |
 | `status_line` | Items to display in the TUI status line footer (see below) |
 | `status_line_command` | Shell command that renders a fully custom status line (see below). Takes precedence over `status_line` while set |
 | `model_effort` | Per-model [effort](/usage/models-and-thinking#effort) overrides — keys are model names, values are `min` / `low` / `medium` / `high` / `xhigh` / `max`. Written automatically when you move the effort slider in `/models` |
@@ -97,20 +97,20 @@ An example `settings.json`:
 Use the process-wide `--profile <name>` option to replace `settings.json` with a separate settings file. It works with TUI and headless runs as well as subcommands:
 
 ```bash
-ante --profile work
-ANTE_PROFILE=review ante -p "review this change"
-ante update --profile work
+cante --profile work
+CANTE_PROFILE=review cante -p "review this change"
+cante update --profile work
 ```
 
-The profile `work` reads and writes `~/.ante/work.settings.json`. Profiles are whole-file replacements, not layers: values omitted from an existing profile fall back to Ante defaults, not to `settings.json`. The file must already exist or be a bundled template; an unknown name prints a warning and uses `settings.json` instead of creating a profile. To create one, write or copy `~/.ante/<name>.settings.json` before launching Ante. Profile names may contain lowercase ASCII letters, digits, `-`, and `_`. CLI flags still override the selected profile. For per-repository configuration, prefer [project settings](#project-settings): they layer rather than replace, and need no flag.
+The profile `work` reads and writes `~/.cante/work.settings.json`. Profiles are whole-file replacements, not layers: values omitted from an existing profile fall back to Cante defaults, not to `settings.json`. The file must already exist or be a bundled template; an unknown name prints a warning and uses `settings.json` instead of creating a profile. To create one, write or copy `~/.cante/<name>.settings.json` before launching Cante. Profile names may contain lowercase ASCII letters, digits, `-`, and `_`. CLI flags still override the selected profile. For per-repository configuration, prefer [project settings](#project-settings): they layer rather than replace, and need no flag.
 
-The built-in `bare` profile ships with Ante: the first `--profile bare` run seeds `~/.ante/bare.settings.json` with onboarding and ambient UI features disabled, plus `auto_memory`, `skills`, and `session_save` set to `false` (and no MCP servers, since the profile defines none). After that it behaves like any other profile — edit the file or change settings in `/config` and they persist. Explicit run flags such as `--enable-auto-memory` still override it per run.
+The built-in `bare` profile ships with Cante: the first `--profile bare` run seeds `~/.cante/bare.settings.json` with onboarding and ambient UI features disabled, plus `auto_memory`, `skills`, and `session_save` set to `false` (and no MCP servers, since the profile defines none). After that it behaves like any other profile — edit the file or change settings in `/config` and they persist. Explicit run flags such as `--enable-auto-memory` still override it per run.
 
 ### Project settings
 
-A repository can carry its own settings. When a session starts or resumes, Ante walks up from the session's working directory, and the nearest ancestor containing `.ante/settings.json` supplies a **project layer** over your user settings:
+A repository can carry its own settings. When a session starts or resumes, Cante walks up from the session's working directory, and the nearest ancestor containing `.cante/settings.json` supplies a **project layer** over your user settings:
 
-```json title=".ante/settings.json"
+```json title=".cante/settings.json"
 {
   "append_system_prompt": "This repo targets Rust 1.88. Prefer `anyhow` over custom error types.",
   "exclude_skills": ["deploy-prod"],
@@ -121,11 +121,11 @@ A repository can carry its own settings. When a session starts or resumes, Ante 
 }
 ```
 
-Unlike [named profiles](#named-profiles), this is a layer, not a replacement: keys the project file omits keep their value from `~/.ante/settings.json`, and only the keys it sets are overridden. Nothing needs to be passed on the command line — checking the file into the repository is enough for everyone working in it.
+Unlike [named profiles](#named-profiles), this is a layer, not a replacement: keys the project file omits keep their value from `~/.cante/settings.json`, and only the keys it sets are overridden. Nothing needs to be passed on the command line — checking the file into the repository is enough for everyone working in it.
 
 #### What a project may set
 
-Because `.ante/settings.json` is repository content, it can be written by anyone who can open a pull request. It may therefore **pin or narrow, never widen**. These keys are dropped, with a notice, when they appear in a project file:
+Because `.cante/settings.json` is repository content, it can be written by anyone who can open a pull request. It may therefore **pin or narrow, never widen**. These keys are dropped, with a notice, when they appear in a project file:
 
 | Dropped key | Why |
 |---|---|
@@ -140,7 +140,7 @@ The remaining session fields layer normally. A project may set `append_system_pr
 
 #### Checking what applied
 
-`ante doctor` prints a `project` row showing the file it resolved (or that none was found) and any keys it dropped. [`ante rage`](/reference/cli-reference#ante-rage) includes the project file, redacted the same way as the user file, so a bug report carries the settings that were actually in effect.
+`cante doctor` prints a `project` row showing the file it resolved (or that none was found) and any keys it dropped. [`cante rage`](/reference/cli-reference#cante-rage) includes the project file, redacted the same way as the user file, so a bug report carries the settings that were actually in effect.
 
 Project settings are read when a session starts or resumes. Editing the file mid-session has no effect until the next session boundary.
 
@@ -157,7 +157,7 @@ The `status_line` field controls which items appear in the top row of the TUI fo
 | `git-branch` | Current Git branch, as `⑂ main` (omitted when unavailable) |
 | `pr-link` | GitHub pull request link for the current branch (requires `gh`) |
 | `context-used` | Context-window usage, shown as `N% ctx` of the window remaining (omitted until known) |
-| `terminals` | Live `ante-*` tmux sessions, shown by name (omitted when none are running or tmux is unavailable) |
+| `terminals` | Live `cante-*` tmux sessions, shown by name (omitted when none are running or tmux is unavailable) |
 
 Two pairs collapse into one compound item when both halves are enabled: effort folds into the model name as `gpt-5.6(high)` (every level, `min` included), and the branch folds into the directory as `project(⑂ main)`. So the default footer reads:
 
@@ -167,7 +167,7 @@ gpt-5.6(high) · openai · project(⑂ main) · 42% ctx
 
 Each half stays an independent toggle — turn `model-name` off and `effort` goes back to its own `effort: high` item.
 
-Default: all items, in the order above. Configure via `~/.ante/settings.json` or the `/statusline` command in the TUI.
+Default: all items, in the order above. Configure via `~/.cante/settings.json` or the `/statusline` command in the TUI.
 
 ### Command-based status line
 
@@ -176,7 +176,7 @@ For full control, `status_line_command` runs a shell command of your choice and 
 ```json
 {
   "status_line_command": {
-    "command": "~/.config/ante/statusline.sh",
+    "command": "~/.config/cante/statusline.sh",
     "padding": 1,
     "refresh_interval": 5
   }
@@ -191,7 +191,7 @@ A plain string is accepted as shorthand: `"status_line_command": "echo hello"`.
 | `padding` | Extra horizontal padding in columns (default: `0`) |
 | `refresh_interval` | Also re-run every N seconds (minimum 1). Useful for clocks or external data. Omit to run only on session events |
 
-**How it works.** Ante pipes a JSON snapshot of the session to your command's stdin and displays whatever it prints to stdout. The command re-runs (debounced at 300ms) after each assistant message and whenever the model, provider, effort, pull request, working directory, or terminal size changes. Runs are capped at 5 seconds, and a newer run cancels the one in flight.
+**How it works.** Cante pipes a JSON snapshot of the session to your command's stdin and displays whatever it prints to stdout. The command re-runs (debounced at 300ms) after each assistant message and whenever the model, provider, effort, pull request, working directory, or terminal size changes. Runs are capped at 5 seconds, and a newer run cancels the one in flight.
 
 The JSON input is a compatible subset of [Claude Code's statusline input](https://code.claude.com/docs/en/statusline), so existing Claude Code statusline scripts work unchanged:
 
@@ -214,7 +214,7 @@ The JSON input is a compatible subset of [Claude Code's statusline input](https:
 }
 ```
 
-`pr` is present only when an open pull request is detected for the current branch; `context_window` is present after the first response when the model's context limit is known, and reports the raw window size alongside used/remaining percentages using Claude Code's field names. `provider` is an Ante extension. The `thinking` key keeps Claude Code's schema even though Ante's knob is [effort](/usage/models-and-thinking#effort): `enabled` is `true` whenever the session's effort is above `min`. The command also receives `COLUMNS` and `LINES` (current terminal size) and `ANTE_PROJECT_DIR` (nearest ancestor with `.git`) in its environment.
+`pr` is present only when an open pull request is detected for the current branch; `context_window` is present after the first response when the model's context limit is known, and reports the raw window size alongside used/remaining percentages using Claude Code's field names. `provider` is a Cante extension. The `thinking` key keeps Claude Code's schema even though Cante's knob is [effort](/usage/models-and-thinking#effort): `enabled` is `true` whenever the session's effort is above `min`. The command also receives `COLUMNS` and `LINES` (current terminal size) and `CANTE_PROJECT_DIR` (nearest ancestor with `.git`) in its environment.
 
 **Output.** Each line of stdout becomes a footer row (up to 8). ANSI colors and OSC 8 hyperlinks are rendered; color state carries across lines. Blank lines are dropped, and empty output renders a blank status line.
 
@@ -232,17 +232,17 @@ Make it executable (`chmod +x`) before pointing `command` at it. If the command 
 
 ### Chat render mode
 
-The default `inline` mode keeps the chat in your terminal's normal scrollback. Use `fullscreen` when a terminal or console drops inline history: Ante moves the chat to the alternate screen, owns its scrollback, and enables `PgUp` / `PgDn`, mouse-wheel scrolling, and drag-to-copy selection.
+The default `inline` mode keeps the chat in your terminal's normal scrollback. Use `fullscreen` when a terminal or console drops inline history: Cante moves the chat to the alternate screen, owns its scrollback, and enables `PgUp` / `PgDn`, mouse-wheel scrolling, and drag-to-copy selection.
 
 ```json
 { "render_mode": "fullscreen" }
 ```
 
-Switch **Render mode** in `/config` to apply and persist the change immediately. To start only the current run in fullscreen without changing settings, use `ante --fullscreen`.
+Switch **Render mode** in `/config` to apply and persist the change immediately. To start only the current run in fullscreen without changing settings, use `cante --fullscreen`.
 
 ### Resize reflow
 
-When the terminal window is resized, ante rebuilds its display at the new size. The `resize_reflow` field selects what happens to the scrollback history above the visible screen:
+When the terminal window is resized, cante rebuilds its display at the new size. The `resize_reflow` field selects what happens to the scrollback history above the visible screen:
 
 | Value | Behavior |
 |---|---|
@@ -253,7 +253,7 @@ When the terminal window is resized, ante rebuilds its display at the new size. 
 { "resize_reflow": "purge" }
 ```
 
-`purge` is opt-in rather than automatic because it requires a terminal that honors the erase-scrollback escape sequence (`CSI 3 J`, the terminfo `E3` capability) — and there is no way for ante to detect that support: an ignored `3 J` fails silently, and enabling `purge` on such a terminal duplicates scrollback instead. Most terminals honor it, but iTerm2 has an advanced setting — "Prevent CSI 3 J from clearing scrollback history" — that blocks it. To check your terminal, run:
+`purge` is opt-in rather than automatic because it requires a terminal that honors the erase-scrollback escape sequence (`CSI 3 J`, the terminfo `E3` capability) — and there is no way for cante to detect that support: an ignored `3 J` fails silently, and enabling `purge` on such a terminal duplicates scrollback instead. Most terminals honor it, but iTerm2 has an advanced setting — "Prevent CSI 3 J from clearing scrollback history" — that blocks it. To check your terminal, run:
 
 ```bash
 seq 1 200; printf '\033[2J\033[3J\033[H'
@@ -263,7 +263,7 @@ then scroll up — if the numbers are gone, your terminal honors `3 J` and `purg
 
 In iTerm2, the capability is toggled under **Settings → Advanced**: search for "3 J" and set **"Prevent CSI 3 J from clearing scrollback history"** to **No** to allow it (required for `purge`), or **Yes** to block it. The change applies immediately — re-run the check above to confirm.
 
-Trade-offs of `purge`: the first resize clears everything in that tab's scrollback, including shell output from before ante started, and only the most recent 2,000 transcript lines are replayed across a resize. Inside tmux or zellij ante always uses the purge strategy regardless of this setting, since both reliably support `3 J`.
+Trade-offs of `purge`: the first resize clears everything in that tab's scrollback, including shell output from before cante started, and only the most recent 2,000 transcript lines are replayed across a resize. Inside tmux or zellij cante always uses the purge strategy regardless of this setting, since both reliably support `3 J`.
 
 Settings can be overridden per-session via CLI flags.
 
@@ -293,26 +293,26 @@ Settings can be overridden per-session via CLI flags.
 | `MODEL_TOP_P` | Override model top_p sampling parameter (float) |
 | `MODEL_MAX_TOKENS` | Override max output tokens (integer) |
 | `MODEL_CONTEXT_LIMIT` | Override max context window size (integer) |
-| `ANTE_LOCAL_PROVIDER_PORT` | Port assumed for the `local` provider when no live model server registration provides one (default: 8080) |
-| `ANTE_HOME` | Override the home config directory (default: `~/.ante`) |
-| `ANTE_PROFILE` | Select a named settings profile for the whole process, including subcommands and external applications; equivalent to `--profile <name>` |
-| `ANTE_INSTALL_DIR` | Installer-only override for the binary install directory (default: `~/.ante/bin`) |
-| `ANTE_OFFLINE_CONTEXT` | Override the local model context-window cap in tokens (see [Offline Mode](/local/offline#environment-variables)) |
-| `ANTE_MCP_TOOL_TIMEOUT` | MCP `tools/call` deadline in whole seconds. Defaults to `600`; zero or invalid values keep the default (see [MCP tool-call timeout](/extend/mcp#tool-call-timeout)) |
-| `ANTE_OPENAI_TRANSPORT` | OpenAI Responses transport: `http_sse` (default) or `websocket_auto` (see [OpenAI transports](/reference/catalog-reference#openai-transports)) |
-| `ANTE_TELEMETRY` | Disable OpenTelemetry export with `off`, `false`, `0`, `disable`, or `disabled` (case-insensitive) |
+| `CANTE_LOCAL_PROVIDER_PORT` | Port assumed for the `local` provider when no live model server registration provides one (default: 8080) |
+| `CANTE_HOME` | Override the home config directory (default: `~/.cante`) |
+| `CANTE_PROFILE` | Select a named settings profile for the whole process, including subcommands and external applications; equivalent to `--profile <name>` |
+| `CANTE_INSTALL_DIR` | Installer-only override for the binary install directory (default: `~/.cante/bin`) |
+| `CANTE_OFFLINE_CONTEXT` | Override the local model context-window cap in tokens (see [Offline Mode](/local/offline#environment-variables)) |
+| `CANTE_MCP_TOOL_TIMEOUT` | MCP `tools/call` deadline in whole seconds. Defaults to `600`; zero or invalid values keep the default (see [MCP tool-call timeout](/extend/mcp#tool-call-timeout)) |
+| `CANTE_OPENAI_TRANSPORT` | OpenAI Responses transport: `http_sse` (default) or `websocket_auto` (see [OpenAI transports](/reference/catalog-reference#openai-transports)) |
+| `CANTE_TELEMETRY` | Disable OpenTelemetry export with `off`, `false`, `0`, `disable`, or `disabled` (case-insensitive) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | Send application metrics and logs to this OTLP/HTTP base URL; overrides any endpoint embedded in the binary |
 | `OTEL_EXPORTER_OTLP_HEADERS` | Standard comma-separated OTLP headers as `name=value` pairs. Percent-encode spaces, for example `Authorization=Basic%20<base64>` |
-| `ANTE_USER` | Optional operator name attached to telemetry as `user.name`; unset by default (see [Identity](#identity)) |
-| `ANTE_USER_ID` | Optional operator-chosen identifier attached to telemetry as `user.id`; unset by default |
-| `ANTE_ENV` | Group telemetry by deployment environment (default: `local`) |
-| `RUST_LOG` | Override the application log filter (release default: `ante=info`); applies to local and exported logs |
+| `CANTE_USER` | Optional operator name attached to telemetry as `user.name`; unset by default (see [Identity](#identity)) |
+| `CANTE_USER_ID` | Optional operator-chosen identifier attached to telemetry as `user.id`; unset by default |
+| `CANTE_ENV` | Group telemetry by deployment environment (default: `local`) |
+| `RUST_LOG` | Override the application log filter (release default: `cante=info`); applies to local and exported logs |
 
 ### Telemetry
 
-Ante initializes an OpenTelemetry exporter when `OTEL_EXPORTER_OTLP_ENDPOINT` is set or when the binary was built with an embedded endpoint. The exporter sends metrics and application `tracing` logs over OTLP/HTTP. Set `OTEL_EXPORTER_OTLP_HEADERS` when the collector needs authentication or tenant headers; a runtime endpoint and headers replace any embedded values. A configured headers string with no usable `name=value` entry disables telemetry with a startup diagnostic. Set `ANTE_TELEMETRY=off` to disable the exporter regardless of how its endpoint was configured; local logs under `~/.ante/logs/` continue to be written.
+Cante initializes an OpenTelemetry exporter when `OTEL_EXPORTER_OTLP_ENDPOINT` is set or when the binary was built with an embedded endpoint. The exporter sends metrics and application `tracing` logs over OTLP/HTTP. Set `OTEL_EXPORTER_OTLP_HEADERS` when the collector needs authentication or tenant headers; a runtime endpoint and headers replace any embedded values. A configured headers string with no usable `name=value` entry disables telemetry with a startup diagnostic. Set `CANTE_TELEMETRY=off` to disable the exporter regardless of how its endpoint was configured; local logs under `~/.cante/logs/` continue to be written.
 
-The metrics cover tool and model call duration and errors, plus token counts when the provider reports usage. Labels are drawn from bounded sets — tool name, model, provider, Ante version, OS/architecture — and none of them names a person or a machine.
+The metrics cover tool and model call duration and errors, plus token counts when the provider reports usage. Labels are drawn from bounded sets — tool name, model, provider, Cante version, OS/architecture — and none of them names a person or a machine.
 
 #### Identity
 
@@ -320,21 +320,21 @@ Exports are anonymous by default. There is no username fallback, no hostname, no
 
 | Identifier | Source | Purpose |
 |---|---|---|
-| Run id | Random per process, never persisted | Gives each concurrently running Ante its own metric series, which cumulative counters require. Exported as `service.instance.id` on metrics only. |
-| Installation id | A random memorable label such as `clever-otter-x7f2`, stored in `~/.ante/installation-id` | Distinguishes "one machine reported 500 errors" from "500 machines did". Minted at the first startup that has telemetry configured, and word-shaped so you can quote it in a bug report — `ante rage` includes it. The words encode nothing about you, your host, or any account. |
-| `user.name` | `ANTE_USER`, explicit only | Names whoever operates a deployment. CI and eval runners set it; a laptop leaves it unset. |
-| `user.id` | `ANTE_USER_ID`, explicit only | An operator-chosen identifier when a name isn't the right shape. |
+| Run id | Random per process, never persisted | Gives each concurrently running Cante its own metric series, which cumulative counters require. Exported as `service.instance.id` on metrics only. |
+| Installation id | A random memorable label such as `clever-otter-x7f2`, stored in `~/.cante/installation-id` | Distinguishes "one machine reported 500 errors" from "500 machines did". Minted at the first startup that has telemetry configured, and word-shaped so you can quote it in a bug report — `cante rage` includes it. The words encode nothing about you, your host, or any account. |
+| `user.name` | `CANTE_USER`, explicit only | Names whoever operates a deployment. CI and eval runners set it; a laptop leaves it unset. |
+| `user.id` | `CANTE_USER_ID`, explicit only | An operator-chosen identifier when a name isn't the right shape. |
 
-Delete `~/.ante/installation-id` to reset to a fresh identity; it is recreated on the next run that has telemetry configured. A home directory Ante cannot read or write simply reports without one. Deployments can also group data with `ANTE_ENV` (default: `local`).
+Delete `~/.cante/installation-id` to reset to a fresh identity; it is recreated on the next run that has telemetry configured. A home directory Cante cannot read or write simply reports without one. Deployments can also group data with `CANTE_ENV` (default: `local`).
 
 All application tracing records that pass the active `RUST_LOG` filter are exported too. Log *bodies* are not scrubbed, so a message that interpolates a home path or a tool argument still carries it even though no attribute names you — only point `OTEL_EXPORTER_OTLP_ENDPOINT` at a collector you trust.
 
 ## Directory structure
 
-### User-level (`~/.ante/`)
+### User-level (`~/.cante/`)
 
 ```
-~/.ante/
+~/.cante/
 ├── settings.json      # User preferences
 ├── <name>.settings.json # Named settings profile selected by --profile
 ├── catalog.json       # Custom provider/model catalog
@@ -345,14 +345,14 @@ All application tracing records that pass the active `RUST_LOG` filter are expor
 ├── projects/          # Per-project auto-memory
 ├── cache/             # WebFetch spill files (48-hour scratch)
 ├── run/jobs/          # Background Bash status and output
-├── run/serve.sock     # Unix socket for `ante serve --sock` (with a .lock sibling)
+├── run/serve.sock     # Unix socket for `cante serve --sock` (with a .lock sibling)
 ├── tmp/               # Disposable staging (48-hour scratch)
 ├── logs/              # Application logs partitioned by UTC date
 ├── skills/            # User-level skills
 └── agents/            # User-level sub-agents
 ```
 
-When `~/.ante/AGENTS.md` doesn't exist, Ante falls back to `~/.claude/CLAUDE.md` for global instructions, so Claude Code setups work without migration. Only one file is read — an existing `AGENTS.md` (even an empty one) always wins.
+When `~/.cante/AGENTS.md` doesn't exist, Cante falls back to `~/.claude/CLAUDE.md` for global instructions, so Claude Code setups work without migration. Only one file is read — an existing `AGENTS.md` (even an empty one) always wins.
 
 ### Project-level
 
@@ -360,7 +360,7 @@ When `~/.ante/AGENTS.md` doesn't exist, Ante falls back to `~/.claude/CLAUDE.md`
 AGENTS.md              # Project instructions
 CLAUDE.md              # Project instructions (fallback when no AGENTS.md)
 
-.ante/
+.cante/
 ├── settings.json      # Project settings layered over the user's
 ├── skills/            # Project-specific skills
 └── agents/            # Project-specific sub-agents
@@ -374,14 +374,14 @@ CLAUDE.md              # Project instructions (fallback when no AGENTS.md)
 └── agents/            # Project-specific sub-agents (Claude Code compatibility)
 ```
 
-Project instructions are found by walking up from the working directory: in each ancestor directory Ante checks `AGENTS.md` first, then `CLAUDE.md`, and the first directory containing either wins. A directory with both reads only `AGENTS.md` — `CLAUDE.md` is a fallback, never a second source.
+Project instructions are found by walking up from the working directory: in each ancestor directory Cante checks `AGENTS.md` first, then `CLAUDE.md`, and the first directory containing either wins. A directory with both reads only `AGENTS.md` — `CLAUDE.md` is a fallback, never a second source.
 
-### Project memory (`~/.ante/projects/`)
+### Project memory (`~/.cante/projects/`)
 
-Project-scoped auto-memory lives under `~/.ante/projects/<project-id>/`, where `<project-id>` is a sanitized form of the project's absolute path. Persisted sessions live separately under `~/.ante/sessions/`.
+Project-scoped auto-memory lives under `~/.cante/projects/<project-id>/`, where `<project-id>` is a sanitized form of the project's absolute path. Persisted sessions live separately under `~/.cante/sessions/`.
 
 ```
-~/.ante/projects/
+~/.cante/projects/
 └── <project-id>/
     └── memory/
         └── MEMORY.md      # Auto-memory for this project
@@ -389,7 +389,7 @@ Project-scoped auto-memory lives under `~/.ante/projects/<project-id>/`, where `
 
 ### Runtime and temporary files
 
-Oversized WebFetch responses spill into `~/.ante/cache/`, while disposable staging uses `~/.ante/tmp/`; entries in both scratch tiers are removed at startup after 48 hours. Background Bash handles live under `~/.ante/run/jobs/<proc-id>/` and are retained while their process is live, then for 24 hours after it settles. Application logs live under `~/.ante/logs/<YYYY-MM-DD>/`, partitioned by UTC date.
+Oversized WebFetch responses spill into `~/.cante/cache/`, while disposable staging uses `~/.cante/tmp/`; entries in both scratch tiers are removed at startup after 48 hours. Background Bash handles live under `~/.cante/run/jobs/<proc-id>/` and are retained while their process is live, then for 24 hours after it settles. Application logs live under `~/.cante/logs/<YYYY-MM-DD>/`, partitioned by UTC date.
 
 See [Storage Reference](/reference/storage-reference) for the complete layout and file purposes.
 
@@ -398,6 +398,6 @@ See [Storage Reference](/reference/storage-reference) for the complete layout an
 Configuration is resolved in this order (later overrides earlier):
 
 1. Built-in defaults
-2. `~/.ante/settings.json` (or `~/.ante/<name>.settings.json` under `--profile`)
-3. The project's `.ante/settings.json`, for the keys it is [allowed to set](#project-settings)
+2. `~/.cante/settings.json` (or `~/.cante/<name>.settings.json` under `--profile`)
+3. The project's `.cante/settings.json`, for the keys it is [allowed to set](#project-settings)
 4. CLI flags or protocol request fields (`--model`, `--provider`, etc.)

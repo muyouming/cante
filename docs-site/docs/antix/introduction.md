@@ -8,7 +8,7 @@ sidebar_position: 1
 
 **Antix** is Antigma's LLM Proxy, Identity Provider, and Organization Manager — the collaborative backend that makes AI scalable, secure, and reliable for teams.
 
-While [Ante](/) delivers autonomous AI capabilities to your local terminal, Antix is the control plane: a unified gateway that routes models across multiple wire protocols, governs organizations, issues budget-capped keys, and tracks AI spend across your company.
+While [Cante](/) delivers autonomous AI capabilities to your local terminal, Antix is the control plane: a unified gateway that routes models across multiple wire protocols, governs organizations, issues budget-capped keys, and tracks AI spend across your company.
 
 ### Key features
 
@@ -19,8 +19,8 @@ While [Ante](/) delivers autonomous AI capabilities to your local terminal, Anti
   <Card title="Hard-budget virtual keys" icon="shield-halved">
     Issue scoped `sk-antix-…` keys with an atomic `max_budget` cap. Strict enforcement blocks overruns before upstream is called.
   </Card>
-  <Card title="Ante control plane" icon="plug">
-    Governance for local coding agents. Start `ante`, type `/connect`, and select Antix to securely authenticate your local agent, attributing every prompt.
+  <Card title="Cante control plane" icon="plug">
+    Governance for local coding agents. Start `cante`, type `/connect`, and select Antix to securely authenticate your local agent, attributing every prompt.
   </Card>
   <Card title="Bring Your Own Key (BYOK)" icon="key">
     Send your own provider credentials in `Authorization` and declare the provider with `X-Antix-Provider`. Antix routes and meters without re-billing.

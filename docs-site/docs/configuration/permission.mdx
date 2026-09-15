@@ -1,9 +1,9 @@
 ---
 title: Permissions
-description: "How Ante gates tool execution with modes, rules, and matchers"
+description: "How Cante gates tool execution with modes, rules, and matchers"
 ---
 
-Ante has a permission system that controls whether tool calls are auto-approved, require user confirmation, or are denied entirely.
+Cante has a permission system that controls whether tool calls are auto-approved, require user confirmation, or are denied entirely.
 
 ## Permission modes
 
@@ -13,7 +13,7 @@ Ante has a permission system that controls whether tool calls are auto-approved,
 | `auto` | Rules are honored first. If no rule matches, tool calls are allowed unless Bash detects a dangerous command, which asks. |
 | `yolo` | All tool calls are auto-approved — no prompts, no rules evaluation, including `deny` rules. |
 
-Set the mode in `~/.ante/settings.json`:
+Set the mode in `~/.cante/settings.json`:
 
 ```json
 {
@@ -29,11 +29,11 @@ Set the mode in `~/.ante/settings.json`:
 Or override per-session:
 
 ```bash
-ante --yolo "run cargo clippy and fix all warnings"
-ante --permission-mode auto "update docs and run tests"
+cante --yolo "run cargo clippy and fix all warnings"
+cante --permission-mode auto "update docs and run tests"
 ```
 
-In the TUI, press **Shift+Tab** to cycle the mode live: `strict` → `auto` → `yolo` → `strict`. The change applies immediately, including to later tool calls in a turn that is already running. Cycling to `strict` or `auto` also saves that mode as the default in `~/.ante/settings.json`; cycling to `yolo` is session-only, so future sessions do not silently start with permission checks off.
+In the TUI, press **Shift+Tab** to cycle the mode live: `strict` → `auto` → `yolo` → `strict`. The change applies immediately, including to later tool calls in a turn that is already running. Cycling to `strict` or `auto` also saves that mode as the default in `~/.cante/settings.json`; cycling to `yolo` is session-only, so future sessions do not silently start with permission checks off.
 
 :::warning
 In headless mode, `yolo` mode is implied — all tools are auto-approved since there is no interactive prompt.
@@ -49,7 +49,7 @@ In headless mode, `yolo` mode is implied — all tools are auto-approved since t
 
 ## Rules
 
-Permission rules pair a **decision** with a **tool matcher**. Persistent rules live in `~/.ante/settings.json` under `permissions.allow`, `permissions.ask`, and `permissions.deny`.
+Permission rules pair a **decision** with a **tool matcher**. Persistent rules live in `~/.cante/settings.json` under `permissions.allow`, `permissions.ask`, and `permissions.deny`.
 
 Precedence is fixed: **deny > session grants > ask > allow > tool defaults**. Within each bucket, matchers are an unordered set. Session grants are the temporary allows added when you approve a call "for this session" (see [Session grants](#session-grants)).
 
@@ -91,7 +91,7 @@ At an approval prompt you can approve a call in three ways:
 
 - **Yes** — approve this one call.
 - **Yes, allow … for this session** — add a temporary grant for the rest of the run. It overrides `ask`/`allow` rules and tool defaults but never a `deny`, and disappears when the session ends.
-- **Yes, always allow … (save to settings)** — also append the matcher to `permissions.allow` in `~/.ante/settings.json` so it applies in future sessions.
+- **Yes, always allow … (save to settings)** — also append the matcher to `permissions.allow` in `~/.cante/settings.json` so it applies in future sessions.
 
 The grant is scoped, not blanket. A single approved Bash command generalizes to a **two-token prefix** so the next sibling call doesn't re-prompt — approving `cargo test -p foo` grants `Bash(cargo test *)`. Commands the dangerous classifier flags (e.g. `rm -rf build`), commands whose second token is a flag (`ls -la`), and multi-stage sequences (`git add -A && git commit -m wip`) stay scoped to the **exact command** instead of widening. `Agent`, `Read`, `Edit`, and `Write` scope to their primary argument (sub-agent type or file path), and `Grep` and `Glob` scope to the search pattern; tools without a known primary argument grant by name.
 
@@ -135,7 +135,7 @@ Only tools with a known primary argument support scoped matchers; any other tool
 | `Grep` | `pattern` |
 | `Glob` | `pattern` |
 
-For file tools, Ante normalizes the call-side path before matching permission rules: one layer of wrapping quotes is stripped, `~` is expanded, and lexical `.` / `..` segments are resolved. A rule such as `Deny(Read(/tmp/secret*))` therefore applies to equivalent spellings like `Read("~/../tmp/secret.txt")` after expansion. Rule specifiers are still glob patterns exactly as written; only the tool call argument is normalized.
+For file tools, Cante normalizes the call-side path before matching permission rules: one layer of wrapping quotes is stripped, `~` is expanded, and lexical `.` / `..` segments are resolved. A rule such as `Deny(Read(/tmp/secret*))` therefore applies to equivalent spellings like `Read("~/../tmp/secret.txt")` after expansion. Rule specifiers are still glob patterns exactly as written; only the tool call argument is normalized.
 
 `Grep` and `Glob` scope to the search pattern, matched as written with no path normalization; the directory being searched is not part of the match.
 
@@ -162,10 +162,10 @@ Malformed permission rules are skipped individually, each reported in the sessio
 
 ```bash
 # Replace the default tool set with exactly these tools
-ante --tools Read,Glob,Grep -p "analyze the code"
+cante --tools Read,Glob,Grep -p "analyze the code"
 
 # Remove these tools
-ante --exclude-tools Bash,Write -p "read-only analysis"
+cante --exclude-tools Bash,Write -p "read-only analysis"
 ```
 
 Each filter flag consumes one comma-separated value per occurrence. Repeat the flag when that reads better; a space-separated list such as `--tools Read Glob` is not accepted.

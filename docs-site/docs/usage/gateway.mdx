@@ -1,21 +1,21 @@
 ---
 title: "Gateway Mode"
-description: "Run Ante as a bot in Slack or Discord"
+description: "Run Cante as a bot in Slack or Discord"
 ---
 
-Gateway mode runs Ante as a long-lived bot reachable from Slack, Discord, or both at the same time. Each conversation — a channel thread or DM — gets its own isolated agent session, so multiple users and teams can talk to Ante in parallel without crossing state.
+Gateway mode runs Cante as a long-lived bot reachable from Slack, Discord, or both at the same time. Each conversation — a channel thread or DM — gets its own isolated agent session, so multiple users and teams can talk to Cante in parallel without crossing state.
 
 ## Basic usage
 
 ```bash
-ante gateway
+cante gateway
 ```
 
-This reads `~/.ante/channels.json`, connects to every platform you've enabled, and starts listening for messages.
+This reads `~/.cante/channels.json`, connects to every platform you've enabled, and starts listening for messages.
 
 ## Configuration
 
-Create `~/.ante/channels.json`. You can enable just Slack, just Discord, or both.
+Create `~/.cante/channels.json`. You can enable just Slack, just Discord, or both.
 
 ```json
 {
@@ -101,19 +101,19 @@ See [Approvals](/usage/approvals) for more on tool approval flows.
 ## CLI reference
 
 ```bash
-ante gateway [--config PATH] [--model MODEL] [--provider PROVIDER] [--output-format FORMAT] [--offline-model PATH]
+cante gateway [--config PATH] [--model MODEL] [--provider PROVIDER] [--output-format FORMAT] [--offline-model PATH]
 ```
 
 | Flag | Default | Description |
 | --- | --- | --- |
-| `--config` | `~/.ante/channels.json` | Path to the channels config file |
+| `--config` | `~/.cante/channels.json` | Path to the channels config file |
 | `--model` | `local` | LLM model to use for every session |
 | `--provider` | `local` | Provider for the chosen model |
 | `--output-format` | `minimal` | Gateway stdout format: `minimal`, `human`, or `json` |
 | `--offline-model` | — | Path to a local GGUF file. Starts a shared `llama serve` router before accepting messages and routes every conversation through it (forces `--provider local --model local`) |
 
 :::tip
-The defaults assume a local llama.cpp server or router. To use a hosted provider, pass `--provider` and `--model` explicitly (e.g. `ante gateway --provider anthropic --model claude-sonnet-5`).
+The defaults assume a local llama.cpp server or router. To use a hosted provider, pass `--provider` and `--model` explicitly (e.g. `cante gateway --provider anthropic --model claude-sonnet-5`).
 :::
 
 ### Output formats
@@ -136,4 +136,4 @@ Make sure the bot is invited to that channel (`/invite @bot-name`) and that `mes
 Confirm **Message Content Intent** is enabled on the bot and that it has `Send Messages` and `Read Message History` permissions in the channel.
 
 **Gateway shows no output after a message**
-Run with `--output-format human` to see every event, and check `~/.ante/logs/` for error details.
+Run with `--output-format human` to see every event, and check `~/.cante/logs/` for error details.

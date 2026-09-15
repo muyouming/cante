@@ -1,24 +1,24 @@
 ---
 title: "网关模式"
 sidebar_label: "网关模式"
-description: "将 Ante 作为长寿命机器人接入 Slack 或 Discord"
+description: "将 Cante 作为长寿命机器人接入 Slack 或 Discord"
 ---
 
 # 网关模式
 
-网关模式（Gateway mode）允许将 Ante 作为长寿命机器人运行，可从 Slack、Discord 或同时从两者接入访问。每一次对话 —— 频道中的讨论串（thread）或私聊（DM）—— 都会分配到独立的智能体会话，使得多用户和多团队可以并发与 Ante 协作而互不干扰状态。
+网关模式（Gateway mode）允许将 Cante 作为长寿命机器人运行，可从 Slack、Discord 或同时从两者接入访问。每一次对话 —— 频道中的讨论串（thread）或私聊（DM）—— 都会分配到独立的智能体会话，使得多用户和多团队可以并发与 Cante 协作而互不干扰状态。
 
 ## 基础用法 {#basic-usage}
 
 ```bash
-ante gateway
+cante gateway
 ```
 
-此命令将读取 `~/.ante/channels.json`，连接您启用的所有平台，并开始监听消息。
+此命令将读取 `~/.cante/channels.json`，连接您启用的所有平台，并开始监听消息。
 
 ## 配置文件 {#configuration}
 
-创建 `~/.ante/channels.json`。您可以仅启用 Slack、仅启用 Discord 或两者同时启用。
+创建 `~/.cante/channels.json`。您可以仅启用 Slack、仅启用 Discord 或两者同时启用。
 
 ```json
 {
@@ -104,19 +104,19 @@ export DISCORD_BOT_TOKEN="..."
 ## 命令行参数参考 {#cli-reference}
 
 ```bash
-ante gateway [--config PATH] [--model MODEL] [--provider PROVIDER] [--output-format FORMAT] [--offline-model PATH]
+cante gateway [--config PATH] [--model MODEL] [--provider PROVIDER] [--output-format FORMAT] [--offline-model PATH]
 ```
 
 | 参数标识 | 默认值 | 说明 |
 | --- | --- | --- |
-| `--config` | `~/.ante/channels.json` | 渠道配置文件的路径 |
+| `--config` | `~/.cante/channels.json` | 渠道配置文件的路径 |
 | `--model` | `local` | 所有会话使用的大语言模型 |
 | `--provider` | `local` | 所选模型的提供商 |
 | `--output-format` | `minimal` | 网关 stdout 输出格式：`minimal`、`human` 或 `json` |
 | `--offline-model` | — | 本地 GGUF 文件路径。在接受消息前启动共享的 `llama serve` 路由器，并将所有对话路由至该服务（强制使用 `--provider local --model local`） |
 
 :::tip
-默认配置假定使用本地 llama.cpp 服务器或路由器。若需使用云端托管提供商，请显式传入 `--provider` 和 `--model`（例如 `ante gateway --provider anthropic --model claude-sonnet-5`）。
+默认配置假定使用本地 llama.cpp 服务器或路由器。若需使用云端托管提供商，请显式传入 `--provider` 和 `--model`（例如 `cante gateway --provider anthropic --model claude-sonnet-5`）。
 :::
 
 ### 输出格式 {#output-formats}
@@ -139,4 +139,4 @@ ante gateway [--config PATH] [--model MODEL] [--provider PROVIDER] [--output-for
 确认机器人已开启 **Message Content Intent**，且在频道中拥有 `Send Messages` 和 `Read Message History` 权限。
 
 **网关收到消息后未输出任何内容**
-使用 `--output-format human` 运行以查看所有事件，并检查 `~/.ante/logs/` 中的详细错误信息。
+使用 `--output-format human` 运行以查看所有事件，并检查 `~/.cante/logs/` 中的详细错误信息。

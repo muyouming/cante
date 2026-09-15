@@ -3,7 +3,7 @@ title: Providers
 description: "Pick your provider, sign in, and customize the catalog"
 ---
 
-Ante is provider-agnostic. Each provider implements a common interface for sending prompts and receiving streaming responses, and providers and models are resolved from a catalog at session start.
+Cante is provider-agnostic. Each provider implements a common interface for sending prompts and receiving streaming responses, and providers and models are resolved from a catalog at session start.
 
 This page covers the everyday tasks: picking a provider, authenticating, and customizing the catalog. For the complete list of built-in providers, every model they serve, and the full `catalog.json` schema, see the [Catalog Reference](/reference/catalog-reference).
 
@@ -11,13 +11,13 @@ This page covers the everyday tasks: picking a provider, authenticating, and cus
 
 You can set your provider three ways, in order of precedence:
 
-1. **CLI flag** — `ante --provider anthropic --model claude-sonnet-5`
-2. **Settings file** — set `provider` and `model` in `~/.ante/settings.json`
-3. **Auto-detect** — if you specify neither, Ante uses the first provider you have credentials for (and `local` if none).
+1. **CLI flag** — `cante --provider anthropic --model claude-sonnet-5`
+2. **Settings file** — set `provider` and `model` in `~/.cante/settings.json`
+3. **Auto-detect** — if you specify neither, Cante uses the first provider you have credentials for (and `local` if none).
 
 Every provider key you can pass to `--provider` is listed in the [Catalog Reference](/reference/catalog-reference#built-in-providers).
 
-Mid-session, type `/providers` in the TUI: pick a connected provider, then confirm a model (and effort) from its scoped picker. Ante remembers the last model you used on each provider. See [Models, Providers & Effort](/usage/models-and-thinking#switching-providers).
+Mid-session, type `/providers` in the TUI: pick a connected provider, then confirm a model (and effort) from its scoped picker. Cante remembers the last model you used on each provider. See [Models, Providers & Effort](/usage/models-and-thinking#switching-providers).
 
 ## Authentication
 
@@ -25,32 +25,32 @@ Most providers read an API key from an environment variable:
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
-ante --provider anthropic --model claude-sonnet-5
+cante --provider anthropic --model claude-sonnet-5
 ```
 
 Each provider's exact auth method (env var name or OAuth) is in the [Catalog Reference](/reference/catalog-reference#built-in-providers).
 
 ### Paste an API key
 
-You can also paste a key directly in the onboarding dialog (reopen it any time with `/welcome`): choose **Use API key**, and Ante auto-detects the provider from the key prefix, masks the input, and validates the key against the provider before storing it owner-only under `~/.ante/auth/`. A key set in the environment always takes precedence over a stored one.
+You can also paste a key directly in the onboarding dialog (reopen it any time with `/welcome`): choose **Use API key**, and Cante auto-detects the provider from the key prefix, masks the input, and validates the key against the provider before storing it owner-only under `~/.cante/auth/`. A key set in the environment always takes precedence over a stored one.
 
-With Anthropic selected on the API-key step, press `Tab` to sign in to the Anthropic Console in your browser instead — Ante provisions an API key for you automatically, without the key ever touching the clipboard.
+With Anthropic selected on the API-key step, press `Tab` to sign in to the Anthropic Console in your browser instead — Cante provisions an API key for you automatically, without the key ever touching the clipboard.
 
 ### Subscription login (OAuth)
 
-Providers with subscription plans (Anthropic, OpenAI, Antix, etc.) can sign in via OAuth instead, so you use your existing subscription without managing API keys. Type `/connect` in the TUI to open the provider login flow. Ante launches your default browser for authentication, then links your session automatically.
+Providers with subscription plans (Anthropic, OpenAI, Antix, etc.) can sign in via OAuth instead, so you use your existing subscription without managing API keys. Type `/connect` in the TUI to open the provider login flow. Cante launches your default browser for authentication, then links your session automatically.
 
 <img src="/assets/cookbook/connect.gif" alt="Connecting to a provider via /connect" style={{width: '100%', borderRadius: '8px', margin: '16px 0'}} />
 
-Once connected, Ante remembers your credentials for future sessions, so there is no need to re-authenticate each time.
+Once connected, Cante remembers your credentials for future sessions, so there is no need to re-authenticate each time.
 
 :::tip
-When using third-party providers, make sure the model supports tool use (function calling) — Ante relies on it for agent capabilities. If results are poor, try a larger or more capable model.
+When using third-party providers, make sure the model supports tool use (function calling) — Cante relies on it for agent capabilities. If results are poor, try a larger or more capable model.
 :::
 
 ## Custom catalog
 
-Create `~/.ante/catalog.json` to add a provider Ante doesn't ship, patch a built-in one, or tweak a model's defaults. It is merged on top of the built-in presets at startup, so you only specify what you want to add or change. Prefer not to write it by hand? Run `/add-provider` in the TUI: Ante discovers the endpoint's models, can probe which effort levels each one accepts, and writes the entry for you (restart to load it). The examples below are the common cases; see the [Catalog Reference](/reference/catalog-reference#catalogjson-schema) for the full schema, authentication forms, and resolution rules.
+Create `~/.cante/catalog.json` to add a provider Cante doesn't ship, patch a built-in one, or tweak a model's defaults. It is merged on top of the built-in presets at startup, so you only specify what you want to add or change. Prefer not to write it by hand? Run `/add-provider` in the TUI: Cante discovers the endpoint's models, can probe which effort levels each one accepts, and writes the entry for you (restart to load it). The examples below are the common cases; see the [Catalog Reference](/reference/catalog-reference#catalogjson-schema) for the full schema, authentication forms, and resolution rules.
 
 ### Add a hosted provider
 
@@ -80,7 +80,7 @@ Most hosted endpoints are OpenAI-compatible. Register one with `wire_style: "Ope
 
 ```bash
 export TOGETHER_API_KEY="..."
-ante --provider together --model moonshotai/Kimi-K2-Instruct
+cante --provider together --model moonshotai/Kimi-K2-Instruct
 ```
 
 ### Declare the effort levels a model accepts
@@ -116,7 +116,7 @@ Omit `auth` for a provider that needs no key, and leave `preferred_models` off w
 ```
 
 ```bash
-ante --provider ollama --model qwen2.5-coder:7b
+cante --provider ollama --model qwen2.5-coder:7b
 ```
 
 ### Patch a built-in provider
@@ -138,7 +138,7 @@ preset value:
 
 ### Send extra request parameters
 
-Gateways and proxies often require a parameter Ante doesn't model. Put it in `extra_body` and it is merged into every chat and streaming request body for that provider:
+Gateways and proxies often require a parameter Cante doesn't model. Put it in `extra_body` and it is merged into every chat and streaming request body for that provider:
 
 ```json
 {
@@ -156,7 +156,7 @@ Gateways and proxies often require a parameter Ante doesn't model. Put it in `ex
 }
 ```
 
-`extra_body` can only add fields — keys Ante already generates for that wire style (`model`, `messages`, `stream`, and friends) are dropped at startup with a notice, and the provider still loads. See [Extra request fields](/reference/catalog-reference#extra-request-fields) for the full reserved list.
+`extra_body` can only add fields — keys Cante already generates for that wire style (`model`, `messages`, `stream`, and friends) are dropped at startup with a notice, and the provider still loads. See [Extra request fields](/reference/catalog-reference#extra-request-fields) for the full reserved list.
 
 ### Override model defaults
 
@@ -183,7 +183,7 @@ The `models` section patches a model by id without redefining it. Each field you
    ```
 3. Use any model from [Open Router's model list](https://openrouter.ai/models):
    ```bash
-   ante --provider openrouter --model deepseek/deepseek-reasoner
+   cante --provider openrouter --model deepseek/deepseek-reasoner
    ```
 
 ### OpenAI-compatible providers
@@ -200,7 +200,7 @@ Many LLM providers expose an OpenAI-compatible API (e.g., Together AI, Fireworks
    ```
 3. Run with the OpenAI Compatible provider:
    ```bash
-   ante --provider openai-compatible --model meta-llama/Llama-3-70b-chat-hf
+   cante --provider openai-compatible --model meta-llama/Llama-3-70b-chat-hf
    ```
 
 For something you'll use repeatedly, add a named provider to your [custom catalog](#custom-catalog) instead so it shows up in the picker.

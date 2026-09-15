@@ -1,35 +1,35 @@
 ---
 title: "Providing Context: Files, Folders & the Web"
 sidebar_label: "Context"
-description: "Add files with @ mentions and let Ante pull in content from the web"
+description: "Add files with @ mentions and let Cante pull in content from the web"
 ---
 
 # Providing Context: Files, Folders & the Web
 
-Give the agent exactly the context it needs: reference local files and directories directly in your prompt, or let Ante fetch what it needs from the web.
+Give the agent exactly the context it needs: reference local files and directories directly in your prompt, or let Cante fetch what it needs from the web.
 
 ## Using @ mentions
 
-Type `@` followed by a file or directory path. Ante shows a search dropdown as you type — press Tab to autocomplete, then Enter to confirm.
+Type `@` followed by a file or directory path. Cante shows a search dropdown as you type — press Tab to autocomplete, then Enter to confirm.
 
 <img src="/assets/cookbook/files.gif" alt="Adding file context with @ mentions" style={{width: '100%', borderRadius: '8px', margin: '16px 0'}} />
 
 - **`@path/to/file.rs`** — embeds the full file contents into your message
 - **`@path/to/dir/`** — embeds the directory tree listing
 
-Completion covers the full project tree, including files nested more than six directories deep, and honors the same ignore rules as Ante's file tools. Project-relative searches reuse a background-built index for fast fuzzy matching. `~/`, absolute, `../`, and `./` paths also work, so files outside the project remain available.
+Completion covers the full project tree, including files nested more than six directories deep, and honors the same ignore rules as Cante's file tools. Project-relative searches reuse a background-built index for fast fuzzy matching. `~/`, absolute, `../`, and `./` paths also work, so files outside the project remain available.
 
 This ensures the agent sees exactly the code you're asking about, without guessing or searching.
 
 :::tip
-If you paste multiple file paths, Ante auto-prefixes them with `@` for convenience. You can reference as many files as you need in a single prompt.
+If you paste multiple file paths, Cante auto-prefixes them with `@` for convenience. You can reference as many files as you need in a single prompt.
 :::
 
 ## Pulling in web content
 
-Ante can search the web and fetch content from URLs, letting you pull in documentation, look up APIs, or research topics without leaving the terminal. Just ask naturally and Ante will use its web browsing tools to find what you need:
+Cante can search the web and fetch content from URLs, letting you pull in documentation, look up APIs, or research topics without leaving the terminal. Just ask naturally and Cante will use its web browsing tools to find what you need:
 
-<img src="/assets/cookbook/webbrowse.gif" alt="Ante performing a web search" style={{width: '100%', borderRadius: '8px', margin: '16px 0'}} />
+<img src="/assets/cookbook/webbrowse.gif" alt="Cante performing a web search" style={{width: '100%', borderRadius: '8px', margin: '16px 0'}} />
 
 The agent can:
 
@@ -44,5 +44,5 @@ Fetching a URL (`WebFetch`) is on by default. Full web **search** (`WebSearch`) 
 :::
 
 :::tip
-You can also pipe web content into Ante from the command line: `curl https://example.com/docs | ante -p "summarize this"`.
+You can also pipe web content into Cante from the command line: `curl https://example.com/docs | cante -p "summarize this"`.
 :::
