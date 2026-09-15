@@ -110,6 +110,38 @@ describe("layoutRow", () => {
   });
 });
 
+describe("scale", () => {
+  test("lays out a full transcript quickly and caches unchanged rows", () => {
+    const rows: Row[] = Array.from({ length: 400 }, (_, index) =>
+      row({
+        id: `r${index}`,
+        kind: (["user", "agent", "thinking", "tool", "turn"] as const)[index % 5]!,
+        text: Array.from({ length: 12 }, (_, line) => `entry ${index} line ${line} with enough words to wrap`).join("\n"),
+        detail: "  +added\n-removed\n@@ hunk",
+      }),
+    );
+    const options = { columns: 120, monoColumns: 100 };
+    const layout = createLayoutCache();
+
+    const coldStart = performance.now();
+    const lines = layout(rows, options);
+    const cold = performance.now() - coldStart;
+    expect(lines.length).toBeGreaterThan(3_000);
+
+    // One streaming tail is a new object; everything else is cached.
+    const tail: Row = { ...rows[rows.length - 1]!, id: "tail", text: "a fresh delta" };
+    const next = [...rows.slice(0, -1), tail];
+    const warmStart = performance.now();
+    layout(next, options);
+    const warm = performance.now() - warmStart;
+
+    // Ceilings are ~50x the observed cost locally: this catches a quadratic
+    // regression, it is not a benchmark.
+    expect(cold).toBeLessThan(250);
+    expect(warm).toBeLessThan(50);
+  });
+});
+
 describe("layout cache", () => {
   test("reuses layout for unchanged rows and remaps indices", () => {
     const layout = createLayoutCache();
