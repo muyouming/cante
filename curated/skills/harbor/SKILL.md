@@ -10,11 +10,11 @@ metadata:
 
 # Run Harbor with Cante
 
-Run [Harbor](https://github.com/laude-institute/harbor) with Cante as the agent. The adapter (`cante_agent.py`) lives in the `cante-harbor/` directory of the [cante repo](https://github.com/AntigmaLabs/cante). Harbor imports it and installs Cante inside each task sandbox from the published install script.
+Run [Harbor](https://github.com/laude-institute/harbor) with Cante as the agent. The adapter (`cante_agent.py`) lives in the `cante-harbor/` directory of the [cante repo](https://github.com/muyouming/cante). Harbor imports it and installs Cante inside each task sandbox from the published install script.
 
 ## Prerequisites
 
-- A checkout of [AntigmaLabs/cante](https://github.com/AntigmaLabs/cante), for `cante-harbor/`
+- A checkout of [muyouming/cante](https://github.com/muyouming/cante), for `cante-harbor/`
 - [uv](https://docs.astral.sh/uv/) with Python 3.12
 - Docker running: Harbor executes each task in a container
 - The provider API key exported in the shell

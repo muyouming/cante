@@ -26,7 +26,7 @@ const docsFooterItems = isZhHansBuild
 
 const footerCommunityItems = [
   { label: 'Discord', href: 'https://discord.gg/pqhj3DNGz2' },
-  { label: 'GitHub', href: 'https://github.com/AntigmaLabs/cante' },
+  { label: 'GitHub', href: 'https://github.com/muyouming/cante' },
 ]
 
 const footerCompanyItems = isZhHansBuild
@@ -193,7 +193,7 @@ const config: Config = {
           position: 'right',
         },
         {
-          href: 'https://github.com/AntigmaLabs/cante',
+          href: 'https://github.com/muyouming/cante',
           html: socialLinkHtml('GitHub', githubIcon),
           position: 'right',
         },

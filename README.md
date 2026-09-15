@@ -4,7 +4,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/AntigmaLabs/cante/releases"><img src="https://img.shields.io/github/v/release/AntigmaLabs/cante?include_prereleases&label=release&color=blueviolet" /></a>
+  <a href="https://github.com/muyouming/cante/releases"><img src="https://img.shields.io/github/v/release/muyouming/cante?include_prereleases&label=release&color=blueviolet" /></a>
   <a href="https://antigma.ai/eval"><img src="https://img.shields.io/badge/Terminal--Bench_2.1-live_results-2ea44f?logo=speedtest&logoColor=white" /></a>
   <a href="https://docs.antigma.ai"><img src="https://img.shields.io/badge/Docs-docs.antigma.ai-orange?logo=safari&logoColor=white" /></a>
   <a href="https://discord.gg/CbAsUR434B"><img src="https://img.shields.io/badge/Discord-Join%20Us-5865F2?logo=discord&logoColor=white" /></a>
@@ -229,7 +229,7 @@ We open sourced what really matters in the age of agentic coding, all under Apac
 
 Alongside these, [`curated/`](curated) is a shared space for reusable pieces from the team and community, laid out to mirror `~/.cante/`: settings profiles like [`pi`](curated/pi.settings.json) and [`plan`](curated/plan.settings.json), and skills.
 
-The core harness itself is developed in a private repository during the alpha and ships as a prebuilt binary via [releases](https://github.com/AntigmaLabs/cante/releases). Core libraries from it continue to be extracted here as they stabilize; progress is tracked in [issue #21](https://github.com/AntigmaLabs/cante/issues/21).
+The core harness itself is developed in a private repository during the alpha and ships as a prebuilt binary via [releases](https://github.com/muyouming/cante/releases). Core libraries from it continue to be extracted here as they stabilize; progress is tracked in [issue #21](https://github.com/muyouming/cante/issues/21).
 
 The protocol surface maps to Cante's client-daemon architecture:
 
