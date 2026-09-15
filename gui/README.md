@@ -32,6 +32,11 @@ cd gui && source scripts/toolchain.sh && cargo test --manifest-path src-tauri/Ca
 
 On a normal machine and on Linux CI it is a no-op.
 
+On Windows the same commands work from PowerShell: the shell is a normal Tauri
+app there, WebView2 renders the frontend (Windows 11 ships it; the bundler
+installs it when missing), and `cante.exe` resolves from `PATH`. Rust needs the
+MSVC toolchain, which `rustup` installs by default on Windows.
+
 ## Run
 
 ```sh
@@ -79,6 +84,17 @@ bash scripts/dom-smoke.sh                 # render the shell in Chrome, read it 
 
 `scripts/e2e.sh` runs all of the above in order, stops at the first failure and
 prints a one-line summary; it is the same gate CI runs.
+
+The Rust tests drive the fixture through `CANTE_BIN="bun <script>"`, because
+Windows cannot execute a `#!` script directly — the spec may carry leading
+arguments, and it is what makes the same test suite pass on `windows-latest`,
+where CI runs this gate alongside the Linux one. There is no way to cross-check
+the Windows target from macOS: `tauri-build`'s resource step needs a Windows
+host, so CI is the only Windows environment the project verifies.
+
+Two things the gate deliberately does not cover, both needing a real window:
+window geometry (persisted by `tauri-plugin-window-state`) and the rendered
+pixels (see `dom-smoke.sh` for a text-level substitute).
 
 `scripts/dom-smoke.sh` is the developer/agent aid for the one thing a terminal
 cannot assert on: the window. It builds the web assets, serves them, has Chrome

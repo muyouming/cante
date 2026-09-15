@@ -107,6 +107,10 @@ the keys in the table are the ones the frontend sends).
 - **Spawn lazily**: `cante serve` starts on the first command that needs it
   (any of the op-sending commands), or when `send_input` is called before
   `start_session`. `CANTE_BIN` overrides the binary (the fixture relies on it).
+- **`CANTE_BIN` is a command spec, not a path**: it may carry leading arguments
+  before the daemon's own `serve`, and tokens may be double-quoted so a Windows
+  path with spaces survives. `"bun <script>"` is how the tests drive the scripted
+  fixture on every platform — Windows cannot execute a `#!` script directly.
 - **stdin**: one JSON object per line, `{"op":…,"id":"op_<ULID>"}`.
 - **stdout**: one `EventMsg` JSON object per line; reassemble across chunk
   boundaries; skip (and log) non-JSON lines.

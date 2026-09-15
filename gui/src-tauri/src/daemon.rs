@@ -459,13 +459,63 @@ pub fn update_session_op(
 // Child process plumbing
 // ---------------------------------------------------------------------------
 
+/// Split a `CANTE_BIN` spec into the program and any leading arguments.
+///
+/// The spec may carry arguments so a script can stand in for `cante` on hosts
+/// without shebang handling — Windows cannot execute `fake-cante.ts` directly,
+/// so tests point `CANTE_BIN` at `"bun <script>"` there. Tokens may be
+/// double-quoted, because a Windows path may contain spaces. The daemon's own
+/// subcommand is appended after these arguments, so the child always sees
+/// `… serve` exactly like the real binary would.
+pub fn split_binary(spec: &str) -> (String, Vec<String>) {
+    let mut parts: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut quoted = false;
+    for ch in spec.trim().chars() {
+        match ch {
+            '"' => quoted = !quoted,
+            c if c.is_whitespace() && !quoted => {
+                if !current.is_empty() {
+                    parts.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    let mut iter = parts.into_iter();
+    let program = iter.next().unwrap_or_else(|| "cante".to_string());
+    (program, iter.collect())
+}
+
+/// Windows: `cante.exe` is a console program, so spawning it from a GUI process
+/// flashes a console window (and can steal focus). `CREATE_NO_WINDOW` keeps the
+/// child invisible while still giving it the piped stdio we own.
+#[cfg(windows)]
+fn hide_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+/// Everywhere else there is nothing to hide.
+#[cfg(not(windows))]
+fn hide_console(_command: &mut Command) {}
+
 fn spawn_child(bin: &str, cwd: &Path) -> Result<Child, String> {
-    Command::new(bin)
-        .arg("serve")
+    let (program, mut args) = split_binary(bin);
+    args.push("serve".to_string());
+    let mut command = Command::new(&program);
+    command
+        .args(&args)
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console(&mut command);
+    command
         .spawn()
         .map_err(|error| format!("could not start `{bin} serve`: {error}"))
 }
@@ -563,12 +613,17 @@ fn run_capture(
     cwd: &Path,
     timeout: Duration,
 ) -> Result<(String, String), String> {
-    let mut child = Command::new(bin)
+    let (program, leading) = split_binary(bin);
+    let mut command = Command::new(&program);
+    command
+        .args(&leading)
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console(&mut command);
+    let mut child = command
         .spawn()
         .map_err(|error| format!("could not run `{bin} {}`: {error}", args.join(" ")))?;
     let mut stdout = child.stdout.take().ok_or_else(|| "no stdout".to_string())?;

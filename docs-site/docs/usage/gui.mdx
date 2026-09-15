@@ -30,6 +30,15 @@ bun run dev
 
 `bun run dev` launches `tauri dev`: Vite serves the frontend on port 1420 and Tauri opens the native window pointed at it. The first run compiles the Rust shell. On Linux that build needs Tauri's [WebKitGTK prerequisites](https://tauri.app/start/prerequisites/) — the CI workflow installs them explicitly for the same reason.
 
+### Windows
+
+The client is an ordinary Tauri app on Windows: WebView2 renders the frontend
+(Windows 11 ships it, and the bundler installs it when missing) and `cante.exe`
+resolves from `PATH`, so the commands above work unchanged from PowerShell. The
+Rust tests drive the scripted fixture through `CANTE_BIN="bun <script>"` — the
+override accepts leading arguments precisely because Windows cannot execute a
+`#!` script directly — and CI runs the same gate on `windows-latest`.
+
 ### Pointing at a binary
 
 The shell resolves `cante` on `PATH` unless `CANTE_BIN` overrides it:
