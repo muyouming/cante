@@ -13,6 +13,13 @@ streaming transcript in the middle, a composer pinned to the bottom, and a
 token / context strip under it. Tool calls render as cards, and approval
 requests open a panel where each call gets its own decision.
 
+Because PocketJS's list primitive is uniform-row, the transcript is laid out as
+a stream of 20 px lines: one header line per entry, then wrapped body lines.
+Fenced code falls into the mono face, unified diffs get `+` / `-` / `@@`
+coloring, tool output gets its own capped section, and any entry opens in full
+from the detail modal. See
+[`src/transcript.ts`](https://github.com/muyouming/cante/blob/main/examples/gui/src/transcript.ts).
+
 ## Why a bridge is involved
 
 PocketJS gives a guest a **bounded, whole-response HTTP client** — `fetch` with

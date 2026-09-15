@@ -25,6 +25,7 @@ import Transcript from "./src/components/Transcript.tsx";
 const HEADER_H = 46;
 const COMPOSER_H = 56;
 const STATUS_H = 28;
+const RAIL_W = 252;
 const DEFAULT_SIZE = { w: 1100, h: 720 };
 
 /** Desktop hosts publish their logical size on `ui.__viewport`; console hosts
@@ -48,6 +49,7 @@ export default function App() {
 
   const compact = () => size().w < 900;
   const transcriptHeight = () => Math.max(140, size().h - HEADER_H - COMPOSER_H - STATUS_H);
+  const transcriptWidth = () => Math.max(240, size().w - (compact() ? 0 : RAIL_W));
 
   const syncViewport = () => {
     const viewport = readViewport();
@@ -106,7 +108,13 @@ export default function App() {
         </Show>
 
         <View class="flex-1 flex-col h-full">
-          <Transcript rows={store.rows()} height={transcriptHeight()} onOpen={setDetail} inputActive={() => true} />
+          <Transcript
+            rows={store.rows()}
+            width={transcriptWidth()}
+            height={transcriptHeight()}
+            onOpen={setDetail}
+            inputActive={() => true}
+          />
           <Composer
             busy={store.daemonStatus() === "streaming" || store.daemonStatus() === "thinking"}
             onSend={(text: string) => void store.send(text)}

@@ -1,17 +1,30 @@
-// The conversation surface: a fixed-row-height virtualized transcript.
+// The conversation surface.
 //
-// VirtualList v1 is uniform-height, so every entry renders as one 96px card —
-// a kind chip, a bounded body, and (for tools) a muted detail line. Full text
-// lives behind a press, which opens the detail modal.
-import { Focusable, Text, View } from "@pocketjs/framework/components";
-import { VirtualList } from "@pocketjs/framework/virtual-list";
-import { Show } from "solid-js";
+// PocketJS's VirtualList is uniform-row, so the transcript is rendered as a
+// stream of 20px lines produced by `src/transcript.ts`: a header line per entry
+// (kind chip + time) followed by wrapped body/output lines. Fenced code and
+// unified diffs get the mono face and diff colors; long entries are capped and
+// open in full from the detail modal.
+import { Text, View } from "@pocketjs/framework/components";
+import { onFrame } from "@pocketjs/framework/lifecycle";
+import { VirtualList, type VirtualListHandle } from "@pocketjs/framework/virtual-list";
+import { Show, createMemo, createSignal } from "solid-js";
 
-import type { Row } from "../store.ts";
+import type { Row } from "../rows.ts";
+import { LINE_HEIGHT, columnsFor, createLayoutCache, type Line } from "../transcript.ts";
 
-export const ROW_HEIGHT = 96;
+export interface TranscriptProps {
+  rows: Row[];
+  /** Content width in logical px (the list's own width). */
+  width: number;
+  height: number;
+  onOpen(row: Row): void;
+  inputActive(): boolean;
+}
 
-function toneText(tone: Row["tone"]): string {
+const layout = createLayoutCache();
+
+function chipClass(tone: Line["tone"]): string {
   switch (tone) {
     case "accent":
       return "text-xs text-sky-300 font-bold tracking-wide";
@@ -28,66 +41,99 @@ function toneText(tone: Row["tone"]): string {
   }
 }
 
-function bodyText(kind: Row["kind"]): string {
-  if (kind === "thinking") return "text-sm text-slate-400 leading-5";
-  if (kind === "tool") return "text-sm text-slate-200 leading-5";
-  if (kind === "error") return "text-sm text-red-300 leading-5";
-  if (kind === "turn") return "text-sm text-slate-400 leading-5";
-  if (kind === "info") return "text-sm text-slate-500 leading-5";
-  return "text-sm text-slate-100 leading-5";
+function bodyText(line: Line): string {
+  if (line.diff === "add") return "text-sm font-mono text-emerald-300";
+  if (line.diff === "del") return "text-sm font-mono text-red-300";
+  if (line.diff === "hunk") return "text-sm font-mono text-sky-300";
+  if (line.mono) return "text-sm font-mono text-slate-300";
+  switch (line.tone) {
+    case "accent":
+      return "text-sm text-sky-200";
+    case "ok":
+      return "text-sm text-emerald-200";
+    case "warn":
+      return "text-sm text-amber-200";
+    case "error":
+      return "text-sm text-red-200";
+    case "muted":
+      return "text-sm text-slate-400";
+    default:
+      return "text-sm text-slate-100";
+  }
 }
 
-function cardBg(kind: Row["kind"]): string {
-  if (kind === "user") return "w-full h-[96] flex-col justify-center px-4 py-2 bg-sky-950 border-b border-slate-800";
-  if (kind === "tool") return "w-full h-[96] flex-col justify-center px-4 py-2 bg-slate-900 border-b border-slate-800";
-  if (kind === "error") return "w-full h-[96] flex-col justify-center px-4 py-2 bg-red-950 border-b border-slate-800";
-  if (kind === "turn") return "w-full h-[96] flex-col justify-center px-4 py-2 bg-slate-950 border-b border-slate-800";
-  return "w-full h-[96] flex-col justify-center px-4 py-2 bg-[#0b0f14] border-b border-slate-800 focus:bg-slate-900";
-}
-
-/** Clip a row body for the fixed-height card; the modal holds the full text. */
-function clip(text: string, limit = 220): string {
-  const flat = text.replace(/\s+\n/g, "\n").trim();
-  return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
-}
-
-export interface TranscriptProps {
-  rows: Row[];
-  height: number;
-  onOpen(row: Row): void;
-  inputActive(): boolean;
+function lineClass(line: Line, focused: boolean): string {
+  if (line.chrome) {
+    return focused
+      ? "w-full h-full flex-row items-center gap-2 px-3 bg-slate-800 border-t border-slate-700"
+      : "w-full h-full flex-row items-center gap-2 px-3 bg-[#0e141b] border-t border-slate-800";
+  }
+  if (line.diff === "add") return "w-full h-full flex-row items-center px-3 bg-emerald-950";
+  if (line.diff === "del") return "w-full h-full flex-row items-center px-3 bg-red-950";
+  if (line.diff === "hunk") return "w-full h-full flex-row items-center px-3 bg-sky-950";
+  if (focused) return "w-full h-full flex-row items-center px-3 bg-slate-800";
+  switch (line.kind) {
+    case "user":
+      return "w-full h-full flex-row items-center px-3 bg-sky-950";
+    case "tool":
+      return "w-full h-full flex-row items-center px-3 bg-slate-900";
+    case "error":
+      return "w-full h-full flex-row items-center px-3 bg-red-950";
+    case "turn":
+      return "w-full h-full flex-row items-center px-3 bg-slate-950";
+    default:
+      return "w-full h-full flex-row items-center px-3 bg-[#0b0f14]";
+  }
 }
 
 export default function Transcript(props: TranscriptProps) {
+  const [focusedLine, setFocusedLine] = createSignal<number | null>(null);
+  let handle: VirtualListHandle | undefined;
+
+  const lines = createMemo<Line[]>(() => {
+    const columns = columnsFor(props.width);
+    const monoColumns = columnsFor(props.width, true) - 2;
+    return layout(props.rows, { columns, monoColumns });
+  });
+
+  // VirtualList owns focus; mirror its index so the focused line reads as such.
+  onFrame(() => {
+    const index = handle?.focusedIndex() ?? null;
+    if (index !== focusedLine()) setFocusedLine(index);
+  });
+
   return (
     <View class="flex-1 w-full">
       <VirtualList
-        count={props.rows.length}
-        rowHeight={ROW_HEIGHT}
+        ref={(value) => {
+          handle = value;
+        }}
+        count={lines().length}
+        rowHeight={LINE_HEIGHT}
         height={props.height}
         stickToBottom
         inputActive={props.inputActive}
         onRowPress={(index) => {
-          const row = props.rows[index];
+          const line = lines()[index];
+          const row = line ? props.rows[line.row] : undefined;
           if (row) props.onOpen(row);
         }}
         renderRow={(index) => {
-          const row = props.rows[index];
-          if (!row) return <View class="w-full h-[96]" />;
+          const line = lines()[index];
+          if (!line) return <View class="w-full h-full" />;
           return (
-            <Focusable class={cardBg(row.kind)}>
-              <View class="flex-row items-center gap-2">
-                <Text class={toneText(row.tone)}>{row.label.toUpperCase()}</Text>
-                <Text class="text-xs text-slate-600">{row.time}</Text>
-                <Show when={row.streaming}>
+            <View class={lineClass(line, focusedLine() === index)}>
+              <Show
+                when={line.chrome}
+                fallback={<Text class={bodyText(line)}>{line.text || " "}</Text>}
+              >
+                <Text class={chipClass(line.tone)}>{line.text}</Text>
+                <Text class="text-xs text-slate-600">{props.rows[line.row]?.time ?? ""}</Text>
+                <Show when={line.streaming}>
                   <Text class="text-xs text-sky-500">●</Text>
                 </Show>
-              </View>
-              <Text class={bodyText(row.kind)}>{clip(row.text)}</Text>
-              <Show when={row.detail}>
-                <Text class="text-xs text-slate-500">{clip(row.detail, 120)}</Text>
               </Show>
-            </Focusable>
+            </View>
           );
         }}
       />
