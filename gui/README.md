@@ -68,6 +68,25 @@ exchange plus one pending approval, so the window opens on a populated
 transcript) and runs `bun run dev`. Set `FAKE_CANTE_SEED=0` for an empty
 transcript. The app starts its own session, so no external POST is needed.
 
+## Package
+
+```sh
+bun run build          # .app + .dmg on macOS, .msi + NSIS .exe on Windows
+bun run build:app      # macOS: the .app only, no disk image
+```
+
+`tauri build` runs the web build first, compiles the shell in release mode and
+bundles it. The bundles are **unsigned**: Gatekeeper warns on first launch and
+Windows SmartScreen asks for confirmation until the project has signing
+identities.
+
+`bun run build:app` exists because the `.dmg` step drives Finder through
+AppleScript to lay out the disk-image window. A terminal without Automation
+permission (a sandboxed agent, a locked screen) cannot do that, so the disk
+image fails while the app bundles fine. CI has the permission and produces both.
+The macOS and Windows bundles are attached to a release by
+`.github/workflows/gui-release.yml` (tag `gui-v*`, or run it by hand).
+
 ## Test and verify
 
 ```sh

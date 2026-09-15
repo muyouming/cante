@@ -1,0 +1,92 @@
+name: GUI Release
+
+# Builds the desktop bundles. Nothing here runs on a pull request — bundling is
+# slow (a release Rust build per platform) and needs no review signal beyond the
+# `GUI` workflow, which stays the gate.
+#
+#   workflow_dispatch                  → artifacts only
+#   workflow_dispatch with a tag       → artifacts + attached to that release
+#   push a `gui-v*` tag                → same as above, automatically
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to attach the bundles to (e.g. gui-v0.1.0). Empty builds artifacts only.'
+        required: false
+        default: ''
+  push:
+    tags:
+      - 'gui-v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    name: Bundle (${{ matrix.label }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Apple silicon only: an Intel build would need `--target
+          # x86_64-apple-darwin` (or a universal build), which roughly doubles
+          # the release build for a platform the client is not aimed at yet.
+          - runner: macos-latest
+            label: macOS arm64
+            artifact: cante-gui-macos-aarch64
+          - runner: windows-latest
+            label: Windows x86_64
+            artifact: cante-gui-windows-x86_64
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.17.0
+        with:
+          toolchain: stable
+          cache-workspaces: gui/src-tauri -> target
+
+      # `tauri build` runs `bun run build:web` first (tauri.conf.json's
+      # beforeBuildCommand), then compiles the shell in release mode and bundles
+      # it: .app + .dmg on macOS, .msi + NSIS .exe on Windows. The bundles are
+      # UNSIGNED — macOS Gatekeeper and Windows SmartScreen will warn until the
+      # project has signing identities.
+      - name: Build the bundle
+        working-directory: gui
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
+      - name: Upload the bundles
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            gui/src-tauri/target/release/bundle/**
+          # A bundling failure that still exits 0 must not pass silently.
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Attach to the release
+        # Tags push here automatically; a manual run opts in with the tag input.
+        if: startsWith(github.ref, 'refs/tags/gui-v') || inputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+          ARTIFACT: ${{ matrix.artifact }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "note: release $TAG does not exist yet — creating it"
+            gh release create "$TAG" --title "$TAG" --notes "Cante desktop client bundles."
+          fi
+          # Only the installable images, not the intermediate bundle trees.
+          find gui/src-tauri/target/release/bundle -type f \
+            \( -name '*.dmg' -o -name '*.msi' -o -name '*setup.exe' \) \
+            -exec gh release upload "$TAG" {} --clobber \;
+          echo "attached $ARTIFACT to $TAG"
