@@ -10,28 +10,43 @@ approvals, a composer, and a token/context status strip.
 ┌──────────────────────────────────────────────────────────────────────┐
 │ CANTE   ~/dev/project            model  provider  effort  perm        │  header
 ├────────────┬─────────────────────────────────────────────────────────┤
-│ SESSION    │ you                        12:04                        │
+│ SESSION    │ YOU                          12:04                      │
 │ ses_01J…   │ add retry to the upload client                          │
-│            │                                                         │
-│ MODEL      │ cante                      12:04                        │
-│ Sonnet 5   │ I'll read the upload path first.                        │
-│            │                                                         │
-│ PROVIDER   │ thinking · reading the client and its tests…            │
-│ Anthropic  │                                                         │
-│            │ TOOL Bash                  12:05  ●                     │
-│ EFFORT     │ rg -n "upload" src/                                     │
-│ High       │                                                         │
-│            │ APPROVAL REQUIRED           12:05                       │
+│            │ CANTE                        12:04                      │
+│ MODEL      │ I'll patch the upload path.                             │
+│ Sonnet 5   │ THINKING                     12:04  ●                   │
+│            │ reading the client and its tests…                       │
+│ PROVIDER   │ TOOL Edit                    12:05                      │
+│ Anthropic  │ @@ -1,4 +1,6 @@                                         │
+│            │ -  let retries = 0;                                     │
+│ EFFORT     │ +  let retries = 0;                                     │
+│ High       │ +  const backoff = (n) => 2 ** n;                       │
+│            │ APPROVAL REQUIRED            12:05                      │
 │ PERMISSIONS│ ┌ Bash  once ┐ ┌ Write  session ┐                        │
-│ Strict     │                                                         │
-│            │ ── APPROVE ──────────────────────────── DENY ALL ──     │
+│ Strict     │ ── APPROVE ──────────────────────────── DENY ALL ──     │
+│            │ Ask Cante…                          ┌SEND┐ ┌STOP┐        │  composer
 │ WORKSPACE  │                                                         │
-│ ~/dev/…    │ Ask Cante…                          ┌SEND┐ ┌STOP┐        │  composer
+│ ~/dev/…    │                                                         │
 │ ● bridge   │                                                         │
 ├────────────┴─────────────────────────────────────────────────────────┤
 │ idle   in 12.4k · out 1.2k   ctx ▓▓▓▓░░░░ 38%   steps 4               │  status
 └──────────────────────────────────────────────────────────────────────┘
 ```
+
+## Rendering
+
+`VirtualList` is uniform-row, so the transcript is laid out as a stream of
+20 px **lines** (`src/transcript.ts`): one header line per entry (kind chip +
+time) followed by wrapped body lines. That buys, with no measurement pass:
+
+- **fenced code** in agent messages renders in the mono face, fences stripped;
+- **unified diffs** in tool output are colored (`+` green, `-` red, `@@` blue);
+- **tool output** gets its own `output` header and is capped at 80 lines;
+- a 400-line cap per entry, with the remainder summarized and the full text one
+  press away in the detail modal.
+
+Layout is memoized per row object, so a poll batch re-lays out only the entries
+that changed (normally just the streaming tail).
 
 ## Why there is a bridge
 
@@ -140,14 +155,15 @@ bridge refuses nothing but also reaches nothing: keep it on `127.0.0.1`.
 ## Tests
 
 ```sh
-bun test examples/gui/bridge        # 12 tests: framing, ring, batching, HTTP
+bun test examples/gui/bridge examples/gui/src   # 24 tests: bridge + layout
 bunx tsc --noEmit -p examples/gui/tsconfig.bridge.json
 ```
 
-The integration cases drive a scripted `cante serve` double over real pipes
-(`bridge/fixtures/fake-cante.ts`), so line framing, the event ring, long-poll
-wakeups, approval state, and the HTTP surface are exercised end to end without
-a Cante install.
+The bridge integration cases drive a scripted `cante serve` double over real
+pipes (`bridge/fixtures/fake-cante.ts`), so line framing, the event ring,
+long-poll wakeups, approval state, and the HTTP surface are exercised end to
+end without a Cante install. The layout suite is pure: wrapping budgets, fence
+detection, diff classification, truncation, and the per-row cache.
 
 ## Layout
 
@@ -159,6 +175,9 @@ examples/gui/
   src/
     protocol.ts             # Op/Evt wire types (mirrors crates/protocol-shape)
     bridge.ts               # bounded-fetch HTTP client for the bridge
+    rows.ts                 # the transcript row model (framework-free)
+    transcript.ts           # pure rows -> display-lines layout + cache
+    transcript.test.ts      # layout unit tests
     store.ts                # signals + the event reducer + the poll loop
     components/             # Transcript, Composer, SessionRail, modals, …
   bridge/
@@ -175,8 +194,10 @@ examples/gui/
   in the `web-app` / `macos-app` profiles yet. `input.text`/`input.ime` are
   declared under `enhances` so the app lights up automatically when a host
   grows them.
-- **One row height.** `VirtualList` is uniform-row v1, so transcript entries
-  render as 96 px cards and long bodies open in a modal.
+- **Wrapping is estimated, not measured.** PocketJS exposes no text metrics,
+  so the layout pass wraps at an average advance (6.6 px proportional, 8.6 px
+  mono). A line that runs long clips in the list; pressing it opens the full
+  entry.
 - **Desktop/web bundling** is not in the CLI's backend table yet (`pocket
   build --target web-app` compiles the bundle, then finds no backend). `pocket
   dev` and `pocket check` are the supported paths; PSP and Vita are the fully

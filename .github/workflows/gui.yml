@@ -35,7 +35,7 @@ jobs:
       - name: Typecheck bridge
         run: bunx tsc --noEmit -p tsconfig.bridge.json
       - name: Unit + integration tests
-        run: bun test bridge
+        run: bun test bridge src
 
   app:
     name: PocketJS check (${{ matrix.target }})

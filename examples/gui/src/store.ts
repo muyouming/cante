@@ -7,6 +7,7 @@ import { after } from "@pocketjs/framework/clock";
 import { batch, createSignal, onCleanup, type Accessor } from "solid-js";
 
 import { BridgeUnavailable, DEFAULT_BRIDGE_URL, POLL_TIMEOUT_MS, createBridge, type Bridge } from "./bridge.ts";
+import type { Row, RowTone } from "./rows.ts";
 import {
   EFFORTS,
   PERMISSION_MODES,
@@ -30,19 +31,9 @@ import {
 export type Connection = "connecting" | "online" | "offline";
 export type DaemonStatus = "idle" | "thinking" | "streaming" | "awaiting" | "error" | "offline";
 
-export type RowKind = "user" | "agent" | "thinking" | "tool" | "info" | "error" | "turn";
-export type RowTone = "accent" | "neutral" | "ok" | "warn" | "error" | "muted";
-
-export interface Row {
-  id: string;
-  kind: RowKind;
-  label: string;
-  text: string;
-  detail: string;
-  tone: RowTone;
-  streaming: boolean;
-  time: string;
-}
+// Rows live in `rows.ts` so the pure layout pass can be tested without the
+// framework; re-exported here because views import their store types here.
+export type { Row, RowKind, RowTone } from "./rows.ts";
 
 export interface CatalogModel {
   id: string;

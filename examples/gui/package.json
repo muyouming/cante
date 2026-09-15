@@ -6,7 +6,7 @@
   "description": "PocketJS GUI client for Cante, plus the loopback HTTP bridge it talks to.",
   "scripts": {
     "bridge": "bun bridge/cante-bridge.ts",
-    "test": "bun test bridge",
+    "test": "bun test bridge src",
     "typecheck:bridge": "tsc --noEmit -p tsconfig.bridge.json",
     "check": "bash scripts/pocket.sh check",
     "dev": "bash scripts/pocket.sh dev"
