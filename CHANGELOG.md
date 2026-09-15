@@ -82,13 +82,13 @@
 
 ### Added
 - GPT-6 Astra in the OpenAI API catalog, supporting reasoning efforts from `low` through `max`
-- `ante serve` accepts concurrent client connections over `--sock` and `--ws`, running each peer in its own task so handshakes do not block other connections, while client shutdowns end only the calling connection
+- `cante serve` accepts concurrent client connections over `--sock` and `--ws`, running each peer in its own task so handshakes do not block other connections, while client shutdowns end only the calling connection
 
 ### Changed
 - Offline inference uses llama.cpp router mode behind a shared runtime across CLI, TUI, and startup callers. Model switches no longer restart the server process, load and unload track native progress events, and workers are cleaned up reliably on cancellation, stop, or exit
 - Gemini 3.8 Flash replaces older Gemini Flash and Pro entries across Gemini API, Vertex AI, OpenRouter, and Antix (supporting low/medium/high reasoning effort) as the default Gemini model; Gemini 3.5 Flash Lite is retained as the Feather option on Gemini API and Vertex AI
 - All built-in tools ignore unknown argument fields instead of rejecting the call, preventing errors from model envelope wrappers or flag aliases, and tool error messages format cause chains onto a single line without backtrace noise
-- Protocol event channels and `crates/ante-sdk`'s `EventReceiver` are now unbounded, warning on backlog rather than dropping events under heavy streaming bursts
+- Protocol event channels and `crates/cante-sdk`'s `EventReceiver` are now unbounded, warning on backlog rather than dropping events under heavy streaming bursts
 
 ### Fixed
 - Compaction aligns fold input boundaries to conversation steps so a `tool_result` is never included without its preceding `tool_use`, preventing invalid request errors and persistent compaction failures on tool-dense dialogs
@@ -97,9 +97,9 @@
 ## v0.preview.94 - 2026-09-03
 
 ### Added
-- Project-level settings: an `.ante/settings.json` in the nearest ancestor of the session directory layers over your user settings when a session starts. Because it is repository content, it may pin or narrow only — `permission_mode`, `permissions.allow`, `mcp_servers`, `system_prompt`, `model` and `provider` are dropped with a notice. `ante doctor` shows a `project` row, and `ante rage` includes the file redacted
-- `ante serve --sock [PATH]` hosts Ante on a Unix socket (default `run/serve.sock` in the ante home). Ownership is an exclusive lock on a `.lock` sibling, so a second host refuses to start and leaves the live socket alone, while a stale socket file is replaced. One client's `Shutdown` ends only its own connection; the process exits on SIGINT or SIGTERM
-- `crates/ante-sdk` — the Ante client for external programs: `connect(endpoint, options)` with the endpoint grammar `stdio` | `unix:<path>` | `ws://<addr>`, yielding the same `Client` on every path. `stdio` spawns `ante serve --stdio` as its own child; `ws://` is not connectable yet
+- Project-level settings: an `.cante/settings.json` in the nearest ancestor of the session directory layers over your user settings when a session starts. Because it is repository content, it may pin or narrow only — `permission_mode`, `permissions.allow`, `mcp_servers`, `system_prompt`, `model` and `provider` are dropped with a notice. `cante doctor` shows a `project` row, and `cante rage` includes the file redacted
+- `cante serve --sock [PATH]` hosts Cante on a Unix socket (default `run/serve.sock` in the cante home). Ownership is an exclusive lock on a `.lock` sibling, so a second host refuses to start and leaves the live socket alone, while a stale socket file is replaced. One client's `Shutdown` ends only its own connection; the process exits on SIGINT or SIGTERM
+- `crates/cante-sdk` — the Cante client for external programs: `connect(endpoint, options)` with the endpoint grammar `stdio` | `unix:<path>` | `ws://<addr>`, yielding the same `Client` on every path. `stdio` spawns `cante serve --stdio` as its own child; `ws://` is not connectable yet
 - Sessions can carry a title: `/rename <title>` sets it, bare `/rename` clears it. The title shows in the resume picker instead of the first message, follows into the terminal tab, and survives a resume
 - Claude Fable 5.1 replaces Fable 5 across the Anthropic, Anthropic subscription, Antix, and OpenRouter catalogs
 - Gemini 3.8 Flash on the Gemini API, Vertex AI, and OpenRouter, with Gemini 3.7/3.8's exact low/medium/high reasoning ladder; Muse Spark 1.3 replaces 1.2 on OpenRouter
@@ -133,7 +133,7 @@
 ## v0.preview.92 - 2026-08-31
 
 ### Added
-- `/add-provider` — a bundled skill that walks you through adding a custom OpenAI-compatible provider: it discovers the endpoint's models, probes which reasoning effort levels it accepts, and writes the entry into `~/.ante/catalog.json`
+- `/add-provider` — a bundled skill that walks you through adding a custom OpenAI-compatible provider: it discovers the endpoint's models, probes which reasoning effort levels it accepts, and writes the entry into `~/.cante/catalog.json`
 - `catalog.json` can declare which reasoning effort levels a model supports, so a custom endpoint shows its real ladder instead of one guessed from the model's name
 
 ### Changed
@@ -189,27 +189,27 @@
 - GLM 5.3 Flash on Z.ai (`glm-5.3-flash`) and OpenRouter (`z-ai/glm-5.3-flash`), with multimodal input, a 1M context window, and graded low/high/max reasoning effort; GLM 5.3 remains the default Z.ai model
 
 ### Changed
-- Run arguments supplied alongside a subcommand are now rejected instead of silently ignored (`ante --model X catalog` errors)
+- Run arguments supplied alongside a subcommand are now rejected instead of silently ignored (`cante --model X catalog` errors)
 - Tool filters take one value per occurrence — `--tools Read,Write` or a repeated flag; space-separated lists now error, and `--allowed-tools` is removed in favor of `--tools`
 - `--profile` is process-scoped: it rides before or after any subcommand, and `serve`, `gateway`, `doctor`, `update`, `rage`, and external apps honor it instead of reading default settings; an unknown profile name falls back to `settings.json` rather than creating one
-- WebFetch drops its unused `prompt` argument — Ante has no extraction sub-model, so the interface is URL-only
+- WebFetch drops its unused `prompt` argument — Cante has no extraction sub-model, so the interface is URL-only
 
 ### Fixed
-- WebFetch identifies itself with an `ante/<version>` User-Agent — GitHub's API rejects UA-less requests with an opaque 403 — and a failed request now carries up to 2KB of the response body instead of a bare status line
-- `ante serve` handles a client that closes stdout as a logged disconnect instead of hanging, stops reading stdin after an explicit `Shutdown`, and bounds runtime teardown
+- WebFetch identifies itself with an `cante/<version>` User-Agent — GitHub's API rejects UA-less requests with an opaque 403 — and a failed request now carries up to 2KB of the response body instead of a bare status line
+- `cante serve` handles a client that closes stdout as a logged disconnect instead of hanging, stops reading stdin after an explicit `Shutdown`, and bounds runtime teardown
 
 ## v0.preview.88 - 2026-08-25
 
 ### Added
-- `ante <name>` runs an external `ante-<name>` executable, resolved from `~/.ante/bin` then `$PATH`; built-in subcommands always take precedence, and an unrecognized name still gets a did-you-mean suggestion
+- `cante <name>` runs an external `cante-<name>` executable, resolved from `~/.cante/bin` then `$PATH`; built-in subcommands always take precedence, and an unrecognized name still gets a did-you-mean suggestion
 - Antix OAuth catalog refresh: Gemini 3.7 Flash, Claude Sonnet 5, Claude Opus 5, and GLM 5.3 replace Gemini 3.5 Flash, Sonnet 4.6, Opus 4.8, and GLM 5.2
 
 ### Changed
-- `ante --help` and usage errors no longer create a log file or boot telemetry — the CLI now parses before the async runtime, logging, and crash hook are initialized
+- `cante --help` and usage errors no longer create a log file or boot telemetry — the CLI now parses before the async runtime, logging, and crash hook are initialized
 - The bundled `skill-creator` skill is model-invocable only and no longer appears as a user-facing command
 
 ### Fixed
-- The "no provider is configured" error names the credential environment variables Ante actually reads and points at `ante auth login` and offline mode
+- The "no provider is configured" error names the credential environment variables Cante actually reads and points at `cante auth login` and offline mode
 - A terminal that never answers the cursor-position query now explains that the inline UI query went unanswered and suggests launching outside the current wrapper or multiplexer, instead of reporting a bare crossterm timeout
 - MCP tool schemas no longer carry `pattern` onto the wire, so an unsupported regex construct (such as lookaround) in one server's schema can no longer make a provider reject the entire tool set; non-regex guidance like `format: email` is preserved
 
@@ -265,10 +265,10 @@
 
 ### Changed
 - Qwen 3.8 models send graded `reasoning_effort` levels instead of collapsing every level to thinking on/off, and the effort picker lists only the distinct supported levels
-- MCP servers are discovered in parallel (one slow server no longer delays the rest), and MCP tool calls time out after 10 minutes — overridable via `ANTE_MCP_TOOL_TIMEOUT` — instead of pinning a turn until interrupt
+- MCP servers are discovered in parallel (one slow server no longer delays the rest), and MCP tool calls time out after 10 minutes — overridable via `CANTE_MCP_TOOL_TIMEOUT` — instead of pinning a turn until interrupt
 
 ### Fixed
-- Headless (`ante -p`) sessions wait for MCP warm-up before the first turn, so MCP tools are present in the model's schema instead of every MCP call failing silently
+- Headless (`cante -p`) sessions wait for MCP warm-up before the first turn, so MCP tools are present in the model's schema instead of every MCP call failing silently
 - llama.cpp context overflows are recognized as context-full and trigger the one-time compaction retry instead of failing the turn
 - Writing to a closed or broken output pipe (consumer exits, macOS EIO) is handled leniently instead of panicking during terminal teardown
 
@@ -288,13 +288,13 @@
 ## v0.preview.82 - 2026-08-17
 
 ### Added
-- `ante offline install` downloads and installs the bundled offline inference engine; running an offline model on a machine without the engine now fails fast with that instruction instead of an opaque error
+- `cante offline install` downloads and installs the bundled offline inference engine; running an offline model on a machine without the engine now fails fast with that instruction instead of an opaque error
 
 ### Changed
 - Grep and Glob permission rules and session approvals now scope to the search pattern instead of blanketing the whole tool, and their transcript rows show just the pattern
 - Tool calls in the transcript show wider, more balanced argument previews
 - Markdown output is restyled: headings, ordered-list markers, inline code, tables, and fenced code blocks on a dark panel background
-- `ante catalog` output is wrapped in a `{"providers": [...]}` envelope
+- `cante catalog` output is wrapped in a `{"providers": [...]}` envelope
 
 ## v0.preview.81 - 2026-08-15
 
@@ -305,13 +305,13 @@
 - macOS release binaries are signed and notarized, so Gatekeeper no longer blocks first launch
 - Sent messages are restyled with a muted margin bar, and the composer prompt shows a chevron
 - Quiet tool calls are grouped into one collapsing activity cell instead of stacking individual rows
-- Log files are written to per-day directories (`logs/<date>/ante.<pid>.log`)
-- Background job handles live under `run/jobs/<proc_id>/`, and the Ante home gains a `tmp/` scratch tier
+- Log files are written to per-day directories (`logs/<date>/cante.<pid>.log`)
+- Background job handles live under `run/jobs/<proc_id>/`, and the Cante home gains a `tmp/` scratch tier
 
 ## v0.preview.80 - 2026-08-14
 
 ### Changed
-- The bundled `ante-guide` skill routes to the documentation corpus instead of inlining reference tables that drift, and no longer suggests the nonexistent `/permissions` command
+- The bundled `cante-guide` skill routes to the documentation corpus instead of inlining reference tables that drift, and no longer suggests the nonexistent `/permissions` command
 
 ### Fixed
 - Empty streaming deltas from providers (Qwen-style reasoning placeholders, OpenRouter-style empty text) no longer fragment messages into broken parts
@@ -322,7 +322,7 @@
 - Gemini 3.7 Flash in the native Gemini, Vertex AI Gemini, and OpenRouter catalogs
 
 ### Changed
-- The bundled `ante-guide` skill answers configuration questions and edits Ante's own settings from a built-in reference, without cloning the docs repository
+- The bundled `cante-guide` skill answers configuration questions and edits Cante's own settings from a built-in reference, without cloning the docs repository
 
 ### Fixed
 - The composer cursor no longer blinks, which broke scrollback in terminals that scroll on output
@@ -341,7 +341,7 @@
 - xAI turns no longer fail with `Argument not supported: search_context_size` — the field is dropped from the provider-native web search tool, so xAI works without `--exclude-tools WebSearch`
 - OAuth credentials refresh against the active preset's endpoint, and token issuer URLs are validated
 - Antix Grok 4.5 is marked text-only, matching what the live route actually accepts
-- `ante doctor` no longer errors when its output is piped to a consumer that closes the pipe early
+- `cante doctor` no longer errors when its output is piped to a consumer that closes the pipe early
 
 ## v0.preview.77 - 2026-08-12
 
@@ -356,7 +356,7 @@
 - OpenAI server-overload errors are retried instead of failing the turn
 - Background job handle files are cleaned up at startup once the job has finished, instead of accumulating
 - `/term` reports tmux as missing instead of opening an empty picker
-- An empty `ANTE_ENV` is treated as unset, so telemetry keeps its default environment label
+- An empty `CANTE_ENV` is treated as unset, so telemetry keeps its default environment label
 
 ## v0.preview.76 - 2026-08-11
 
@@ -376,10 +376,10 @@
 ## v0.preview.75 - 2026-08-10
 
 ### Added
-- Custom providers in the user catalog accept an `extra_body` map — provider-specific fields merged into chat and streaming request bodies, for gateways and proxies that require extra parameters. Keys that collide with Ante-owned request fields are dropped with a notice at catalog load instead of rejecting the whole provider
+- Custom providers in the user catalog accept an `extra_body` map — provider-specific fields merged into chat and streaming request bodies, for gateways and proxies that require extra parameters. Keys that collide with Cante-owned request fields are dropped with a notice at catalog load instead of rejecting the whole provider
 
 ### Changed
-- `SessionStart` and `SessionUpdated` no longer carry the active provider's full model list on the wire; that catalog data is available from `ante catalog`. Clients still receive the provider id, display name, and effective base URL
+- `SessionStart` and `SessionUpdated` no longer carry the active provider's full model list on the wire; that catalog data is available from `cante catalog`. Clients still receive the provider id, display name, and effective base URL
 
 ### Fixed
 - Anthropic requests are compatible with proxies and gateways again: the unsupported context-management field is no longer sent, extended-thinking budgets respect the 1024-token minimum, and a temperature other than 1 with thinking enabled now fails with a clear message instead of a confusing provider error
@@ -387,14 +387,14 @@
 ## v0.preview.74 - 2026-08-10
 
 ### Changed
-- When telemetry is configured, Ante uses a random, resettable installation ID and per-process run IDs; operator identity is sent only when explicitly configured
+- When telemetry is configured, Cante uses a random, resettable installation ID and per-process run IDs; operator identity is sent only when explicitly configured
 
 ## v0.preview.73 - 2026-08-10
 
 ### Added
 - Coming from Claude Code or Codex: when a session in this directory was active within the last 4 hours, startup offers to pick it up. `/resume-claude` and `/resume-codex` are bundled skills that locate the foreign transcript, read it as data, and reconstruct task, progress, and next step before confirming with you. The hint appears once per project and never in headless runs.
-- `/import-claude` copies Claude Code's project memory for this directory into Ante's project memory. Existing Ante files are never overwritten, and re-running is a clean no-op.
-- `settings.json` accepts `system_prompt`, `append_system_prompt`, and `tools` as fresh-session defaults, plus `auto_memory`, `skills`, and `session_save` with matching CLI overrides. Explicit CLI flags and wire values stay authoritative, and persisted custom prompt text is redacted from `ante rage` bundles.
+- `/import-claude` copies Claude Code's project memory for this directory into Cante's project memory. Existing Cante files are never overwritten, and re-running is a clean no-op.
+- `settings.json` accepts `system_prompt`, `append_system_prompt`, and `tools` as fresh-session defaults, plus `auto_memory`, `skills`, and `session_save` with matching CLI overrides. Explicit CLI flags and wire values stay authoritative, and persisted custom prompt text is redacted from `cante rage` bundles.
 
 ### Changed
 - Bump the bundled llama.cpp engine to b10217
@@ -406,7 +406,7 @@
 ## v0.preview.72 - 2026-08-09
 
 ### Added
-- Onboarding "Use API key" now takes a pasted key directly: masked input with provider auto-detect from the key prefix, validated against the provider, and stored owner-only under `~/.ante/auth` (env vars still take precedence)
+- Onboarding "Use API key" now takes a pasted key directly: masked input with provider auto-detect from the key prefix, validated against the provider, and stored owner-only under `~/.cante/auth` (env vars still take precedence)
 - On the API-key step with Anthropic selected, `Tab` signs in to the Anthropic Console in the browser and provisions an API key automatically — the key never touches the clipboard
 - Compaction results are now visible: a collapsed `* Compacted` marker appears in the conversation (manual and auto compaction), with the full summary in the ctrl+o transcript view; `CompactEnd` now carries the summary text on the wire, and trimmed oversized tool results are reported with an info line
 
@@ -416,27 +416,27 @@
 
 ### Fixed
 - A fresh install with no credentials no longer lands in a session silently wired to the unreachable built-in `localhost:8080` fallback — the not-connected state points at `/connect`, and a successful sign-in restarts the session on the newly connected provider
-- Standalone `ante update` no longer panics with a broken pipe when its launcher closes stdout, and a closed pipe can no longer cancel an update
+- Standalone `cante update` no longer panics with a broken pipe when its launcher closes stdout, and a closed pipe can no longer cancel an update
 
 ## v0.preview.71 - 2026-08-07
 
 ### Added
-- `ante doctor` checks that the Ante home directory (`~/.ante`) is writable
+- `cante doctor` checks that the Cante home directory (`~/.cante`) is writable
 
 ### Changed
 - Dependency updates
 
 ### Fixed
-- Cancelling a running Bash tool call now kills its whole process group, so grandchild processes no longer keep running after Ante reports execution stopped
+- Cancelling a running Bash tool call now kills its whole process group, so grandchild processes no longer keep running after Cante reports execution stopped
 - Streaming model calls that produce no usable output within 5 minutes fail with a timeout instead of hanging the turn indefinitely
-- The installer refuses `sudo` installs that would leave `~/.ante` root-owned, and startup shows a visible notice when the Ante home is unwritable
+- The installer refuses `sudo` installs that would leave `~/.cante` root-owned, and startup shows a visible notice when the Cante home is unwritable
 - Proxy `auth_unavailable` credential failures are classified as terminal auth errors instead of consuming the reconnect budget
 - Parameterless tool schemas keep an explicit empty `properties` object on OpenAI-compatible requests, fixing rejections from strict endpoints
 
 ## v0.preview.70 - 2026-08-03
 
 ### Added
-- `--profile <name>`: named settings profiles as whole-file replacement settings files (`<name>.settings.json`), plus the `ANTE_PROFILE` env var and a built-in file-less `bare` profile
+- `--profile <name>`: named settings profiles as whole-file replacement settings files (`<name>.settings.json`), plus the `CANTE_PROFILE` env var and a built-in file-less `bare` profile
 - Bare `/term` opens a terminal picker — list, attach/detach, kill, and create sessions
 
 ### Changed
@@ -446,7 +446,7 @@
 - SKILL.md reads are labeled as skill loads in the transcript
 
 ### Fixed
-- `ante catalog` exits cleanly instead of panicking when its output pipe closes early
+- `cante catalog` exits cleanly instead of panicking when its output pipe closes early
 - Brighter agent response text; thinking text pinned to foreground gray
 - Hidden hardware cursor parked at the composer so OS IME popups appear at the caret
 - Z.ai five-hour usage-limit errors (code 1308) are classified as terminal quota instead of being retried
@@ -469,11 +469,11 @@
 
 ### Added
 - `/term <name> [args...]` launches the named binary in the fresh session — `/term claude --continue` opens a split already running claude; existing sessions still just attach
-- `terminals` status-line chip (on by default) showing live `ante-*` tmux sessions by name
+- `terminals` status-line chip (on by default) showing live `cante-*` tmux sessions by name
 - `--no-skills` run flag: skip skill discovery entirely (nothing advertised in the system prompt or dispatchable as commands); `/resume` preserves the choice
 
 ### Changed
-- Repeated `/term` calls stack viewer splits in one right-hand column, replacing the composed `ante-view-*` viewer — every agent keeps a full-width column and Ante keeps its size
+- Repeated `/term` calls stack viewer splits in one right-hand column, replacing the composed `cante-view-*` viewer — every agent keeps a full-width column and Cante keeps its size
 - Two-row footer: identity items (model, dir, branch, …) on top, permission mode and activity chips beneath
 - Default DeepSeek V4 Flash to max reasoning effort on all routes (Antix, direct, OpenRouter)
 - Dependency updates
@@ -491,7 +491,7 @@
 - Delete sessions from the `/resume` picker
 
 ### Changed
-- Replace `/pty` with `/term`: the agent drives durable named tmux sessions through ordinary Bash (namespaced `ante-*`), and `/term <name>` opens a native terminal split/window to watch or type; sessions survive Ante restarts
+- Replace `/pty` with `/term`: the agent drives durable named tmux sessions through ordinary Bash (namespaced `cante-*`), and `/term <name>` opens a native terminal split/window to watch or type; sessions survive Cante restarts
 - No subprocesses or file writes before the TUI's first frame (faster, quieter startup)
 - Bump the bundled llama.cpp engine to b10107
 
@@ -552,7 +552,7 @@
 - Remove Qwen 3.7 Max/Plus from the OpenRouter catalog (endpoints no longer accessible); they remain available via Antix
 - Render markdown lists directly instead of via tui-markdown
 - Inset all TUI rows two columns from the window edge
-- Consolidate the ante-guide into a bundled, model-only skill
+- Consolidate the cante-guide into a bundled, model-only skill
 - Warn when concurrent Edit/Write mutations target the same file path
 - Prune older built-in model catalog entries
 
@@ -656,7 +656,7 @@
 - Improve TUI resize handling to prevent scrollback duplication and content loss, with an opt-in `resize_reflow = "purge"` setting for terminals that can safely purge and replay
 - Install official pinned `llama.cpp` prebuilts with SHA-256 verification, atomic versioned installs, GPU-tier selection, and mirror fallback for offline engine setup
 - Improve installer feedback and reliability
-- Refine default prompts for task-contract validation and split Ante product guidance from working defaults
+- Refine default prompts for task-contract validation and split Cante product guidance from working defaults
 
 ## v0.preview.52 - 2026-07-02
 
@@ -689,7 +689,7 @@
 - Make MCP and dynamically registered tools obey tool filtering, fixing a bypass where they ignored `--allowed-tools`/`--disallowed-tools`; rename the flags to `--include-tools`/`--exclude-tools` with the old names kept as hidden aliases
 - Send native web search to the model by default on web-search-capable providers
 - Add `gpt-5.4` and `gpt-5.4-mini` to the OpenAI subscription models
-- Apply `~/.ante/catalog.json` as partial provider overlays, patching existing providers field-by-field instead of overwriting them
+- Apply `~/.cante/catalog.json` as partial provider overlays, patching existing providers field-by-field instead of overwriting them
 - Make skill frontmatter parsing lenient, recovering from common unquoted colons in `description:` values
 
 ## v0.preview.45 - 2026-06-25
@@ -699,7 +699,7 @@
 - Infer model vision support from model markers, and return image metadata from Read when the model lacks vision
 - Make native web search a declarative provider flag
 - Rework bash mode to run in the user's shell and reuse the shared crates/exec path
-- Surface settings parse notices in `ante doctor`
+- Surface settings parse notices in `cante doctor`
 - Dependency updates
 
 ## v0.preview.44 - 2026-06-22
@@ -708,7 +708,7 @@
 - Add bash mode (!cmd) for running shell commands inline
 - Make the status line Claude Code-compatible, show the raw context window, and refresh its defaults
 - Lay groundwork for offline mode with a self-contained TUI
-- Make ante-guide read docs from the ante-preview repo checkout
+- Make cante-guide read docs from the cante-preview repo checkout
 - Improve auto-memory tool labels in the TUI
 - Handle malformed tool-call arguments cleanly
 - Read the subagent report from the last model message
@@ -730,7 +730,7 @@
 
 ## v0.preview.42 - 2026-06-18
 
-- Add an `ante doctor` command and speed up startup by decoupling TUI session start
+- Add an `cante doctor` command and speed up startup by decoupling TUI session start
 - Remove the global Ctrl-D TUI exit shortcut
 - Show the Shift+Tab cycle hint in the custom status-line footer
 - Guard background bash commands against trailing ampersands
@@ -800,7 +800,7 @@
 
 - Add OpenRouter provider profiles
 - Show a sign-off message and bug-report hint when exiting the TUI
-- Set the terminal window title to "Ante"
+- Set the terminal window title to "Cante"
 - Handle redacted thinking blocks from the latest Claude models
 - Prevent the Bash tool from inheriting stdin
 - Fix token usage accounting for Anthropic and OpenAI-compatible streaming
@@ -810,13 +810,13 @@
 - Add OpenAI-compatible provider profiles
 - Surface subagent activity as live tool updates instead of separate turn events
 - Recover from transient API decode failures instead of crashing the run
-- Allow `ANTE_INSTALL_DIR` to override the install location and harden the install script
+- Allow `CANTE_INSTALL_DIR` to override the install location and harden the install script
 - Unify the LLM streaming driver across providers for consistent streaming behavior
 - Dependency updates
 
 ## v0.preview.33 - 2026-06-04
 
-- Add `ante update --version <V>` to pin or roll back to a specific release
+- Add `cante update --version <V>` to pin or roll back to a specific release
 - Retire the legacy `latest` update channel and transparently resolve it to `stable`
 - Drive vision/image support from model metadata
 - Reduce Read and multiline Grep latency
@@ -824,7 +824,7 @@
 
 ## v0.preview.32 - 2026-06-04
 
-- Add `ante catalog` command to print the merged model catalog as JSON
+- Add `cante catalog` command to print the merged model catalog as JSON
 - Show structured turn errors instead of a raw debug dump
 - Recover from transient connection resets instead of failing the run
 - Fix Anthropic 400 error from unsigned thinking blocks
@@ -841,7 +841,7 @@
 
 ## v0.preview.30 - 2026-05-31
 
-- Add `ante rage` command to bundle a bug report
+- Add `cante rage` command to bundle a bug report
 - Persist tool approvals via "always allow" and store allow/ask/deny rules in settings.json
 - Let Edit create a new file via an empty `old_string`
 - Suggest a similar path when Edit targets a missing file
@@ -867,7 +867,7 @@
 
 ## v0.preview.28 - 2026-05-21
 
-- Support global `~/.ante/AGENTS.md` alongside project AGENTS.md
+- Support global `~/.cante/AGENTS.md` alongside project AGENTS.md
 - Update OpenAI model catalog and provider selector fallback
 - Add generic LLM model listing across providers
 - Re-enable antix smoke test in release workflow
@@ -992,7 +992,7 @@
 
 ## v0.preview.14 - 2026-04-21
 
-- Add escape example of Ante and fix config reload bug
+- Add escape example of Cante and fix config reload bug
 - Fix shutdown bug for offline serve and headless
 - Show changelog on update
 - Support symlinked user skill roots
@@ -1105,7 +1105,7 @@
 ## v0.preview.2 - 2026-03-09
 
 - Fix command popup scrolling when selection moves past visible area
-- Add Ante terminus
+- Add Cante terminus
 - Add standard OAuth support for Antix
 - Fix OAuth callback server cancellation and bind errors
 - Adjust OpenAI reasoning effort mapping

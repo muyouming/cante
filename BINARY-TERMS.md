@@ -1,6 +1,6 @@
-# Ante Binary Preview Terms
+# Cante Binary Preview Terms
 
-These terms apply to the prebuilt `ante` binaries distributed by Antigma Labs
+These terms apply to the prebuilt `cante` binaries distributed by Antigma Labs
 via GitHub Releases and install scripts (the "Binary"). The source code
 published in this repository is licensed separately under the Apache License,
 Version 2.0 — see [LICENSE](LICENSE).
