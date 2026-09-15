@@ -1,4 +1,4 @@
-"""Dependency-free contract tests for the adapter published to AntigmaLabs/ante."""
+"""Dependency-free contract tests for the adapter published to AntigmaLabs/cante."""
 from __future__ import annotations
 
 import importlib
@@ -84,7 +84,7 @@ def _install_harbor_stubs() -> None:
 
 _install_harbor_stubs()
 sys.path.insert(0, str(Path(__file__).parent))
-ante_agent = importlib.import_module("ante_agent")
+cante_agent = importlib.import_module("cante_agent")
 
 
 class ShellCommandTests(unittest.TestCase):
@@ -101,8 +101,8 @@ class ShellCommandTests(unittest.TestCase):
     def test_setup_log_command_overwrites_setup_log(self):
         with tempfile.TemporaryDirectory() as directory:
             log = Path(directory) / "setup" / "stdout.txt"
-            with patch.object(ante_agent, "_SETUP_LOG", log):
-                command = ante_agent.setup_log_command(
+            with patch.object(cante_agent, "_SETUP_LOG", log):
+                command = cante_agent.setup_log_command(
                     "printf 'fresh setup output\\n'", append=False
                 )
 
@@ -116,8 +116,8 @@ class ShellCommandTests(unittest.TestCase):
             log = Path(directory) / "setup" / "stdout.txt"
             log.parent.mkdir()
             log.write_text("earlier setup output\n")
-            with patch.object(ante_agent, "_SETUP_LOG", log):
-                command = ante_agent.setup_log_command("printf 'next setup output\\n'")
+            with patch.object(cante_agent, "_SETUP_LOG", log):
+                command = cante_agent.setup_log_command("printf 'next setup output\\n'")
 
             result = self.run_shell(command)
 
@@ -126,23 +126,23 @@ class ShellCommandTests(unittest.TestCase):
                 log.read_text(), "earlier setup output\nnext setup output\n"
             )
 
-    def test_ante_command_preserves_agent_failure(self):
+    def test_cante_command_preserves_agent_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            binary = root / "ante"
+            binary = root / "cante"
             binary.write_text(
                 "#!/usr/bin/env bash\ncat >/dev/null\nprintf 'agent output\\n'\nexit 19\n"
             )
             binary.chmod(0o755)
             instruction = root / "instruction.md"
             instruction.write_text("test instruction")
-            log = root / "logs" / "ante.txt"
+            log = root / "logs" / "cante.txt"
 
             with (
-                patch.object(ante_agent, "_AGENT_LOG", log),
-                patch.object(ante_agent, "_INSTRUCTION_PATH", instruction),
+                patch.object(cante_agent, "_AGENT_LOG", log),
+                patch.object(cante_agent, "_INSTRUCTION_PATH", instruction),
             ):
-                command = ante_agent.ante_command("test-model", None, None, "")
+                command = cante_agent.cante_command("test-model", None, None, "")
             result = self.run_shell(command, path=root)
 
             self.assertEqual(result.returncode, 19)
@@ -153,19 +153,19 @@ class ShellCommandTests(unittest.TestCase):
 class AdapterMetadataTests(unittest.TestCase):
     def test_default_args_disable_session_persistence_and_skills(self):
         self.assertEqual(
-            ante_agent.DEFAULT_ANTE_ARGS,
+            cante_agent.DEFAULT_CANTE_ARGS,
             "--yolo --output-format json --no-session-save --no-skills",
         )
 
     def test_agent_info_preserves_runtime_provider_and_full_model_name(self):
-        agent = object.__new__(ante_agent.AnteAgent)
+        agent = object.__new__(cante_agent.CanteAgent)
         agent._version = "1.2.3"
         agent.model_name = "deepseek/deepseek-v4-flash-0731"
         agent._provider = "openrouter"
 
         info = agent.to_agent_info()
 
-        self.assertEqual(info.name, "ante")
+        self.assertEqual(info.name, "cante")
         self.assertEqual(info.version, "1.2.3")
         self.assertEqual(info.model_info.name, "deepseek/deepseek-v4-flash-0731")
         self.assertEqual(info.model_info.provider, "openrouter")

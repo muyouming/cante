@@ -3,12 +3,12 @@ name: Harbor Adapter
 on:
   pull_request:
     paths:
-      - 'ante-harbor/**'
+      - 'cante-harbor/**'
       - '.github/workflows/harbor-adapter.yml'
   push:
     branches: [main]
     paths:
-      - 'ante-harbor/**'
+      - 'cante-harbor/**'
       - '.github/workflows/harbor-adapter.yml'
 
 permissions:
@@ -29,6 +29,6 @@ jobs:
           python-version: '3.12'
           enable-cache: false
       - name: Run unit tests
-        run: uv run --no-project python -m unittest discover -s ante-harbor -p 'test_*.py' -v
+        run: uv run --no-project python -m unittest discover -s cante-harbor -p 'test_*.py' -v
       - name: Compile adapter modules
-        run: uv run --no-project python -m py_compile ante-harbor/ante_agent.py ante-harbor/ante_events.py
+        run: uv run --no-project python -m py_compile cante-harbor/cante_agent.py cante-harbor/cante_events.py

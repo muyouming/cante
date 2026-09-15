@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from ante_events import (
+from cante_events import (
     CACHE_CREATION_METADATA_KEY,
     EFFORT_METADATA_KEY,
     FAILURE_CLASS_METADATA_KEY,
@@ -46,18 +46,18 @@ from harbor.models.trial.result import AgentInfo, ModelInfo
 from harbor.utils.trajectory_utils import format_trajectory_json
 
 
-_AGENT_LOG = Path("/logs/agent/ante.txt")
+_AGENT_LOG = Path("/logs/agent/cante.txt")
 _SETUP_LOG = _AGENT_LOG.parent / "setup" / "stdout.txt"
 _INSTRUCTION_PATH = Path("/tmp/instruction.md")
-_INSTALLER_URL = "https://download.ante.run/install.sh"
+_INSTALLER_URL = "https://download.cante.run/install.sh"
 _INSTALLER_MAX_BYTES = 1024 * 1024
 
-ENABLE_ATIF_ENV = "ANTE_ENABLE_ATIF"
+ENABLE_ATIF_ENV = "CANTE_ENABLE_ATIF"
 
-# Extra Ante behavior flags used when the caller passes none. Model/provider are
+# Extra Cante behavior flags used when the caller passes none. Model/provider are
 # structured inputs owned by the adapter, never part of this string. run.py
 # imports this so the orchestrator and adapter defaults cannot drift.
-DEFAULT_ANTE_ARGS = "--yolo --output-format json --no-session-save --no-skills"
+DEFAULT_CANTE_ARGS = "--yolo --output-format json --no-session-save --no-skills"
 
 _HARBOR_ERROR_BY_EXCEPTION_KIND = {
     "rate_limited": ApiRateLimitError,
@@ -89,7 +89,7 @@ def _populate_context_from_events(
     events: list[dict[str, Any]],
     diagnostic_failure_class: str | None,
 ) -> None:
-    """Translate Ante events into the small AgentContext metadata interface."""
+    """Translate Cante events into the small AgentContext metadata interface."""
     usage = accumulate_usage_from_events(events)
     if has_reported_usage(usage):
         for field in ("cost_usd", "n_input_tokens", "n_output_tokens", "n_cache_tokens"):
@@ -131,17 +131,17 @@ def setup_log_command(command: str, *, append: bool = True) -> str:
 
 
 def install_command_from_args(install_args: str) -> str:
-    """Build a robust in-sandbox install.sh command for published Ante builds."""
+    """Build a robust in-sandbox install.sh command for published Cante builds."""
     quoted_args = " ".join(shlex.quote(arg) for arg in shlex.split(install_args or ""))
     execute = (
-        'ANTE_INSTALL_DIR=/usr/local/bin NO_MODIFY_PATH=true bash -- "$installer_path"'
+        'CANTE_INSTALL_DIR=/usr/local/bin NO_MODIFY_PATH=true bash -- "$installer_path"'
     )
     if quoted_args:
         execute = f"{execute} {quoted_args}"
     return "\n".join(
         [
             "set -eu",
-            'installer_path="$(mktemp "${TMPDIR:-/tmp}/ante-install.XXXXXX")"',
+            'installer_path="$(mktemp "${TMPDIR:-/tmp}/cante-install.XXXXXX")"',
             "trap 'rm -f \"$installer_path\"' EXIT",
             "curl --fail --silent --show-error --location \\",
             "  --retry 3 --retry-delay 1 --retry-max-time 120 \\",
@@ -153,37 +153,37 @@ def install_command_from_args(install_args: str) -> str:
     )
 
 
-def split_extra_ante_args(ante_args: str) -> list[str]:
-    """Split extra Ante flags and reject flags owned by structured inputs.
+def split_extra_cante_args(cante_args: str) -> list[str]:
+    """Split extra Cante flags and reject flags owned by structured inputs.
 
     ``--model``/``--provider``/``--effort`` have dedicated inputs; letting them
-    ride in ``ante_args`` too would emit duplicate flags (Ante exits 2) and
+    ride in ``cante_args`` too would emit duplicate flags (Cante exits 2) and
     leave provenance recording only the structured value.
     """
-    tokens = shlex.split(ante_args or "")
+    tokens = shlex.split(cante_args or "")
     reserved = ("--model", "--provider", "--effort")
     for token in tokens:
         if token in reserved or token.startswith(tuple(f"{flag}=" for flag in reserved)):
             raise ValueError(
-                "ante_args must not include --model, --provider, or --effort; "
+                "cante_args must not include --model, --provider, or --effort; "
                 "use model_name, provider, and effort instead"
             )
     return tokens
 
 
-def ante_command(
+def cante_command(
     model_name: str,
     provider: str | None,
     effort: str | None,
-    ante_args: str,
+    cante_args: str,
 ) -> str:
-    """Build the final Ante invocation run inside the sandbox."""
-    args = ["ante", "--model", model_name]
+    """Build the final Cante invocation run inside the sandbox."""
+    args = ["cante", "--model", model_name]
     if provider:
         args += ["--provider", provider]
     if effort:
         args += ["--effort", effort]
-    args += split_extra_ante_args(ante_args)
+    args += split_extra_cante_args(cante_args)
     command = " ".join(shlex.quote(arg) for arg in args)
     escaped_log_dir = shlex.quote(str(_AGENT_LOG.parent))
     escaped_log_path = shlex.quote(str(_AGENT_LOG))
@@ -206,9 +206,9 @@ async def upload_instruction(environment: BaseEnvironment, instruction: str) -> 
         await environment.upload_file(source_path, str(_INSTRUCTION_PATH))
 
 
-class AnteAgent(BaseInstalledAgent):
+class CanteAgent(BaseInstalledAgent):
     SUPPORTS_ATIF: bool = True
-    _INSTALL_VERSION_COMMAND = "ante --version"
+    _INSTALL_VERSION_COMMAND = "cante --version"
     CLI_FLAGS = [
         CliFlag("provider", cli="--provider", type="str"),
         CliFlag("reasoning_effort", cli="--effort", type="str"),
@@ -226,32 +226,32 @@ class AnteAgent(BaseInstalledAgent):
     def __init__(
         self,
         *args,
-        ante_args: str | None = None,
+        cante_args: str | None = None,
         install_command: str | None = None,
         install_args: str | None = None,
         **kwargs,
     ) -> None:
         super().__init__(*args, **kwargs)
-        self._ante_args = DEFAULT_ANTE_ARGS if ante_args is None else ante_args
+        self._cante_args = DEFAULT_CANTE_ARGS if cante_args is None else cante_args
         self._provider = self._resolved_flags.get("provider") or None
         self._effort = self._resolved_flags.get("reasoning_effort") or None
         self._enable_atif = self.resolve_env_vars().get(ENABLE_ATIF_ENV) == "true"
         # Optional in-sandbox install command (e.g. an install.sh one-liner). When
         # set, install() runs it instead of uploading a runner-built binary, so the
         # same adapter works for both PR builds and published nightly/release
-        # builds. It must leave `ante` on PATH for the shared --version check.
+        # builds. It must leave `cante` on PATH for the shared --version check.
         self._install_command = install_command or None
         self._install_args = install_args
         # Successful exec output is authoritative over a possibly partial
-        # downloaded ante.txt. Timeouts leave this unset and use the file.
+        # downloaded cante.txt. Timeouts leave this unset and use the file.
         self._event_output: str | None = None
 
     @staticmethod
     def name() -> str:
-        return "ante"
+        return "cante"
 
     def to_agent_info(self) -> AgentInfo:
-        """Report the provider and model consumed by Ante without re-parsing them."""
+        """Report the provider and model consumed by Cante without re-parsing them."""
         return AgentInfo(
             name=self.name(),
             version=self.version() or "unknown",
@@ -262,7 +262,7 @@ class AnteAgent(BaseInstalledAgent):
             ),
         )
 
-    async def _installed_ante_matches_requested_version(
+    async def _installed_cante_matches_requested_version(
         self, environment: BaseEnvironment
     ) -> bool:
         if self._version is None:
@@ -280,8 +280,8 @@ class AnteAgent(BaseInstalledAgent):
         return installed_version == self._version
 
     async def install(self, environment: BaseEnvironment) -> None:
-        if await self._installed_ante_matches_requested_version(environment):
-            self.logger.debug("Ante is already available at the requested version")
+        if await self._installed_cante_matches_requested_version(environment):
+            self.logger.debug("Cante is already available at the requested version")
             return
 
         install_command = self._install_command
@@ -289,7 +289,7 @@ class AnteAgent(BaseInstalledAgent):
             install_command = install_command_from_args(self._install_args)
 
         if install_command is not None:
-            # Provision ante from within the sandbox: a raw command, or install.sh
+            # Provision cante from within the sandbox: a raw command, or install.sh
             # for a published build. No runner-built binary required.
             await self.ensure_system_dependencies(environment, ("curl", "bash"))
             await self.exec_as_root(
@@ -298,16 +298,16 @@ class AnteAgent(BaseInstalledAgent):
         else:
             # Default mode: upload the binary staged next to this file by the
             # caller.
-            binary_path = Path(__file__).parent / "ante"
+            binary_path = Path(__file__).parent / "cante"
             if not binary_path.exists():
-                raise FileNotFoundError(f"Ante binary not found at: {binary_path}")
+                raise FileNotFoundError(f"Cante binary not found at: {binary_path}")
             await environment.upload_file(
                 source_path=binary_path,
-                target_path="/usr/local/bin/ante",
+                target_path="/usr/local/bin/cante",
             )
             await self.exec_as_root(
                 environment,
-                command=setup_log_command("chmod +x /usr/local/bin/ante", append=False),
+                command=setup_log_command("chmod +x /usr/local/bin/cante", append=False),
             )
 
         version_command = self.get_version_command()
@@ -326,16 +326,16 @@ class AnteAgent(BaseInstalledAgent):
         for line in text.splitlines():
             parts = line.strip().split()
             if parts:
-                return parts[1] if parts[0] == "ante" and len(parts) >= 2 else parts[0]
+                return parts[1] if parts[0] == "cante" and len(parts) >= 2 else parts[0]
         return text
 
     def _classify_exec_error(self, command: str, result: Any) -> NonZeroAgentExitCodeError:
-        """Classify a failed Ante process from its final structured turn.
+        """Classify a failed Cante process from its final structured turn.
 
         Harbor calls this hook only after an exec returns nonzero. Exceptions
         raised by Harbor's own timeout/cancellation boundary bypass it.
 
-        A final ``TurnEnd(Error)`` is authoritative and maps through Ante's kind
+        A final ``TurnEnd(Error)`` is authoritative and maps through Cante's kind
         table. A run whose final ``TurnEnd`` completed failed for a reason the
         model did not report, so it stays a plain exit-code error rather than
         letting recovered-turn text drive classification. Only output with no
@@ -356,7 +356,7 @@ class AnteAgent(BaseInstalledAgent):
 
         detail = (
             f"Command failed (exit {result.return_code}): {command}\n"
-            f"Ante TurnEnd(Error):\n{self._truncate_output(failure.detail_text)}"
+            f"Cante TurnEnd(Error):\n{self._truncate_output(failure.detail_text)}"
         )
         error_type = (
             _HARBOR_ERROR_BY_EXCEPTION_KIND.get(failure.exception_kind)
@@ -389,7 +389,7 @@ class AnteAgent(BaseInstalledAgent):
                         model_name=self.model_name,
                     )
                 except Exception:
-                    self.logger.exception("Failed to convert Ante events to trajectory")
+                    self.logger.exception("Failed to convert Cante events to trajectory")
                 else:
                     if trajectory:
                         trajectory_path = Path(self.logs_dir) / "trajectory.json"
@@ -398,7 +398,7 @@ class AnteAgent(BaseInstalledAgent):
                                 format_trajectory_json(trajectory.to_json_dict()),
                                 encoding="utf-8",
                             )
-                            self.logger.debug(f"Wrote Ante trajectory to {trajectory_path}")
+                            self.logger.debug(f"Wrote Cante trajectory to {trajectory_path}")
                         except OSError as exc:
                             self.logger.debug(
                                 f"Failed to write trajectory file {trajectory_path}: {exc}"
@@ -413,11 +413,11 @@ class AnteAgent(BaseInstalledAgent):
         model_name = self.model_name or os.environ.get("MODEL_NAME")
         if not model_name:
             raise RuntimeError("model must be set (pass `-m <name>` or set MODEL_NAME)")
-        # ante reads API keys / MODEL_* from the container env that Harbor
+        # cante reads API keys / MODEL_* from the container env that Harbor
         # populates from --ae/--agent-env. The instruction is uploaded as a
         # file so the command only needs shell escaping for flags and paths.
         await upload_instruction(environment, instruction)
-        command = ante_command(model_name, self._provider, self._effort, self._ante_args)
+        command = cante_command(model_name, self._provider, self._effort, self._cante_args)
 
         result = await self.exec_as_agent(environment, command=command)
         # tee mirrors the event stream to stdout. A successful exec's captured

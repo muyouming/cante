@@ -41,7 +41,7 @@ def _install_harbor_stubs() -> None:
 
 
 _install_harbor_stubs()
-ante_events = importlib.import_module("ante_events")
+cante_events = importlib.import_module("cante_events")
 
 
 def _event(name: str, data: Any, *, timestamp: str | None = None) -> dict[str, Any]:
@@ -61,7 +61,7 @@ class EventStreamTests(unittest.TestCase):
         second = _event("Info", "ready")
         output = "\n".join(
             (
-                "installing ante...",
+                "installing cante...",
                 json.dumps(first),
                 "{malformed json",
                 "[1, 2, 3]",
@@ -70,7 +70,7 @@ class EventStreamTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(ante_events.events_from_text(output), [first, second])
+        self.assertEqual(cante_events.events_from_text(output), [first, second])
 
     def test_tool_call_stats_count_errors_and_malformed_calls(self):
         events = [
@@ -131,7 +131,7 @@ class EventStreamTests(unittest.TestCase):
             ),
         ]
 
-        stats = ante_events.tool_call_stats_from_events(events)
+        stats = cante_events.tool_call_stats_from_events(events)
 
         self.assertEqual(
             stats,
@@ -156,7 +156,7 @@ class EventStreamTests(unittest.TestCase):
         ]
 
         self.assertEqual(
-            ante_events.accumulate_usage_from_events(events),
+            cante_events.accumulate_usage_from_events(events),
             {
                 "n_input_tokens": 17,
                 "n_output_tokens": 7,
@@ -165,7 +165,7 @@ class EventStreamTests(unittest.TestCase):
             },
         )
         self.assertIsNone(
-            ante_events.accumulate_usage_from_events(
+            cante_events.accumulate_usage_from_events(
                 [_usage(input_tokens=1, output_tokens=2)]
             )["n_cache_creation_tokens"]
         )
@@ -181,7 +181,7 @@ class EventStreamTests(unittest.TestCase):
             _usage(input_tokens=7, output_tokens=5, cache_creation_tokens=0),
         ]
 
-        metrics = ante_events._usage_totals(event for event in events)
+        metrics = cante_events._usage_totals(event for event in events)
 
         self.assertEqual(metrics.total_prompt_tokens, 17)
         self.assertEqual(metrics.total_completion_tokens, 7)
@@ -206,9 +206,9 @@ class FailureAndStepTests(unittest.TestCase):
         )
         recovered = _event("TurnEnd", {"status": "Completed", "steps": 2})
 
-        self.assertIsNone(ante_events.final_turn_failure([failed, recovered]))
+        self.assertIsNone(cante_events.final_turn_failure([failed, recovered]))
 
-        failure = ante_events.final_turn_failure([failed])
+        failure = cante_events.final_turn_failure([failed])
         self.assertEqual(failure.kind, "rate_limited")
         self.assertEqual(failure.failure_class, "rate_limited")
         self.assertEqual(failure.exception_kind, "rate_limited")
@@ -218,7 +218,7 @@ class FailureAndStepTests(unittest.TestCase):
         )
 
     def test_future_failure_kind_has_stable_fallback(self):
-        failure = ante_events.final_turn_failure(
+        failure = cante_events.final_turn_failure(
             [
                 _event(
                     "TurnEnd",
@@ -248,12 +248,12 @@ class FailureAndStepTests(unittest.TestCase):
             _usage(input_tokens=6, output_tokens=2),
         ]
 
-        self.assertEqual(ante_events.total_steps_from_events(events), 2)
+        self.assertEqual(cante_events.total_steps_from_events(events), 2)
         self.assertEqual(
-            ante_events.incomplete_steps_lower_bound_from_events(events), 5
+            cante_events.incomplete_steps_lower_bound_from_events(events), 5
         )
         self.assertIsNone(
-            ante_events.incomplete_steps_lower_bound_from_events(
+            cante_events.incomplete_steps_lower_bound_from_events(
                 [_event("TurnEnd", {"status": "Completed", "steps": 0})]
             )
         )
@@ -308,7 +308,7 @@ class TrajectoryTests(unittest.TestCase):
                 {
                     "tool_use_id": "call-read",
                     "status": "Completed",
-                    "result_json": {"content": "Ante"},
+                    "result_json": {"content": "Cante"},
                 },
             ),
             _usage(
@@ -322,16 +322,16 @@ class TrajectoryTests(unittest.TestCase):
             _event("Info", "turn complete"),
         ]
 
-        trajectory = ante_events.trajectory_from_events(
+        trajectory = cante_events.trajectory_from_events(
             events,
-            agent_name="ante",
+            agent_name="cante",
             agent_version="0.preview.86",
             model_name="fallback-model",
         )
 
         self.assertEqual(trajectory.schema_version, "ATIF-v1.7")
         self.assertEqual(trajectory.session_id, "session-123")
-        self.assertEqual(trajectory.agent.name, "ante")
+        self.assertEqual(trajectory.agent.name, "cante")
         self.assertEqual(trajectory.agent.version, "0.preview.86")
         self.assertEqual(trajectory.agent.model_name, "claude-sonnet-5")
         self.assertEqual(
@@ -377,7 +377,7 @@ class TrajectoryTests(unittest.TestCase):
         self.assertEqual(tool_step.llm_call_count, 1)
         self.assertEqual(final_step.message, "Done.")
         self.assertEqual(final_step.llm_call_count, 1)
-        self.assertEqual(info_step.extra, {"ante_event": "Info"})
+        self.assertEqual(info_step.extra, {"cante_event": "Info"})
 
         self.assertEqual(trajectory.final_metrics.total_prompt_tokens, 130)
         self.assertEqual(trajectory.final_metrics.total_completion_tokens, 24)
@@ -394,9 +394,9 @@ class TrajectoryTests(unittest.TestCase):
             _usage(input_tokens=8, output_tokens=2),
         ]
 
-        trajectory = ante_events.trajectory_from_events(
+        trajectory = cante_events.trajectory_from_events(
             events,
-            agent_name="ante",
+            agent_name="cante",
             agent_version="legacy",
             model_name="legacy-model",
         )
@@ -404,13 +404,13 @@ class TrajectoryTests(unittest.TestCase):
         self.assertEqual(trajectory.agent.model_name, "legacy-model")
         self.assertIsNone(trajectory.agent.extra)
         self.assertIsNone(trajectory.final_metrics.extra)
-        self.assertIsNone(ante_events.resolved_model_effort_from_events(events))
-        self.assertIsNone(ante_events.total_steps_from_events(events))
+        self.assertIsNone(cante_events.resolved_model_effort_from_events(events))
+        self.assertIsNone(cante_events.total_steps_from_events(events))
 
     def test_metadata_only_events_do_not_create_empty_trajectory(self):
-        trajectory = ante_events.trajectory_from_events(
+        trajectory = cante_events.trajectory_from_events(
             [_event("SessionStart", {"session_id": "session-123"})],
-            agent_name="ante",
+            agent_name="cante",
             agent_version="test",
             model_name=None,
         )

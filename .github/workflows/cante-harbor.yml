@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       install_args:
-        description: 'install.sh args for the Ante build to test (e.g. stable, nightly, a version); empty = install.sh default'
+        description: 'install.sh args for the Cante build to test (e.g. stable, nightly, a version); empty = install.sh default'
         required: false
         default: ''
       harbor_args:
@@ -20,7 +20,7 @@ on:
         required: false
         default: 'gemini'
       effort:
-        description: 'Reasoning effort passed to ante --effort'
+        description: 'Reasoning effort passed to cante --effort'
         required: false
         default: ''
       model_base_url:
@@ -93,8 +93,8 @@ jobs:
           echo "Generated matrix: $MATRIX"
 
   # Second job: Run Harbor tests (each matrix item is a separate job)
-  test-ante-harbor:
-    name: Test Ante Harbor (Run ${{ matrix.run_index }})
+  test-cante-harbor:
+    name: Test Cante Harbor (Run ${{ matrix.run_index }})
     needs: generate-matrix
     runs-on: ${{ github.event.inputs.runs_on || 'ubuntu-22.04-16core' }}
     timeout-minutes: 7200
@@ -153,7 +153,7 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          ANTE_ENV: github_action
+          CANTE_ENV: github_action
         run: |
           cd $HOME/harbor
 
@@ -173,7 +173,7 @@ jobs:
           fi
 
           CMD=(uv run harbor run
-            --agent ante_agent:AnteAgent
+            --agent cante_agent:CanteAgent
             --model "$MODEL_NAME"
             --ak "provider=$PROVIDER"
             --ak "install_args=$INSTALL_ARGS")
@@ -182,7 +182,7 @@ jobs:
           fi
           # ${KEY} is passed literally; harbor expands it when building the sandbox env.
           CMD+=(--ae "$CRED=\${$CRED}")
-          for key in MODEL_BASE_URL MODEL_TEMPERATURE MODEL_MAX_TOKENS ANTE_ENV; do
+          for key in MODEL_BASE_URL MODEL_TEMPERATURE MODEL_MAX_TOKENS CANTE_ENV; do
             if [ -n "${!key}" ]; then
               CMD+=(--ae "$key=\${$key}")
             fi
@@ -191,7 +191,7 @@ jobs:
           CMD+=("${HARBOR_ARGV[@]}")
 
           # The adapter is imported from the checkout; harbor resolves it via PYTHONPATH.
-          export PYTHONPATH="$GITHUB_WORKSPACE/ante-harbor${PYTHONPATH:+:$PYTHONPATH}"
+          export PYTHONPATH="$GITHUB_WORKSPACE/cante-harbor${PYTHONPATH:+:$PYTHONPATH}"
 
           # Use sg to run with docker group permissions (avoids needing to log out/in)
           sg docker -c "$(printf '%q ' "${CMD[@]}")"
@@ -208,7 +208,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: always()
         with:
-          name: ante-harbor-results-${{ github.run_id }}-run-${{ matrix.run_index }}
+          name: cante-harbor-results-${{ github.run_id }}-run-${{ matrix.run_index }}
           path: test-results/
           retention-days: 30
           if-no-files-found: warn
