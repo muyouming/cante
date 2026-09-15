@@ -37,6 +37,25 @@ button {
   cursor: pointer;
 }
 
+/* Keyboard focus: one ring that reads on the dark chrome, everywhere.
+   Components must not cancel this with `focus:outline-none`; mouse clicks
+   stay quiet because `:focus-visible` only matches keyboard navigation. */
+:focus-visible {
+  outline: 2px solid #38bdf8;
+  outline-offset: 2px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Text fields match :focus-visible even on click; keep the ring inset so it
+   does not clip against the surrounding panel. */
+textarea:focus-visible,
+input:focus-visible {
+  outline-offset: -1px;
+}
+
 textarea,
 input {
   font: inherit;

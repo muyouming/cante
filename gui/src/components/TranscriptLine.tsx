@@ -79,10 +79,31 @@ export interface TranscriptLineProps {
 
 export default function TranscriptLine(props: TranscriptLineProps): JSX.Element {
   const line = () => props.line;
+  // The chrome line is the keyboard handle for opening the row's full entry;
+  // body lines stay clickable but do not add a tab stop each.
+  const actionable = (): boolean => props.onOpen !== undefined && line().chrome;
+  const open = (event: MouseEvent): void => {
+    if (event.currentTarget instanceof HTMLElement) event.currentTarget.focus();
+    props.onOpen?.();
+  };
+  const openLabel = (): string => {
+    const at = props.time ? ` at ${props.time}` : "";
+    return `${line().text}${at} — open the full ${line().kind} entry`;
+  };
   return (
     <div
       class={`flex h-full w-full items-center gap-2 overflow-hidden px-3 ${rowClass(line(), props.highlighted ?? false)} ${props.onOpen ? "cursor-pointer" : ""}`}
-      onClick={() => props.onOpen?.()}
+      onClick={open}
+      role={actionable() ? "button" : undefined}
+      tabindex={actionable() ? 0 : undefined}
+      aria-label={actionable() ? openLabel() : undefined}
+      onKeyDown={(event) => {
+        if (!actionable()) return;
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          props.onOpen?.();
+        }
+      }}
       title={line().chrome ? undefined : line().text}
     >
       <Show

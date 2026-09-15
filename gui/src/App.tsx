@@ -30,6 +30,9 @@ export default function App(): JSX.Element {
   const [detail, setDetail] = createSignal<Row | null>(null);
 
   const compact = (): boolean => width() < COMPACT_WIDTH;
+  // The webview is the desktop app when the Tauri host is present; a plain
+  // browser tab can never reach the daemon, and says so instead.
+  const bridge = isBridgeAvailable();
 
   const onKeyDown = (event: KeyboardEvent): void => {
     const meta = event.metaKey || event.ctrlKey;
@@ -51,18 +54,8 @@ export default function App(): JSX.Element {
       void store.interrupt();
       return;
     }
-    if (event.key === "Escape") {
-      // The approval gate is intentionally not dismissible.
-      if (store.paletteOpen()) {
-        store.closePalette();
-        return;
-      }
-      if (store.pickerOpen()) {
-        store.closePicker();
-        return;
-      }
-      if (detail()) setDetail(null);
-    }
+    // Overlays own Escape: they restore focus to their opener on close. The
+    // approval gate is deliberately not dismissible.
   };
 
   onMount(() => {
@@ -84,10 +77,13 @@ export default function App(): JSX.Element {
       <Header store={store} compact={compact()} />
 
       <Show when={store.connection() === "offline"}>
-        <div class="flex w-full shrink-0 items-center border-b border-amber-900 bg-amber-950 px-4 py-2">
+        <div
+          class="flex w-full shrink-0 items-center border-b border-amber-900 bg-amber-950 px-4 py-2"
+          role="alert"
+        >
           <span class="text-sm text-amber-200">
-            {isBridgeAvailable()
-              ? "Desktop bridge offline — the daemon is not responding; the GUI reconnects on its own."
+            {bridge
+              ? "Daemon offline — the cante daemon is not responding; the GUI reconnects on its own."
               : "Desktop bridge unavailable — this is the browser preview; open the Cante desktop app to talk to the daemon."}
           </span>
         </div>
@@ -99,7 +95,13 @@ export default function App(): JSX.Element {
         </Show>
 
         <main class="flex min-h-0 min-w-0 flex-1 flex-col">
-          <Transcript rows={store.rows()} onOpen={setDetail} />
+          <Transcript
+            rows={store.rows()}
+            onOpen={setDetail}
+            connection={store.connection()}
+            hasSession={store.session() !== null}
+            bridge={bridge}
+          />
           <Composer
             store={store}
             busy={store.daemonStatus() === "streaming" || store.daemonStatus() === "thinking"}

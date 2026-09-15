@@ -34,11 +34,16 @@ export default function DetailModal(props: DetailModalProps): JSX.Element {
   });
 
   return (
-    <Overlay open={props.row !== null} onClose={props.onClose} panelClass="max-w-[720px]">
+    <Overlay
+      open={props.row !== null}
+      onClose={props.onClose}
+      label={props.row ? `${props.row.label} — full entry` : "Transcript entry"}
+      panelClass="max-w-[720px]"
+    >
       <Show when={props.row}>
         <div class="flex items-center justify-between gap-2">
           <div class="flex items-center gap-2">
-            <span class="text-base font-bold text-slate-50">{props.row?.label.toUpperCase()}</span>
+            <h2 class="text-base font-bold text-slate-50">{props.row?.label.toUpperCase()}</h2>
             <span class="text-xs text-slate-500">{props.row?.time}</span>
             <span class="text-xs text-slate-600">{props.row?.kind}</span>
           </div>

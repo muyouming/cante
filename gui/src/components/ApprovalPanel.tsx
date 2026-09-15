@@ -4,7 +4,7 @@
 // (and is mirrored by `cante://state`). Each requested call gets its own
 // Once / Session / Always / Deny choice, and nothing resumes until the batch is
 // answered — so this overlay is deliberately blocking (no Esc, no backdrop
-// dismiss).
+// dismiss), but it still traps focus and announces itself as a modal dialog.
 import { For, Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -50,10 +50,15 @@ export default function ApprovalPanel(props: ApprovalPanelProps): JSX.Element {
   };
 
   return (
-    <Overlay open={props.approval !== null} panelClass="max-w-[620px]">
+    <Overlay
+      open={props.approval !== null}
+      label="Approval required"
+      dismissible={false}
+      panelClass="max-w-[620px]"
+    >
       <Show when={props.approval}>
         <div class="flex flex-col gap-1">
-          <span class="text-base font-bold text-slate-50">Approval required</span>
+          <h2 class="text-base font-bold text-slate-50">Approval required</h2>
           <span class="text-sm text-slate-400">
             {props.approval?.message || "Cante wants to run the following tool calls."}
           </span>
@@ -70,12 +75,17 @@ export default function ApprovalPanel(props: ApprovalPanelProps): JSX.Element {
                 <span class="truncate font-mono text-xs text-slate-400" title={previewJson(tool.args, 400)}>
                   {previewJson(tool.args, 160)}
                 </span>
-                <div class="flex flex-wrap gap-1">
+                <div
+                  class="flex flex-wrap gap-1"
+                  role="group"
+                  aria-label={`Decision for ${tool.name}`}
+                >
                   <For each={DECISIONS}>
                     {(decision) => (
                       <button
                         type="button"
                         onClick={() => choose(index(), decision)}
+                        aria-pressed={(decisions()[index()] ?? "Accept") === decision}
                         class={decisionClass(decision, (decisions()[index()] ?? "Accept") === decision)}
                       >
                         {DECISION_LABELS[decision].toUpperCase()}
