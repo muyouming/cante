@@ -10,9 +10,10 @@ import { BTN } from "@pocketjs/framework/input";
 import { onButtonPress, onFrame } from "@pocketjs/framework/lifecycle";
 import { Show, createSignal, onMount } from "solid-js";
 
-import { createStore, type Row } from "./src/store.ts";
 import type { ReviewDecision } from "./src/protocol.ts";
+import { createStore, type Row } from "./src/store.ts";
 import ApprovalModal from "./src/components/ApprovalModal.tsx";
+import CommandPalette from "./src/components/CommandPalette.tsx";
 import Composer from "./src/components/Composer.tsx";
 import DetailModal from "./src/components/DetailModal.tsx";
 import Header from "./src/components/Header.tsx";
@@ -42,7 +43,6 @@ export default function App() {
   const store = createStore();
   const [size, setSize] = createSignal(DEFAULT_SIZE);
   const [detail, setDetail] = createSignal<Row | null>(null);
-  const [picker, setPicker] = createSignal(false);
 
   let openKeyboard: (() => void) | null = null;
   let autoStarted = false;
@@ -74,7 +74,18 @@ export default function App() {
     void store.interrupt();
   });
   onButtonPress(BTN.SELECT, () => {
-    setPicker((open) => !open);
+    if (store.paletteOpen()) store.closePalette();
+    else store.openPalette();
+  });
+  onButtonPress(BTN.START, () => {
+    if (store.pickerOpen()) store.closePicker();
+    else store.openPicker();
+  });
+  onButtonPress(BTN.LTRIGGER, () => {
+    store.historyPrev();
+  });
+  onButtonPress(BTN.RTRIGGER, () => {
+    store.historyNext();
   });
 
   onMount(() => {
@@ -85,7 +96,7 @@ export default function App() {
 
   return (
     <Screen class="relative w-full h-full flex-col overflow-hidden bg-[#0b0f14]">
-      <Header store={store} compact={compact()} onPickModel={() => setPicker(true)} />
+      <Header store={store} compact={compact()} />
 
       <Show when={store.connection() === "offline"}>
         <View class="w-full flex-col px-4 py-2 bg-amber-950 border-b border-amber-900">
@@ -97,14 +108,7 @@ export default function App() {
 
       <View class="flex-1 flex-row w-full">
         <Show when={!compact()}>
-          <SessionRail
-            store={store}
-            onPickModel={() => setPicker(true)}
-            onNewSession={() => {
-              store.clearTranscript();
-              void store.startSession();
-            }}
-          />
+          <SessionRail store={store} />
         </Show>
 
         <View class="flex-1 flex-col h-full">
@@ -116,9 +120,8 @@ export default function App() {
             inputActive={() => true}
           />
           <Composer
+            store={store}
             busy={store.daemonStatus() === "streaming" || store.daemonStatus() === "thinking"}
-            onSend={(text: string) => void store.send(text)}
-            onInterrupt={() => void store.interrupt()}
             onReady={(open: () => void) => {
               openKeyboard = open;
             }}
@@ -130,17 +133,24 @@ export default function App() {
 
       <ApprovalModal approval={store.approval()} onRespond={(decisions: ReviewDecision[]) => void store.respond(decisions)} />
 
+      <CommandPalette
+        open={store.paletteOpen()}
+        commands={store.commands()}
+        onClose={() => store.closePalette()}
+        onRun={(command) => void store.runCommand(command)}
+      />
+
       <ModelPicker
-        open={picker()}
+        open={store.pickerOpen()}
         catalog={store.catalog()}
         currentProvider={store.session()?.provider?.id ?? ""}
         currentModel={store.session()?.model?.id ?? ""}
         busy={store.daemonStatus() === "streaming"}
-        onClose={() => setPicker(false)}
+        onClose={() => store.closePicker()}
         onReload={() => void store.loadCatalog()}
         onPick={(provider: string, model: string) => {
           void store.setModel(provider, model);
-          setPicker(false);
+          store.closePicker();
         }}
       />
 

@@ -45,8 +45,28 @@ function handle(op: unknown, id: string): void {
     emit({ SessionStart: SESSION }, id);
     return;
   }
+  if ("Goal" in record) {
+    const goal = record.Goal as unknown;
+    const text =
+      typeof goal === "string" ? `goal ${goal.toLowerCase()}` : `goal set: ${String((goal as { Set?: string }).Set ?? "")}`;
+    emit({ Info: text }, id);
+    return;
+  }
   if ("UserInput" in record) {
     const turn_id = "turn_1";
+    // Slow mode splits the delta run across a tick so tests can prove the
+    // bridge's quiet window coalesces it instead of returning token by token.
+    if (process.env.FAKE_CANTE_SLOW_DELTAS === "1") {
+      // No TurnStart: a structural event would flush the parked poll
+      // immediately, and the point here is the delta-only quiet window.
+      emit({ MessageDelta: "hello " }, id);
+      setTimeout(() => {
+        emit({ MessageDelta: "world" }, id);
+        emit({ AgentMessage: "hello world" }, id);
+        emit({ TurnEnd: { turn_id, status: "Completed", steps: 1 } }, id);
+      }, 30);
+      return;
+    }
     emit({ TurnStart: { turn_id } }, id);
     emit({ ThinkingDelta: "thinking " }, id);
     emit({ ThinkingDelta: "hard" }, id);

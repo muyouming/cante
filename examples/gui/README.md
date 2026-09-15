@@ -118,19 +118,45 @@ Environment: `POCKETJS_ROOT` (use an existing checkout), `POCKETJS_VERSION`
 
 | Input | Action |
 | --- | --- |
-| Press a transcript row | Open the full entry (bodies are clipped in the list) |
+| Press a transcript line | Open the full entry that owns it |
 | Press a tool card in the approval panel | Cycle `Once → Session → Always → Deny` |
 | `TRIANGLE` | Summon the system keyboard for the composer |
 | `SQUARE` | Interrupt the running turn |
-| `SELECT` | Toggle the model picker |
-| d-pad / arrows | Move focus; the transcript follows the focused row |
+| `SELECT` | Toggle the command palette |
+| `START` | Toggle the model picker |
+| `LTRIGGER` / `RTRIGGER` | Recall the previous / next prompt (your draft is restored) |
+| d-pad / arrows | Move focus; the transcript follows the focused line |
 | tap / click | Same activation path as `CIRCLE` on every control |
 
-The rail's *model*, *provider*, *effort* and *permissions* rows are controls:
-pressing them opens the picker or cycles the value. Effort and permission
-changes ride `UpdateSession`, so they apply to the next turn without dropping
-the conversation; picking a provider/model starts a new session (matching
-`cante`'s own semantics).
+Those are `S` · `A` · `Shift` · `Space` · `Q`/`E` in the browser host.
+
+The rail's *session*, *model*, *provider*, *effort* and *permissions* rows are
+controls: pressing them restarts, opens the picker, or cycles the value. Effort
+and permission changes ride `UpdateSession`, so they apply to the next turn
+without dropping the conversation; picking a provider/model starts a new
+session (matching `cante`'s own semantics).
+
+## Commands
+
+PocketJS has no physical-keyboard text path yet, so a command surface is what
+keeps the client usable on a d-pad. `SELECT` — or the header's `MENU` chip, or a
+leading `/` in the composer — opens it. The list is the built-ins below plus
+every skill the session announced in `SessionStart`.
+
+| Command | What it does |
+| --- | --- |
+| `/new` | Restart the conversation with the current settings |
+| `/model` | Open the provider / model picker |
+| `/effort` · `/permissions` | Cycle the value |
+| `/goal <condition>` · `/goal-clear` | Drive the goal loop |
+| `/compact` · `/context` | Compact history · report context occupancy |
+| `/interrupt` | Stop the running turn |
+| `/clear` | Discard the transcript on screen (the session keeps running) |
+| `/<anything else>` | Forwarded to the daemon as a `SlashCommand` |
+
+A command that needs an argument shows a `<hint>` in the palette and **prefills
+the composer** instead of guessing: pick it, type the argument, send. A typed
+`/name args` line goes through the same dispatcher.
 
 ## Bridge API
 
@@ -145,6 +171,7 @@ the conversation; picking a provider/model starts a new session (matching
 | `POST /approval` | `{turn_id, responses[]}` | `ApprovalResponse` |
 | `POST /interrupt` | — | `Interrupt` |
 | `POST /slash` | `{name, args}` | `SlashCommand` |
+| `POST /goal` | `{command: Set\|Clear\|Status, condition?}` | `Goal` |
 | `POST /compact` | `{instructions?}` | `Compact` |
 | `POST /context` | — | `ContextReport` |
 | `POST /shutdown` | — | `Shutdown`, then stops the daemon |
@@ -155,15 +182,16 @@ bridge refuses nothing but also reaches nothing: keep it on `127.0.0.1`.
 ## Tests
 
 ```sh
-bun test examples/gui/bridge examples/gui/src   # 24 tests: bridge + layout
+bun test examples/gui/bridge examples/gui/src   # 36 tests: bridge + layout + commands
 bunx tsc --noEmit -p examples/gui/tsconfig.bridge.json
 ```
 
 The bridge integration cases drive a scripted `cante serve` double over real
 pipes (`bridge/fixtures/fake-cante.ts`), so line framing, the event ring,
 long-poll wakeups, approval state, and the HTTP surface are exercised end to
-end without a Cante install. The layout suite is pure: wrapping budgets, fence
-detection, diff classification, truncation, and the per-row cache.
+end without a Cante install. The other suites are pure: wrapping budgets, fence
+detection, diff classification, truncation, the per-row cache, and command
+parsing/filtering.
 
 ## Layout
 
@@ -177,9 +205,9 @@ examples/gui/
     bridge.ts               # bounded-fetch HTTP client for the bridge
     rows.ts                 # the transcript row model (framework-free)
     transcript.ts           # pure rows -> display-lines layout + cache
-    transcript.test.ts      # layout unit tests
+    commands.ts             # built-in + skill command model, slash parsing
     store.ts                # signals + the event reducer + the poll loop
-    components/             # Transcript, Composer, SessionRail, modals, …
+    components/             # Transcript, Composer, SessionRail, palettes, …
   bridge/
     cante-bridge.ts         # the loopback HTTP ⇄ stdio daemon
     cante-bridge.test.ts    # unit + end-to-end tests
@@ -190,18 +218,20 @@ examples/gui/
 ## Known limits
 
 - **Text entry is the system keyboard.** PocketJS's `TextField` summons a
-  framework-drawn OSK on every target today; there is no host text-input path
-  in the `web-app` / `macos-app` profiles yet. `input.text`/`input.ime` are
-  declared under `enhances` so the app lights up automatically when a host
-  grows them.
+  framework-drawn OSK on every target today; the `web-app` / `macos-app`
+  profiles publish no host text-input path (`input.text` / `input.ime` are
+  registered capabilities with no framework consumer yet, so nothing in a
+  PocketJS app can read a physical keyboard). Both stay declared under
+  `enhances` for when a host grows them. In the meantime the command palette
+  and prompt history make a whole session drivable without typing.
 - **Wrapping is estimated, not measured.** PocketJS exposes no text metrics,
   so the layout pass wraps at an average advance (6.6 px proportional, 8.6 px
   mono). A line that runs long clips in the list; pressing it opens the full
   entry.
-- **Desktop/web bundling** is not in the CLI's backend table yet (`pocket
-  build --target web-app` compiles the bundle, then finds no backend). `pocket
-  dev` and `pocket check` are the supported paths; PSP and Vita are the fully
-  wired targets.
-- **No streaming transport**: deltas arrive per poll batch, so a very chatty
-  turn renders in ~1 batch per round trip rather than per token. Coalescing
-  keeps that to a few updates per second.
+- **Desktop/web bundling** is not in the CLI's backend table yet. `pocket
+  build --target web-app` compiles the bundle and pak, then finds no backend;
+  `scripts/pocket.sh build` reports exactly that instead of looking crashed.
+  `pocket dev` / `check` and the PSP + Vita targets are the supported paths.
+- **No streaming transport.** Deltas arrive per poll batch rather than per
+  token. The bridge now holds a parked poll for a 40 ms quiet window, so a
+  burst renders as one update instead of one update per first token.

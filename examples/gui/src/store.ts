@@ -4,9 +4,16 @@
 // event batches, and every batch is folded into the transcript + session
 // signals below. Solid owns reactivity; nothing here touches the DOM-like tree.
 import { after } from "@pocketjs/framework/clock";
-import { batch, createSignal, onCleanup, type Accessor } from "solid-js";
+import { batch, createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 
 import { BridgeUnavailable, DEFAULT_BRIDGE_URL, POLL_TIMEOUT_MS, createBridge, type Bridge } from "./bridge.ts";
+import {
+  allCommands,
+  builtinCommand,
+  parseSlash,
+  type ClientAction,
+  type Command,
+} from "./commands.ts";
 import type { Row, RowTone } from "./rows.ts";
 import {
   EFFORTS,
@@ -68,6 +75,12 @@ export interface Store {
   notice: Accessor<string | null>;
   catalog: Accessor<CatalogProvider[]>;
   canteVersion: Accessor<string | null>;
+  /** Built-in commands plus the session's skills. */
+  commands: Accessor<Command[]>;
+  draft: Accessor<string>;
+  history: Accessor<string[]>;
+  pickerOpen: Accessor<boolean>;
+  paletteOpen: Accessor<boolean>;
   connect(): void;
   startSession(overrides?: SessionOverrides): Promise<void>;
   send(text: string, mode?: "prompt" | "steer" | "shell"): Promise<void>;
@@ -76,6 +89,19 @@ export interface Store {
   setEffort(effort: Effort): Promise<void>;
   setPermissionMode(mode: PermissionMode): Promise<void>;
   setModel(provider: string, model: string): Promise<void>;
+  setDraft(value: string): void;
+  /** Send a prompt, or run a `/command` when the text starts with a slash. */
+  submit(text?: string): Promise<void>;
+  /** Run a command picked from the palette. */
+  runCommand(command: Command): Promise<void>;
+  historyPrev(): void;
+  historyNext(): void;
+  openPicker(): void;
+  closePicker(): void;
+  openPalette(): void;
+  closePalette(): void;
+  cycleEffort(): Promise<void>;
+  cyclePermission(): Promise<void>;
   compact(): Promise<void>;
   requestContextReport(): Promise<void>;
   loadCatalog(): Promise<void>;
@@ -151,6 +177,13 @@ export function createStore(bridge: Bridge = createBridge(DEFAULT_BRIDGE_URL)): 
   const [notice, setNotice] = createSignal<string | null>(null);
   const [catalog, setCatalog] = createSignal<CatalogProvider[]>([]);
   const [canteVersion, setCanteVersion] = createSignal<string | null>(null);
+  const [draft, setDraftSignal] = createSignal("");
+  const [history, setHistory] = createSignal<string[]>([]);
+  const [pickerOpen, setPickerOpen] = createSignal(false);
+  const [paletteOpen, setPaletteOpen] = createSignal(false);
+  const commands = createMemo<Command[]>(() => allCommands(session()?.skills ?? []));
+  let historyCursor: number | null = null;
+  let historyDraft = "";
 
   let cursor = 0;
   let alive = true;
@@ -476,6 +509,137 @@ export function createStore(bridge: Bridge = createBridge(DEFAULT_BRIDGE_URL)): 
     await post("/context", {});
   }
 
+  // ---- input: draft, history, commands ------------------------------------
+
+  function setDraft(value: string): void {
+    historyCursor = null;
+    setDraftSignal(value);
+  }
+
+  function pushHistory(text: string): void {
+    historyCursor = null;
+    setHistory((list) => {
+      const next = list[list.length - 1] === text ? list : [...list, text];
+      return next.length > 50 ? next.slice(next.length - 50) : next;
+    });
+  }
+
+  /** ↑ through previously sent prompts; the in-progress draft is restored. */
+  function historyPrev(): void {
+    const list = history();
+    if (list.length === 0) return;
+    if (historyCursor === null) {
+      historyDraft = draft();
+      historyCursor = list.length;
+    }
+    historyCursor = Math.max(0, historyCursor - 1);
+    setDraftSignal(list[historyCursor]!);
+  }
+
+  function historyNext(): void {
+    const list = history();
+    if (historyCursor === null) return;
+    if (historyCursor >= list.length - 1) {
+      historyCursor = null;
+      setDraftSignal(historyDraft);
+      return;
+    }
+    historyCursor += 1;
+    setDraftSignal(list[historyCursor]!);
+  }
+
+  async function cycleEffort(): Promise<void> {
+    const current = session()?.model?.effort ?? "Medium";
+    const index = EFFORTS.indexOf(current);
+    await setEffort(EFFORTS[(index + 1) % EFFORTS.length]!);
+  }
+
+  async function cyclePermission(): Promise<void> {
+    const current = session()?.permission_mode ?? "Strict";
+    const index = PERMISSION_MODES.indexOf(current);
+    await setPermissionMode(PERMISSION_MODES[(index + 1) % PERMISSION_MODES.length]!);
+  }
+
+  /** Commands the GUI runs itself; everything else is a daemon `SlashCommand`. */
+  async function runClient(action: ClientAction, args = ""): Promise<void> {
+    switch (action) {
+      case "new-session":
+        clearTranscript();
+        await startSession();
+        return;
+      case "clear-view":
+        clearTranscript();
+        return;
+      case "model":
+        setPickerOpen(true);
+        return;
+      case "effort":
+        await cycleEffort();
+        return;
+      case "permissions":
+        await cyclePermission();
+        return;
+      case "compact":
+        await compact();
+        return;
+      case "context":
+        await requestContextReport();
+        return;
+      case "interrupt":
+        await interrupt();
+        return;
+      case "goal":
+        await post("/goal", args ? { command: "Set", condition: args } : { command: "Status" });
+        return;
+      case "goal-clear":
+        await post("/goal", { command: "Clear" });
+        return;
+    }
+  }
+
+  /** Dispatch `/<name> <args>` — locally when built in, otherwise to the daemon. */
+  async function runCommandByName(name: string, args: string): Promise<void> {
+    const builtin = builtinCommand(name);
+    if (builtin?.client) {
+      // An argument-taking command with nothing typed yet: prefill and let the
+      // user finish in the composer rather than guessing.
+      if (builtin.prefill !== undefined && !args) {
+        setDraftSignal(`/${name} `);
+        return;
+      }
+      await runClient(builtin.client, args);
+      return;
+    }
+    await post("/slash", { name, args });
+  }
+
+  async function submit(text?: string): Promise<void> {
+    const value = (text ?? draft()).trim();
+    if (!value) return;
+    historyCursor = null;
+    setDraftSignal("");
+    const slash = parseSlash(value);
+    if (slash) {
+      await runCommandByName(slash.name, slash.args);
+      return;
+    }
+    pushHistory(value);
+    await send(value);
+  }
+
+  async function runCommand(command: Command): Promise<void> {
+    setPaletteOpen(false);
+    if (command.prefill !== undefined) {
+      setDraftSignal(`/${command.name} `);
+      return;
+    }
+    if (command.client) {
+      await runClient(command.client);
+      return;
+    }
+    await post("/slash", { name: command.name, args: "" });
+  }
+
   async function loadCatalog(): Promise<void> {
     try {
       const raw = await bridge.get<{ providers?: unknown[] }>("/catalog", 15_000);
@@ -505,6 +669,22 @@ export function createStore(bridge: Bridge = createBridge(DEFAULT_BRIDGE_URL)): 
     }
   }
 
+  function openPicker(): void {
+    setPickerOpen(true);
+  }
+
+  function closePicker(): void {
+    setPickerOpen(false);
+  }
+
+  function openPalette(): void {
+    setPaletteOpen(true);
+  }
+
+  function closePalette(): void {
+    setPaletteOpen(false);
+  }
+
   function clearTranscript(): void {
     toolRows.clear();
     setRows([]);
@@ -527,6 +707,11 @@ export function createStore(bridge: Bridge = createBridge(DEFAULT_BRIDGE_URL)): 
     notice,
     catalog,
     canteVersion,
+    commands,
+    draft,
+    history,
+    pickerOpen,
+    paletteOpen,
     connect,
     startSession,
     send,
@@ -535,6 +720,17 @@ export function createStore(bridge: Bridge = createBridge(DEFAULT_BRIDGE_URL)): 
     setEffort,
     setPermissionMode,
     setModel,
+    setDraft,
+    submit,
+    runCommand,
+    historyPrev,
+    historyNext,
+    openPicker,
+    closePicker,
+    openPalette,
+    closePalette,
+    cycleEffort,
+    cyclePermission,
     compact,
     requestContextReport,
     loadCatalog,

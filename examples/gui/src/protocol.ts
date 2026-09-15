@@ -62,6 +62,14 @@ export interface SessionInfo {
   cwd: string;
   permission_mode: PermissionMode;
   title?: string | null;
+  /** Skills the session can invoke as `/name` (announced by `SessionStart`). */
+  skills?: SkillMetadata[];
+}
+
+export interface SkillMetadata {
+  name: string;
+  description?: string | null;
+  argument_hint?: string | null;
 }
 
 export type TurnEndStatus =

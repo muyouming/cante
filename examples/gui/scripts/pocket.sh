@@ -67,8 +67,23 @@ case "$cmd" in
       --manifest "$APP_LINK/pocket.json" --project-root "$APP_LINK" "$@")
     ;;
   build)
-    (cd "$CHECKOUT" && bun tools/pocket.ts build --target "$POCKET_TARGET" \
-      --manifest "$APP_LINK/pocket.json" --project-root "$APP_LINK" -- "$@")
+    # `pocket build` compiles the bundle for any registered target, then hands
+    # off to a target backend — and only psp/vita have one today. Treat the
+    # "no backend" exit as the documented post-bundle stop instead of an error.
+    set +e
+    output="$(cd "$CHECKOUT" && bun tools/pocket.ts build --target "$POCKET_TARGET" \
+      --manifest "$APP_LINK/pocket.json" --project-root "$APP_LINK" -- "$@" 2>&1)"
+    status=$?
+    set -e
+    printf '%s\n' "$output"
+    if [ "$status" -ne 0 ] && printf '%s' "$output" | grep -F -q 'targetBackends[target] is not a function'; then
+      echo
+      echo "note: PocketJS $POCKETJS_VERSION registers no CLI backend for '$POCKET_TARGET'."
+      echo "      The bundle and pak above were produced; serve them with 'scripts/pocket.sh dev',"
+      echo "      or build a wired target: POCKET_TARGET=psp ./scripts/pocket.sh build"
+      exit 0
+    fi
+    exit "$status"
     ;;
   dev)
     (cd "$CHECKOUT" && bun tools/dev.ts "$@" cante-gui-main)
