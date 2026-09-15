@@ -1,11 +1,11 @@
 [package]
-name = "ante-exec"
+name = "cante-exec"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Standalone process execution utilities for Ante"
+description = "Standalone process execution utilities for Cante"
 license = "Apache-2.0"
-repository = "https://github.com/AntigmaLabs/ante"
+repository = "https://github.com/AntigmaLabs/cante"
 readme = "README.md"
 
 [dependencies]

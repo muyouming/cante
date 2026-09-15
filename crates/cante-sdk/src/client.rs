@@ -1,6 +1,6 @@
 //! The client end of one connection: an op sender and an event receiver.
 
-use ante_protocol_shape::{EventMsg, Evt, Op, OpMsg, op_msg};
+use cante_protocol_shape::{EventMsg, Evt, Op, OpMsg, op_msg};
 use thiserror::Error;
 use tokio::sync::mpsc::{Sender, UnboundedReceiver, error::TrySendError};
 
@@ -43,7 +43,7 @@ impl OpSender {
 /// backlog rather than losing events.
 pub type EventReceiver = UnboundedReceiver<EventMsg>;
 
-/// One connection to an Ante host, seen from the client. Which session it
+/// One connection to a Cante host, seen from the client. Which session it
 /// drives is decided by the ops sent over it (`StartSession`,
 /// `ResumeSession`), never by how it was opened.
 pub struct Client {
@@ -96,7 +96,7 @@ impl Client {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ante_protocol_shape::event_msg;
+    use cante_protocol_shape::event_msg;
 
     #[tokio::test]
     async fn close_stops_at_goodbye_and_tolerates_a_gone_host() {

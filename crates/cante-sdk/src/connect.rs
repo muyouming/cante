@@ -2,7 +2,7 @@
 
 use std::{collections::BTreeMap, path::PathBuf, process::Stdio};
 
-use ante_protocol_shape::{EventMsg, OpMsg};
+use cante_protocol_shape::{EventMsg, OpMsg};
 use thiserror::Error;
 use tokio::{
     io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
@@ -15,7 +15,7 @@ use crate::{Client, Endpoint, OpSender};
 /// How to reach or start the host. Every field is optional.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectOptions {
-    /// The `ante` executable for [`Endpoint::Stdio`]. Defaults to `ante` on
+    /// The `cante` executable for [`Endpoint::Stdio`]. Defaults to `cante` on
     /// `PATH`.
     pub executable: Option<PathBuf>,
     /// Extra arguments appended after `serve --stdio` (for example
@@ -32,7 +32,7 @@ pub struct ConnectOptions {
 pub enum ConnectError {
     #[error("`{0}` endpoints are not supported by this build")]
     Unsupported(Endpoint),
-    #[error("could not find the `ante` executable on PATH: {0}")]
+    #[error("could not find the `cante` executable on PATH: {0}")]
     ExecutableNotFound(#[source] which::Error),
     #[error("failed to spawn `{command}`: {source}")]
     Spawn {
@@ -66,14 +66,14 @@ pub async fn connect(endpoint: Endpoint, options: ConnectOptions) -> Result<Clie
     }
 }
 
-/// Spawn `ante serve --stdio` and bridge its pipes onto a client's channel
+/// Spawn `cante serve --stdio` and bridge its pipes onto a client's channel
 /// pair. Dropping every `OpSender` closes the child's stdin, which is how
 /// the child learns to shut down; its exit ends the event stream, and the
 /// task that read it reaps the child.
 fn connect_stdio(options: ConnectOptions) -> Result<Client, ConnectError> {
     let executable = match options.executable {
         Some(path) => path,
-        None => which::which("ante").map_err(ConnectError::ExecutableNotFound)?,
+        None => which::which("cante").map_err(ConnectError::ExecutableNotFound)?,
     };
 
     let mut command = Command::new(&executable);
@@ -110,7 +110,7 @@ fn connect_stdio(options: ConnectOptions) -> Result<Client, ConnectError> {
     Ok(Client::from_parts(OpSender::new(op_tx), evt_rx))
 }
 
-/// Dial the socket file an `ante serve --sock` host listens on and bridge
+/// Dial the socket file an `cante serve --sock` host listens on and bridge
 /// it onto a client's channel pair. Dropping every `OpSender` shuts down
 /// the write side, which is how the host learns the peer is gone; the host
 /// closing the socket ends the event stream.
@@ -203,7 +203,7 @@ mod tests {
     #[tokio::test]
     async fn a_missing_executable_is_a_spawn_error() {
         let options = ConnectOptions {
-            executable: Some(PathBuf::from("/definitely/not/ante")),
+            executable: Some(PathBuf::from("/definitely/not/cante")),
             ..Default::default()
         };
         let error = connect(Endpoint::Stdio, options).await.err().expect("spawn must fail");
@@ -213,7 +213,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn a_missing_socket_file_is_a_dial_error() {
-        let endpoint = Endpoint::Unix(PathBuf::from("/definitely/not/ante.sock"));
+        let endpoint = Endpoint::Unix(PathBuf::from("/definitely/not/cante.sock"));
         let error = connect(endpoint.clone(), ConnectOptions::default())
             .await
             .err()
@@ -227,10 +227,10 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn unix_endpoint_dials_a_socket_file_and_round_trips() {
-        use ante_protocol_shape::{Evt, Op, event_msg};
+        use cante_protocol_shape::{Evt, Op, event_msg};
 
         let path = std::env::temp_dir()
-            .join(format!("ante-sdk-unix-roundtrip-{}.sock", std::process::id()));
+            .join(format!("cante-sdk-unix-roundtrip-{}.sock", std::process::id()));
         let _ = std::fs::remove_file(&path);
         let listener = tokio::net::UnixListener::bind(&path).expect("bind test socket");
 

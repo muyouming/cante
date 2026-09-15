@@ -337,7 +337,7 @@ pub struct SubagentMetadata {
 /// on, a name to show a user, and the endpoint actually in use — which env
 /// overrides can move away from the published default, so it is a property of
 /// this session rather than of the provider. The provider's model list is not
-/// here; it is the same for every session and is published by `ante catalog`.
+/// here; it is the same for every session and is published by `cante catalog`.
 /// Unknown fields are ignored, so payloads still carrying it decode fine.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProviderSpec {

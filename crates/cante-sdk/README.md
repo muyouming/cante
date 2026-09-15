@@ -1,21 +1,21 @@
-# ante-sdk
+# cante-sdk
 
-Rust SDK for Ante.
+Rust SDK for Cante.
 
-A `Client` is one connection to an Ante host. It sends `Op`s and receives
+A `Client` is one connection to a Cante host. It sends `Op`s and receives
 `EventMsg`s; which session it drives is decided by the ops sent over it, never
 by how it was opened.
 
 ```rust
-let client = ante_sdk::connect("stdio".parse()?, ConnectOptions::default()).await?;
+let client = cante_sdk::connect("stdio".parse()?, ConnectOptions::default()).await?;
 ```
 
 An `Endpoint` names where a host is reachable, never a session:
 
 | Endpoint | The client | Host lifetime |
 | --- | --- | --- |
-| `stdio` | spawns `ante serve --stdio` as its own child | the connection's |
-| `unix:<path>` | dials the socket file of an `ante serve --sock` host | someone else's |
+| `stdio` | spawns `cante serve --stdio` as its own child | the connection's |
+| `unix:<path>` | dials the socket file of an `cante serve --sock` host | someone else's |
 | `ws://<addr>` | dials a WebSocket server (not yet connectable) | someone else's |
 
 A process that hosts sessions itself obtains the same `Client` type from its
@@ -24,7 +24,7 @@ codecs serialize.
 
 [`examples/mini-tui`](../../examples/mini-tui) is a chat TUI in one file:
 it connects over `stdio`, streams the reply, and answers tool approvals
-with `y`/`n`. It needs a working `ante` on `PATH`; model and provider come
+with `y`/`n`. It needs a working `cante` on `PATH`; model and provider come
 from your settings.
 
 ```sh

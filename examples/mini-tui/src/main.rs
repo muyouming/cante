@@ -1,15 +1,15 @@
-//! Minimal chat TUI on top of `ante-sdk`: type a prompt, watch the reply
+//! Minimal chat TUI on top of `cante-sdk`: type a prompt, watch the reply
 //! stream in, approve tool calls with `y`/`n`.
 //!
 //! Run with `cargo run` from this directory.
 //!
 //! Keys: Enter sends, Esc interrupts the running turn, Ctrl+C quits.
-//! Model and provider resolve from your `~/.ante/settings.json`.
+//! Model and provider resolve from your `~/.cante/settings.json`.
 //!
 //! Everything the SDK does is in `main`, `on_key`, and `on_event`; the rest
 //! is ratatui drawing a transcript and an input line.
 
-use ante_sdk::{
+use cante_sdk::{
     Client, ConnectOptions, connect,
     protocol::{
         Evt, Id, Op, ReviewDecision, SessionRequest, ToolDecision, ToolUse, TurnEndStatus,
@@ -28,7 +28,7 @@ use ratatui::{
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // One connection to a host: `stdio` spawns `ante serve --stdio` as a
+    // One connection to a host: `stdio` spawns `cante serve --stdio` as a
     // child. Unset session fields resolve to the host's defaults.
     let mut client = connect("stdio".parse()?, ConnectOptions::default()).await?;
     client.send(Op::StartSession(SessionRequest::default())).await?;

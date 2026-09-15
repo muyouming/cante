@@ -5,7 +5,7 @@ on:
     paths:
       - 'crates/**'
       - 'examples/**'
-      - 'ante-acp/**'
+      - 'cante-acp/**'
       - 'rustfmt.toml'
       - '.github/workflows/public-crates.yml'
   push:
@@ -13,7 +13,7 @@ on:
     paths:
       - 'crates/**'
       - 'examples/**'
-      - 'ante-acp/**'
+      - 'cante-acp/**'
       - 'rustfmt.toml'
       - '.github/workflows/public-crates.yml'
 
@@ -38,15 +38,15 @@ jobs:
           - crate: exec
             manifest: crates/exec/Cargo.toml
             workspace: crates/exec
-          - crate: ante-sdk
-            manifest: crates/ante-sdk/Cargo.toml
-            workspace: crates/ante-sdk
+          - crate: cante-sdk
+            manifest: crates/cante-sdk/Cargo.toml
+            workspace: crates/cante-sdk
           - crate: llm
             manifest: crates/llm/Cargo.toml
             workspace: crates/llm
-          - crate: ante-acp
-            manifest: ante-acp/Cargo.toml
-            workspace: ante-acp
+          - crate: cante-acp
+            manifest: cante-acp/Cargo.toml
+            workspace: cante-acp
           - crate: mini-tui
             manifest: examples/mini-tui/Cargo.toml
             workspace: examples/mini-tui

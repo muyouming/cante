@@ -1,15 +1,15 @@
 [package]
-name = "ante-sdk"
+name = "cante-sdk"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Rust SDK for Ante: connect to a host and drive sessions over the Op/Evt protocol"
+description = "Rust SDK for Cante: connect to a host and drive sessions over the Op/Evt protocol"
 license = "Apache-2.0"
-repository = "https://github.com/AntigmaLabs/ante"
+repository = "https://github.com/AntigmaLabs/cante"
 readme = "README.md"
 
 [dependencies]
-ante-protocol-shape = { path = "../protocol-shape" }
+cante-protocol-shape = { path = "../protocol-shape" }
 serde = "1.0"
 serde_json = "1.0"
 thiserror = "2.0"

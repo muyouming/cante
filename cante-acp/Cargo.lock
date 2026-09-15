@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "ante-acp"
+name = "cante-acp"
 version = "0.1.0"
