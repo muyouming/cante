@@ -30,6 +30,6 @@ target
 # Obsidian vault config
 .obsidian/
 
-# Python bytecode (ante-harbor agent adapter)
+# Python bytecode (cante-harbor agent adapter)
 __pycache__/
 *.pyc

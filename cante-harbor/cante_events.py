@@ -58,7 +58,7 @@ class _TurnErrorPolicy:
 
 @dataclass(frozen=True)
 class FinalTurnFailure:
-    """Normalized terminal Ante failure shared by the adapter and archive."""
+    """Normalized terminal Cante failure shared by the adapter and archive."""
 
     kind: str | None
     headline: str | None
@@ -105,7 +105,7 @@ def is_number(value: Any) -> bool:
 
 
 def usage_from_event(event_msg: dict[str, Any]) -> dict[str, Any] | None:
-    """Return a UsageUpdate payload from one Ante EventMsg object."""
+    """Return a UsageUpdate payload from one Cante EventMsg object."""
     event = event_msg.get("event")
     update = event.get("UsageUpdate") if isinstance(event, dict) else None
     usage = update.get("usage") if isinstance(update, dict) else None
@@ -113,7 +113,7 @@ def usage_from_event(event_msg: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def total_steps_from_events(events: Iterable[dict[str, Any]]) -> int | None:
-    """Sum turn-loop steps reported by Ante, or None for legacy event logs."""
+    """Sum turn-loop steps reported by Cante, or None for legacy event logs."""
     counts = []
     for event_msg in events:
         name, data = _event_name_data(event_msg)
@@ -184,7 +184,7 @@ def incomplete_steps_lower_bound_from_events(
 
 
 def event_from_line(line: str) -> dict[str, Any] | None:
-    """Return one Ante EventMsg JSONL object, if present."""
+    """Return one Cante EventMsg JSONL object, if present."""
     line = line.strip()
     if not line.startswith("{"):
         return None
@@ -196,7 +196,7 @@ def event_from_line(line: str) -> dict[str, Any] | None:
 
 
 def events_from_text(output: str) -> list[dict[str, Any]]:
-    """Parse Ante's mixed stdout/log stream into EventMsg objects once."""
+    """Parse Cante's mixed stdout/log stream into EventMsg objects once."""
     return [event for line in output.splitlines() if (event := event_from_line(line))]
 
 
@@ -301,7 +301,7 @@ def classify_diagnostic_text(text: str) -> str | None:
 def final_turn_failure(
     events: Iterable[dict[str, Any]],
 ) -> FinalTurnFailure | None:
-    """Normalize the final root ``TurnEnd(Error)`` emitted by headless Ante.
+    """Normalize the final root ``TurnEnd(Error)`` emitted by headless Cante.
 
     Headless output emits ``TurnEnd`` only for the root turn. Stopping at the
     final one is important for ``--check`` recovery: an initial
@@ -344,7 +344,7 @@ def final_turn_failure(
 
 
 def has_turn_end(events: Iterable[dict[str, Any]]) -> bool:
-    """Whether headless Ante reached any root ``TurnEnd``, whatever its status.
+    """Whether headless Cante reached any root ``TurnEnd``, whatever its status.
 
     Output with no ``TurnEnd`` at all (installer failures, crashes before the
     first turn settled) carries no structured verdict, so the adapter lets
@@ -424,7 +424,7 @@ def _usage_from_payloads(payloads: Iterable[dict[str, Any] | None]) -> dict[str,
 
 
 def accumulate_usage_from_events(events: Iterable[dict[str, Any]]) -> dict[str, Any] | None:
-    """Sum token usage from parsed Ante EventMsg objects.
+    """Sum token usage from parsed Cante EventMsg objects.
 
     Missing cache-write fields stay None, so providers that do not report them
     do not look like they explicitly reported zero.
@@ -460,10 +460,10 @@ def _event_name_data(event_msg: dict[str, Any]) -> tuple[str | None, Any]:
 def resolved_model_effort_from_events(
     events: Iterable[dict[str, Any]],
 ) -> str | None:
-    """Return the latest effective model effort reported by Ante.
+    """Return the latest effective model effort reported by Cante.
 
     Session events carry the fully resolved ModelSpec, so this captures catalog
-    defaults as well as explicit ``--effort`` overrides. Older Ante versions
+    defaults as well as explicit ``--effort`` overrides. Older Cante versions
     predate the effort field and return ``None``.
     """
     effort: str | None = None
@@ -541,7 +541,7 @@ def redact_binary_payloads(value: Any) -> int:
 
 
 def redact_event_log_text(output: str) -> tuple[str, int]:
-    """Redact typed binary payloads from copied Ante JSONL event logs."""
+    """Redact typed binary payloads from copied Cante JSONL event logs."""
     lines = []
     redacted = 0
     for line in output.splitlines(keepends=True):
@@ -668,7 +668,7 @@ def trajectory_from_events(
     agent_version: str,
     model_name: str | None,
 ) -> Any | None:
-    """Convert parsed Ante EventMsg objects into Harbor's validated Trajectory model."""
+    """Convert parsed Cante EventMsg objects into Harbor's validated Trajectory model."""
     events = [event for event in events if isinstance(event, dict)]
     steps: list[Any] = []
     tool_steps: dict[str, Any] = {}
@@ -852,7 +852,7 @@ def trajectory_from_events(
                 timestamp=timestamp,
                 source="system",
                 message=data,
-                extra={"ante_event": name},
+                extra={"cante_event": name},
             )
             continue
 
@@ -864,7 +864,7 @@ def trajectory_from_events(
                 timestamp=timestamp,
                 source="system",
                 message=message,
-                extra={"ante_event": name, **data},
+                extra={"cante_event": name, **data},
             )
 
     if not steps:
@@ -889,8 +889,8 @@ def trajectory_from_events(
 
 
 def read_event_log_text(logs_dir: Path) -> str | None:
-    """Read Harbor's downloaded Ante log without parsing it."""
-    log_path = logs_dir / "ante.txt"
+    """Read Harbor's downloaded Cante log without parsing it."""
+    log_path = logs_dir / "cante.txt"
     try:
         return log_path.read_text(encoding="utf-8", errors="replace")
     except OSError:

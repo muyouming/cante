@@ -1,6 +1,6 @@
 # Harbor Test Workflow
 
-This workflow runs Harbor tests against the Ante agent using configurable parameters.
+This workflow runs Harbor tests against the Cante agent using configurable parameters.
 
 ## Default Command
 
@@ -8,29 +8,29 @@ With default parameters, the workflow executes:
 
 ```bash
 uv run harbor run \
-  --agent ante_agent:AnteAgent \
+  --agent cante_agent:CanteAgent \
   --model "gemini-3-pro-preview" \
   --ak provider=gemini \
   --ak install_args= \
   --ae 'GEMINI_API_KEY=${GEMINI_API_KEY}' \
   --ae 'MODEL_BASE_URL=${MODEL_BASE_URL}' \
-  --ae 'ANTE_ENV=${ANTE_ENV}' \
+  --ae 'CANTE_ENV=${CANTE_ENV}' \
   --dataset terminal-bench@2.0 \
   --n-attempts 5
 ```
 
-This directory contains the Ante agent adapter (`ante_agent.py` and
-`ante_events.py`), which the workflow puts on `PYTHONPATH` for the harbor
-run. Ante itself is installed inside each sandbox from the published
-install.sh (`https://download.ante.run/install.sh`) using `install_args`.
+This directory contains the Cante agent adapter (`cante_agent.py` and
+`cante_events.py`), which the workflow puts on `PYTHONPATH` for the harbor
+run. Cante itself is installed inside each sandbox from the published
+install.sh (`https://download.cante.run/install.sh`) using `install_args`.
 
 ## Workflow Parameters
 
 ### `install_args`
-- **Description**: install.sh args selecting the Ante build to test (e.g. `stable`, `nightly`, a version)
+- **Description**: install.sh args selecting the Cante build to test (e.g. `stable`, `nightly`, a version)
 - **Default**: `` (empty — install.sh's default build)
 - **Required**: No
-- **Usage**: Passed to the published install.sh inside the sandbox to select which Ante build to install.
+- **Usage**: Passed to the published install.sh inside the sandbox to select which Cante build to install.
 
 ### `harbor_args`
 - **Description**: Arguments to pass to harbor
@@ -45,20 +45,20 @@ install.sh (`https://download.ante.run/install.sh`) using `install_args`.
 - **Description**: Model name to use
 - **Default**: `gemini-3-pro-preview`
 - **Required**: No
-- **Usage**: The model identifier passed to Harbor and forwarded to `ante --model`.
+- **Usage**: The model identifier passed to Harbor and forwarded to `cante --model`.
 
 ### `provider`
 - **Description**: Model provider (anthropic, openai, gemini)
 - **Default**: `gemini`
 - **Required**: No
-- **Usage**: Passed to `ante --provider`, and selects which API key is forwarded into the sandbox:
+- **Usage**: Passed to `cante --provider`, and selects which API key is forwarded into the sandbox:
   - `anthropic`: `ANTHROPIC_API_KEY`
   - `openai`: `OPENAI_API_KEY`
   - `gemini`: `GEMINI_API_KEY`
 
 ### `effort`
-- **Description**: Reasoning effort passed to `ante --effort`
-- **Default**: `` (empty — Ante's catalog default)
+- **Description**: Reasoning effort passed to `cante --effort`
+- **Default**: `` (empty — Cante's catalog default)
 - **Required**: No
 
 ### `model_base_url`
@@ -98,7 +98,7 @@ install.sh (`https://download.ante.run/install.sh`) using `install_args`.
 
 - **Job Timeout**: Each test job has a 120-hour timeout configured (`timeout-minutes: 7200`). **Important**: GitHub-hosted runners have a hard 6-hour limit regardless of the configured timeout value. Self-hosted runners can utilize the full 120-hour timeout.
 - **Execution Strategy**: Sequential execution (`max-parallel: 1`) - runs execute one after another
-- **Artifacts**: Each run uploads its results as a separate artifact named `ante-harbor-results-<run_id>-run-<index>`
+- **Artifacts**: Each run uploads its results as a separate artifact named `cante-harbor-results-<run_id>-run-<index>`
 - **Artifact Retention**: 30 days
 
 
