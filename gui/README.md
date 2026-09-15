@@ -43,6 +43,11 @@ bun run dev          # tauri dev against your installed `cante`
 Other scripts: `bun run dev:web` (Vite only), `bun run build` (bundled app),
 `bun run build:web` (frontend only).
 
+`bun run dev` is the way in. A debug build points the window at `devUrl`
+(Vite on 1420), so running `cargo run` on its own opens a **blank** window with
+no frontend and no commands — that is Tauri's dev behaviour, not a broken shell.
+For a window that serves the built assets, `bun run build` and open the bundle.
+
 ## Run against the fixture
 
 No `cante` install needed — `fixtures/fake-cante.ts` is an executable scripted

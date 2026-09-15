@@ -38,7 +38,7 @@ The shell resolves `cante` on `PATH` unless `CANTE_BIN` overrides it:
 CANTE_BIN=/path/to/cante bun run dev
 ```
 
-The daemon starts **lazily**, on the first command that needs it, so the window opens even when no binary is found. The header and status bar then show the bridge as `offline`, and `health` reports the path it tried.
+The daemon starts **lazily**, on the first command that needs it, so the window opens even when no binary is found. The header and status bar then show the status as `offline`, `health` keeps answering with the workspace it will spawn in, and the first operation that needs the daemon fails with the binary it tried to start.
 
 To produce a local bundle:
 
