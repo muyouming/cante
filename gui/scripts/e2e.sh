@@ -28,16 +28,9 @@ step() {
   fi
 }
 
-typecheck() {
-  # gui/tsconfig.json sets "types": [] and package.json ships no bun types, so
-  # `bun:test` in the ported src/*.test.ts would not resolve. Extend the frozen
-  # config from scripts/ with a bun:test shim instead of editing owner files.
-  bunx tsc --noEmit -p scripts/tsconfig.typecheck.json
-}
-
 step "bun install" bun install
 step "bun test src" bun test src
-step "bunx tsc --noEmit" typecheck
+step "bunx tsc --noEmit" bunx tsc --noEmit
 step "bun run build:web" bun run build:web
 step "bun test fixtures" bun test fixtures
 step "cargo test (src-tauri)" cargo test --manifest-path src-tauri/Cargo.toml

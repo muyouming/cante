@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Cante desktop client — Tauri shell around the `cante serve` protocol",
+  "description": "Cante desktop client \u2014 Tauri shell around the `cante serve` protocol",
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
@@ -22,6 +22,7 @@
   "devDependencies": {
     "@tailwindcss/vite": "^4",
     "@tauri-apps/cli": "^2",
+    "@types/bun": "^1.4.2",
     "tailwindcss": "^4",
     "typescript": "^5.7.2",
     "vite": "^7",

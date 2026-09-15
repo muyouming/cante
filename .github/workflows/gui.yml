@@ -19,26 +19,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Frontend and Rust tests
+  gate:
+    name: GUI gate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
-      - name: Install frontend dependencies
-        working-directory: gui
-        run: bun install --frozen-lockfile
-      - name: Run frontend tests
-        working-directory: gui
-        run: bun test src
-      - name: Typecheck frontend
-        working-directory: gui
-        run: bunx tsc --noEmit
 
-      # Tauri 2 renders in WebKitGTK on Linux, and the webkit2gtk crate links
-      # against its C libraries. Without these -dev packages `cargo test`
-      # cannot even compile the shell, so install Tauri's documented Linux
-      # prerequisites before building anything Rust.
+      # Tauri 2 renders in WebKitGTK on Linux and the webkit2gtk crate links
+      # against its C libraries, so `cargo test` cannot even compile the shell
+      # without Tauri's documented Linux prerequisites.
       - name: Install Tauri Linux prerequisites (WebKitGTK dev packages)
         run: |
           sudo apt-get update
@@ -58,7 +48,11 @@ jobs:
           toolchain: stable
           cache-workspaces: gui/src-tauri -> target
 
-      # No `tauri build` here: bundling needs additional platform tools and is
-      # slow. Typecheck, unit tests and `cargo test` are the gate.
-      - name: Run Rust tests
-        run: cargo test --manifest-path gui/src-tauri/Cargo.toml
+      # One command, the same one a developer runs: `gui/scripts/e2e.sh` installs
+      # deps, runs the frontend tests and typecheck, builds the web assets (which
+      # `tauri::generate_context!` reads at compile time), runs the fixture tests,
+      # and finally `cargo test`. Driving CI through the script is deliberate —
+      # a hand-written step list drifts from the local gate, which is exactly how
+      # a missing `vite build` before `cargo test` slipped through once.
+      - name: Run the app's e2e gate
+        run: bash gui/scripts/e2e.sh
