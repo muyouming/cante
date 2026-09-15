@@ -1,0 +1,84 @@
+# Cante GUI
+
+A desktop client for [Cante](../../README.md): a Tauri 2 shell (Rust) around a
+Vite + SolidJS + TypeScript frontend, styled with Tailwind v4. The Rust side
+spawns `cante serve` and forwards its `Op`/`Evt` JSON Lines stream to the
+frontend, which renders the session rail, streaming transcript, tool cards,
+approval prompts and command palette.
+
+## Prerequisites
+
+- **Bun** ≥ 1.2 — installs deps, runs the tests and the Vite dev server.
+- **Rust** (stable, via [rustup](https://rustup.rs)) with the host linker.
+- **Platform deps** for Tauri 2 (WebKit2GTK on Linux; Xcode Command Line Tools
+  on macOS).
+
+### macOS: Xcode licence
+
+If `/usr/bin/cc` refuses to link with *"You have not agreed to the Xcode license
+agreements"*, either accept it once:
+
+```sh
+sudo xcodebuild -license accept
+```
+
+or use the zig-based shims this machine already has (`/tmp/zigcc.sh`,
+`/tmp/bin/xcrun`, …). `scripts/toolchain.sh` detects both cases and is sourced
+by `dev.sh` and `e2e.sh`; source it yourself before a bare cargo command:
+
+```sh
+cd gui && source scripts/toolchain.sh && cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+On a normal machine and on Linux CI it is a no-op.
+
+## Run
+
+```sh
+cd gui
+bun install
+bun run dev          # tauri dev against your installed `cante`
+```
+
+Other scripts: `bun run dev:web` (Vite only), `bun run build` (bundled app),
+`bun run build:web` (frontend only).
+
+## Run against the fixture
+
+No `cante` install needed — `fixtures/fake-cante.ts` is an executable scripted
+`cante serve` double that speaks the real wire protocol.
+
+```sh
+cd gui
+bash scripts/dev.sh
+```
+
+It sets `CANTE_BIN` to the fixture, seeds `FAKE_CANTE_SEED=1` (a finished
+exchange plus one pending approval, so the window opens on a populated
+transcript) and runs `bun run dev`. Set `FAKE_CANTE_SEED=0` for an empty
+transcript. The app starts its own session, so no external POST is needed.
+
+## Test and verify
+
+```sh
+cd gui
+bun test src                              # frontend unit tests
+bun test fixtures                         # the fixture, driven over real pipes
+bunx tsc --noEmit                         # typecheck
+bun run build:web                         # production frontend build
+cargo test --manifest-path src-tauri/Cargo.toml   # Rust bridge (source toolchain.sh on macOS)
+
+bash scripts/e2e.sh                       # the whole gate, fail-fast
+```
+
+`scripts/e2e.sh` runs all of the above in order, stops at the first failure and
+prints a one-line summary; it is the same gate CI runs.
+
+## Protocol contract
+
+- `CONTRACT.md` — the frozen Rust ↔ frontend interface (commands, events,
+  status transitions, module signatures).
+- `../crates/protocol-shape/src/msg.rs` — source of truth for the `Op`/`Evt`
+  wire shapes.
+- [protocol-reference](https://docs.antigma.ai/reference/protocol-reference) —
+  the rendered protocol reference.
