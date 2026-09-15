@@ -1,12 +1,12 @@
 //! End-to-end: drive the real `Daemon` against the scripted `cante serve`
 //! double (`gui/fixtures/fake-cante.ts`) over real pipes.
 //!
-//! The fixture is a bun script, so the test sets `CANTE_BIN` to its path (the
-//! override the contract promises) and relies on `bun` being on `PATH`. The
-//! ported fixture does not carry the executable bit in git, so it is granted
-//! for the duration of the test and restored afterwards.
+//! The fixture is a bun script, so the test points `CANTE_BIN` at
+//! `"bun <script>"` (the override the contract promises) and relies on `bun`
+//! being on `PATH` — the same form a Windows host needs, where a `#!` script
+//! cannot be executed directly.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
@@ -46,46 +46,15 @@ impl Emitter for ChannelEmitter {
 }
 
 /// Temporarily make a file executable, restoring the original mode on drop.
-#[cfg(unix)]
-struct ExecutableGuard {
-    path: PathBuf,
-    mode: u32,
-}
-
-#[cfg(unix)]
-impl ExecutableGuard {
-    fn ensure(path: &Path) -> std::io::Result<Self> {
-        use std::os::unix::fs::PermissionsExt;
-        let metadata = std::fs::metadata(path)?;
-        let mode = metadata.permissions().mode();
-        if mode & 0o111 == 0 {
-            let mut permissions = metadata.permissions();
-            permissions.set_mode(mode | 0o755);
-            std::fs::set_permissions(path, permissions)?;
-        }
-        Ok(Self { path: path.to_path_buf(), mode })
-    }
-}
-
-#[cfg(unix)]
-impl Drop for ExecutableGuard {
-    fn drop(&mut self) {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = std::fs::metadata(&self.path) {
-            let mut permissions = metadata.permissions();
-            permissions.set_mode(self.mode);
-            let _ = std::fs::set_permissions(&self.path, permissions);
-        }
-    }
-}
-
 #[test]
 fn fake_cante_reaches_awaiting_with_a_pending_approval() {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixtures/fake-cante.ts");
     assert!(fixture.exists(), "fixture missing: {}", fixture.display());
-    #[cfg(unix)]
-    let _executable = ExecutableGuard::ensure(&fixture).expect("grant fixture executable bit");
-    std::env::set_var("CANTE_BIN", &fixture);
+    // Drive the fixture through `bun <script>` on every platform: Windows has no
+    // shebang handling, so a direct path would only work on unix. This also
+    // exercises `CANTE_BIN`'s command-spec form (see tests/binary_spec.rs).
+    let bun = std::env::var("BUN").unwrap_or_else(|_| "bun".to_string());
+    std::env::set_var("CANTE_BIN", format!("{bun} {}", fixture.display()));
 
     let (tx, rx) = mpsc::channel();
     let daemon = Daemon::new(Arc::new(ChannelEmitter { tx }));

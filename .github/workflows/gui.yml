@@ -56,3 +56,26 @@ jobs:
       # a missing `vite build` before `cargo test` slipped through once.
       - name: Run the app's e2e gate
         run: bash gui/scripts/e2e.sh
+
+  windows:
+    name: GUI gate (Windows)
+    runs-on: windows-latest
+    # Git Bash is the shell the app's e2e script is written for; it is present
+    # on the Windows images.
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions-rust-lang/setup-rust-toolchain@v1.17.0
+        with:
+          toolchain: stable
+          cache-workspaces: gui/src-tauri -> target
+
+      # No WebKitGTK step here: Windows uses WebView2, which the runner already
+      # has, and `cargo test` never opens a window. This job is the reason the
+      # Rust tests are written portably — the fixture is driven through
+      # `CANTE_BIN="bun <script>"` because Windows has no shebang handling.
+      - name: Run the app's e2e gate
+        run: bash gui/scripts/e2e.sh

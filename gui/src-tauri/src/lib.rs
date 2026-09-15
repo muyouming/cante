@@ -35,6 +35,9 @@ impl daemon::Emitter for TauriEmitter {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Remember window geometry between runs. Rust-side only, so no JS
+        // permission is involved.
+        .plugin(tauri_plugin_window_state::Builder::default().build())
         .setup(|app| {
             let emitter: Arc<dyn daemon::Emitter> =
                 Arc::new(TauriEmitter { app: app.handle().clone() });
