@@ -105,4 +105,68 @@ fn unknown_events_are_ignored() {
     state.status = "streaming".to_string();
     apply(&mut state, json!({ "SomeFutureEvent": { "payload": 1 } }));
     assert_eq!(state.status, "streaming");
+
+    // Unknown payloads and non-objects must not panic or disturb the session.
+    apply(&mut state, json!("FutureUnitVariant"));
+    apply(&mut state, json!(42));
+    apply(&mut state, json!(null));
+    assert_eq!(state.status, "streaming");
+    assert!(state.pending_approval.is_none());
+}
+
+#[test]
+fn a_turn_pause_without_an_approval_payload_does_not_open_one() {
+    // Every shape below is a `TurnPause` that carries no usable approval: the
+    // reason is missing, a different reason, a bare string, an explicit null,
+    // or the payload itself is a non-object. None may reach `awaiting`.
+    let bare_reasons = [
+        json!({ "turn_id": "t1" }),
+        json!({ "turn_id": "t1", "reason": null }),
+        json!({ "turn_id": "t1", "reason": { "Other": { "message": "nope" } } }),
+        json!({ "turn_id": "t1", "reason": "Approval" }),
+        json!({ "turn_id": "t1", "reason": { "Approval": null } }),
+        json!({ "turn_id": "t1", "reason": { "Approval": "not-an-object" } }),
+    ];
+    for payload in bare_reasons {
+        let mut state = CanteState::default();
+        apply(&mut state, json!({ "TurnStart": { "turn_id": "t1" } }));
+        apply(&mut state, json!({ "TurnPause": payload.clone() }));
+        assert_ne!(state.status, "awaiting", "{payload} must not await");
+        assert!(state.pending_approval.is_none(), "{payload} must not open an approval");
+    }
+
+    // A non-object TurnPause body must be ignored too.
+    let mut state = CanteState::default();
+    apply(&mut state, json!({ "TurnPause": "bad" }));
+    assert_ne!(state.status, "awaiting");
+    assert!(state.pending_approval.is_none());
+}
+
+#[test]
+fn deltas_during_awaiting_keep_the_approval_open() {
+    let mut state = CanteState::default();
+    apply(
+        &mut state,
+        json!({ "TurnPause": {
+        "turn_id": "t1",
+        "reason": { "Approval": { "message": "Allow?", "tools": [] } }
+    } }),
+    );
+    assert_eq!(state.status, "awaiting");
+
+    for event in [
+        json!({ "ThinkingDelta": "thinking" }),
+        json!({ "Thinking": { "text": "thinking" } }),
+        json!({ "ToolUpdate": { "tool_use_id": "tool_1" } }),
+        json!({ "ToolEnd": { "tool_use_id": "tool_1" } }),
+    ] {
+        apply(&mut state, event.clone());
+        assert_eq!(state.status, "awaiting", "{event} must not leave awaiting");
+        assert!(state.pending_approval.is_some());
+    }
+
+    // TurnEnd clears the prompt even from awaiting.
+    apply(&mut state, json!({ "TurnEnd": { "turn_id": "t1", "status": "Completed" } }));
+    assert_eq!(state.status, "idle");
+    assert!(state.pending_approval.is_none());
 }
