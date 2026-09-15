@@ -1,13 +1,15 @@
 // The composer: one multiline field bound to the store's draft, plus Send/Stop.
 //
 // Enter sends, Shift+Enter inserts a newline, ↑/↓ walk the prompt history (the
-// in-progress draft is restored at the end), and a leading `/` shows the
-// matching commands inline before the text is parsed by the store.
-import { For, Show, createMemo, createSignal, onMount } from "solid-js";
+// in-progress draft is restored at the end). A leading `/` opens the live
+// command palette above the field: the store owns the query, the highlight,
+// completion, and dismissal, so the palette behaviour is unit-tested without a
+// DOM and this component only wires the keys and the rows.
+import { Show, createSignal, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
-import { filterCommands } from "../commands.ts";
 import type { Store } from "../store.ts";
+import { CommandList } from "./CommandPalette.tsx";
 
 export interface ComposerProps {
   store: Store;
@@ -16,25 +18,12 @@ export interface ComposerProps {
 
 const MAX_ROWS = 6;
 const LINE = 20;
+const SLASH_LIST_ID = "cante-slash-command-list";
 
 export default function Composer(props: ComposerProps): JSX.Element {
   const store = props.store;
   const [height, setHeight] = createSignal(40);
   let field: HTMLTextAreaElement | undefined;
-
-  const slashQuery = createMemo<string | null>(() => {
-    const value = store.draft();
-    if (!value.startsWith("/")) return null;
-    const body = value.slice(1);
-    if (/\s/.test(body)) return null;
-    return body;
-  });
-
-  const suggestions = createMemo(() => {
-    const query = slashQuery();
-    if (query === null) return [];
-    return filterCommands(store.commands(), query).slice(0, 6);
-  });
 
   const resize = (): void => {
     if (!field) return;
@@ -49,6 +38,35 @@ export default function Composer(props: ComposerProps): JSX.Element {
   });
 
   const onKeyDown = (event: KeyboardEvent): void => {
+    if (store.paletteVisible()) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        store.movePalette(1);
+        return;
+      }
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        store.movePalette(-1);
+        return;
+      }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        store.completePalette();
+        return;
+      }
+      if (event.key === "Escape") {
+        event.preventDefault();
+        store.dismissPalette();
+        return;
+      }
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        // No match means the daemon may still own the name; send it as typed.
+        if (store.paletteMatches().length > 0) void store.runPalette();
+        else void store.submit();
+        return;
+      }
+    }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void store.submit();
@@ -73,25 +91,18 @@ export default function Composer(props: ComposerProps): JSX.Element {
 
   return (
     <div class="w-full shrink-0 border-t border-slate-800 bg-[#0e141b]">
-      <Show when={suggestions().length > 0}>
-        <div class="flex flex-wrap gap-1 border-b border-slate-800 px-3 py-1.5">
-          <For each={suggestions()}>
-            {(command) => (
-              <button
-                type="button"
-                title={command.hint}
-                aria-label={`Run /${command.name} — ${command.title}`}
-                onClick={() => {
-                  void store.runCommand(command);
-                  field?.focus();
-                }}
-                class="flex items-center gap-1 rounded border border-slate-800 bg-slate-900 px-1.5 py-0.5 text-xs text-slate-200 hover:border-sky-500 hover:bg-slate-800"
-              >
-                <span class="font-mono text-sky-300">/{command.name}</span>
-                <span class="text-slate-500">{command.title}</span>
-              </button>
-            )}
-          </For>
+      <Show when={store.paletteVisible()}>
+        <div class="border-b border-slate-800 px-3 py-2">
+          <CommandList
+            commands={store.paletteMatches()}
+            selected={store.paletteIndex()}
+            onSelect={(index) => store.selectPalette(index)}
+            onRun={(command) => {
+              void store.runPaletteCommand(command);
+              field?.focus();
+            }}
+            listId={SLASH_LIST_ID}
+          />
         </div>
       </Show>
 
@@ -105,6 +116,14 @@ export default function Composer(props: ComposerProps): JSX.Element {
           style={{ height: `${height()}px` }}
           spellcheck={false}
           aria-label="Message Cante"
+          aria-autocomplete="list"
+          aria-expanded={store.paletteVisible()}
+          aria-controls={SLASH_LIST_ID}
+          aria-activedescendant={
+            store.paletteVisible() && store.paletteMatches().length > 0
+              ? `${SLASH_LIST_ID}-${store.paletteIndex()}`
+              : undefined
+          }
           placeholder="Ask Cante…  (/  for commands)"
           onInput={(event) => {
             store.setDraft(event.currentTarget.value);

@@ -78,7 +78,14 @@ bun run build:app      # macOS: the .app only, no disk image
 `tauri build` runs the web build first, compiles the shell in release mode and
 bundles it. The bundles are **unsigned**: Gatekeeper warns on first launch and
 Windows SmartScreen asks for confirmation until the project has signing
-identities.
+identities — confirm once (right-click → Open; More info → Run anyway), and take
+installers only from a `gui-v*` release or a build of your own.
+
+The metadata in `tauri.conf.json` is what an installer needs: the copyright, the
+repository's Apache-2.0 `LICENSE` (`licenseFile`), a macOS 11.0 minimum, a
+**per-user** NSIS install (`nsis.installMode: "currentUser"` into
+`%LOCALAPPDATA%\Cante`, no elevation; the `.msi` is per-machine) and WebView2
+fetched with Microsoft's bootstrapper (`webviewInstallMode`) when missing.
 
 `bun run build:app` exists because the `.dmg` step drives Finder through
 AppleScript to lay out the disk-image window. A terminal without Automation

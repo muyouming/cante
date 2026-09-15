@@ -82,6 +82,19 @@ export function parseSlash(text: string): { name: string; args: string } | null 
   return { name: body.slice(0, at), args: body.slice(at + 1).trim() };
 }
 
+/**
+ * The live filter text while the user is still typing the command *name*:
+ * `/comp` → `comp`. A bare `/` (or `/c`) returns `""`, which keeps the palette
+ * open on every command. Once a space lands after the name, or the text is not
+ * a slash command at all, the palette has nothing to filter (`null`).
+ */
+export function slashPaletteQuery(text: string): string | null {
+  if (!text.startsWith("/")) return null;
+  const body = text.slice(1);
+  if (/\s/.test(body)) return null;
+  return body;
+}
+
 /** Filter for the palette: prefix matches first, then substring matches. */
 export function filterCommands(commands: readonly Command[], query: string): Command[] {
   const needle = query.trim().toLowerCase();

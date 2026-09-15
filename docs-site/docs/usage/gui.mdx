@@ -80,6 +80,39 @@ The bundles are unsigned — Gatekeeper warns on first launch and SmartScreen as
 for confirmation. `.github/workflows/gui-release.yml` builds both platforms and
 attaches the images to a release (push a `gui-v*` tag, or run it manually).
 
+## Installing
+
+Two families of installer come out of that workflow — attached to the `gui-v*`
+release when it runs, and left as workflow artifacts otherwise:
+
+| Platform | Artifact | What it is |
+| --- | --- | --- |
+| macOS, Apple silicon | `Cante_<version>_aarch64.dmg` | A disk image holding `Cante.app`; drag the app to Applications. The bundle declares macOS 11.0 as its minimum. |
+| Windows, x86_64 | `Cante_<version>_x64-setup.exe` (NSIS) and `Cante_<version>_x64_en-US.msi` | Ordinary installers: Start-menu entry, entry in the uninstall list. |
+
+**Per-user on Windows, per-machine for the MSI.** The NSIS `setup.exe` is built
+with `installMode: "currentUser"`: it installs into `%LOCALAPPDATA%\Cante`,
+registers itself in your own account's uninstall list, and never asks for
+administrator rights. The `.msi` is per-machine — it installs under
+`Program Files` and elevates. Either installs the same application; you do not
+need both.
+
+**WebView2.** The Windows installers are built with
+`webviewInstallMode: "downloadBootstrapper"`: when the WebView2 runtime is
+missing, the installer downloads Microsoft's bootstrapper and runs it silently,
+so installing needs a network connection. Windows 11, and Windows 10 with Edge
+updates, already ship WebView2 — then nothing is downloaded.
+
+**Unsigned means one confirmation, once.** The project has no signing
+identities, so macOS Gatekeeper refuses the first launch and reports that it
+cannot verify the app (`Apple could not verify … is free of malware` on recent
+macOS), and Windows SmartScreen shows `Windows protected your PC`. Neither
+warning means the download is corrupt. Confirm it: on macOS, right-click the app
+→ **Open**, or System Settings → Privacy & Security → **Open Anyway**; on
+Windows, **More info** → **Run anyway**. Take installers only from the project's
+own `gui-v*` releases — or build from source — rather than a mirror. The long
+version of this is [The bundles are unsigned](#the-bundles-are-unsigned).
+
 ## What it drives
 
 Everything the GUI does becomes one of the protocol operations below. Each is a Tauri `invoke` that returns `ok` or a human-readable error string.
@@ -117,7 +150,7 @@ Keyboard: `Cmd/Ctrl+K` opens the command palette, `Cmd/Ctrl+M` the model picker,
 
 ## Limits
 
-- **Preview, built from source.** No GUI installer is published; run it from a checkout as above.
+- **Preview, built from source.** Installers are the unsigned bundles from the `gui-v*` release workflow ([Installing](#installing)); anything else means running from a checkout as above.
 - **It needs its own `cante`.** The window and the daemon are separate processes, and the shell only spawns `cante serve` over stdio. Unix-socket and WebSocket hosts are not connectable from the GUI.
 - **One connection per window.** Closing the window drops the child daemon.
 - **The event ring is bounded.** The bridge keeps the last 4096 events with a monotonic cursor; a client that falls too far behind is told `truncated` and reloads the transcript from state.

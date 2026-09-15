@@ -4,12 +4,14 @@
 // from the Rust ring on launch and reconciles it periodically so a missed push
 // (or a webview reload) cannot desync the view. Every batch is folded into the
 // signals below by one reducer — the same shape the reverted bridge used.
-import { batch, createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
+import { batch, createSignal, onCleanup, type Accessor } from "solid-js";
 
 import {
   allCommands,
   builtinCommand,
+  filterCommands,
   parseSlash,
+  slashPaletteQuery,
   type ClientAction,
   type Command,
 } from "./commands.ts";
@@ -98,6 +100,21 @@ export interface Store {
   history: Accessor<string[]>;
   pickerOpen: Accessor<boolean>;
   paletteOpen: Accessor<boolean>;
+  /** Slash palette: live filtering while a `/command` name is being typed. */
+  paletteVisible: Accessor<boolean>;
+  paletteQuery: Accessor<string>;
+  paletteMatches: Accessor<Command[]>;
+  paletteIndex: Accessor<number>;
+  movePalette(delta: number): void;
+  selectPalette(index: number): void;
+  /** Complete the highlighted name into the draft without running it (Tab). */
+  completePalette(): void;
+  /** Run the highlighted command, falling back to the first match (Enter). */
+  runPalette(): Promise<void>;
+  /** Run one palette row, consuming the draft (click). */
+  runPaletteCommand(command: Command | undefined): Promise<void>;
+  /** Hide the slash palette without discarding the draft (Esc). */
+  dismissPalette(): void;
   connect(): void;
   startSession(overrides?: SessionOverrides): Promise<void>;
   send(text: string, mode?: "prompt" | "steer" | "shell"): Promise<void>;
@@ -280,8 +297,34 @@ export function createStore(): Store {
   const [history, setHistory] = createSignal<string[]>([]);
   const [pickerOpen, setPickerOpen] = createSignal(false);
   const [paletteOpen, setPaletteOpen] = createSignal(false);
+  const [paletteDismissed, setPaletteDismissed] = createSignal(false);
+  const [paletteCursor, setPaletteCursor] = createSignal(0);
 
-  const commands = createMemo<Command[]>(() => allCommands(session()?.skills ?? []));
+  // Plain accessors rather than `createMemo`s: `bun test` resolves Solid's
+  // server build, where a memo is computed once and never re-runs. These must
+  // recompute from the draft on every read, and in the browser they still track
+  // inside JSX because each read touches the underlying signals directly.
+  function commands(): Command[] {
+    return allCommands(session()?.skills ?? []);
+  }
+
+  // The slash palette is a pure projection of the draft: `/` or `/comp` keeps
+  // it open with a live `filterCommands` query, a space after the name (or a
+  // non-slash draft) hides it, and Esc hides it until the next keystroke.
+  function paletteQuery(): string {
+    return slashPaletteQuery(draft()) ?? "";
+  }
+  function paletteVisible(): boolean {
+    return slashPaletteQuery(draft()) !== null && !paletteDismissed();
+  }
+  function paletteMatches(): Command[] {
+    return paletteVisible() ? filterCommands(commands(), paletteQuery()) : [];
+  }
+  function paletteIndex(): number {
+    const count = paletteMatches().length;
+    if (count === 0) return 0;
+    return Math.max(0, Math.min(paletteCursor(), count - 1));
+  }
 
   let historyCursor: number | null = null;
   let historyDraft = "";
@@ -814,6 +857,9 @@ export function createStore(): Store {
   function setDraft(value: string): void {
     historyCursor = null;
     setDraftSignal(value);
+    // A fresh edit reopens a dismissed palette and re-ranks the highlight.
+    setPaletteDismissed(false);
+    setPaletteCursor(0);
   }
 
   function pushHistory(text: string): void {
@@ -968,6 +1014,51 @@ export function createStore(): Store {
     setPaletteOpen(false);
   }
 
+  // ---- slash palette (draft-driven) ---------------------------------------
+
+  function movePalette(delta: number): void {
+    const count = paletteMatches().length;
+    if (count === 0) {
+      setPaletteCursor(0);
+      return;
+    }
+    setPaletteCursor(Math.max(0, Math.min(count - 1, paletteIndex() + delta)));
+  }
+
+  function selectPalette(index: number): void {
+    const count = paletteMatches().length;
+    if (count === 0) {
+      setPaletteCursor(0);
+      return;
+    }
+    setPaletteCursor(Math.max(0, Math.min(count - 1, index)));
+  }
+
+  function completePalette(): void {
+    const command = paletteMatches()[paletteIndex()];
+    if (!command) return;
+    // Completing inserts `/name ` and stops there; the trailing space closes
+    // the palette so Enter afterwards is a plain submit of the command.
+    setDraft(`/${command.name} `);
+  }
+
+  async function runPaletteCommand(command: Command | undefined): Promise<void> {
+    if (!command) return;
+    setDraftSignal("");
+    setPaletteDismissed(false);
+    setPaletteCursor(0);
+    await runCommand(command);
+  }
+
+  async function runPalette(): Promise<void> {
+    const matches = paletteMatches();
+    await runPaletteCommand(matches[paletteIndex()] ?? matches[0]);
+  }
+
+  function dismissPalette(): void {
+    setPaletteDismissed(true);
+  }
+
   function clearTranscript(): void {
     toolRows.clear();
     setRows([]);
@@ -995,6 +1086,10 @@ export function createStore(): Store {
     history,
     pickerOpen,
     paletteOpen,
+    paletteVisible,
+    paletteQuery,
+    paletteMatches,
+    paletteIndex,
     connect,
     startSession,
     send,
@@ -1007,6 +1102,12 @@ export function createStore(): Store {
     setDraft,
     submit,
     runCommand,
+    movePalette,
+    selectPalette,
+    completePalette,
+    runPalette,
+    runPaletteCommand,
+    dismissPalette,
     historyPrev,
     historyNext,
     openPicker,
