@@ -69,10 +69,17 @@ bun run build:web                         # production frontend build
 cargo test --manifest-path src-tauri/Cargo.toml   # Rust bridge (source toolchain.sh on macOS)
 
 bash scripts/e2e.sh                       # the whole gate, fail-fast
+bash scripts/dom-smoke.sh                 # render the shell in Chrome, read it back as text
 ```
 
 `scripts/e2e.sh` runs all of the above in order, stops at the first failure and
 prints a one-line summary; it is the same gate CI runs.
+
+`scripts/dom-smoke.sh` is the developer/agent aid for the one thing a terminal
+cannot assert on: the window. It builds the web assets, serves them, has Chrome
+dump the rendered DOM, and checks that the header, chips, composer, status bar
+and the browser-preview fallback are all present. It is not part of the CI gate
+(CI has no Chrome) and takes about a second.
 
 ## Protocol contract
 
