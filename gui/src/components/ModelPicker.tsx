@@ -1,7 +1,9 @@
 // Provider / model picker, driven by `cante catalog`.
 //
 // One flat, filterable list: the provider name is a chip on each row and the
-// current model is marked. Picking one starts a session on that model.
+// current model is marked. Picking one starts a session on that model. The
+// filter field is a combobox over the list so a screen reader follows the
+// highlighted row.
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -27,6 +29,8 @@ interface Entry {
   efforts: string;
   current: boolean;
 }
+
+const LIST_ID = "cante-model-list";
 
 export default function ModelPicker(props: ModelPickerProps): JSX.Element {
   const [query, setQuery] = createSignal("");
@@ -75,10 +79,10 @@ export default function ModelPicker(props: ModelPickerProps): JSX.Element {
   };
 
   return (
-    <Overlay open={props.open} onClose={props.onClose} panelClass="max-w-[620px]">
+    <Overlay open={props.open} onClose={props.onClose} label="Choose a model" panelClass="max-w-[620px]">
       <div class="flex items-center justify-between gap-2">
         <div class="flex flex-col gap-1">
-          <span class="text-base font-bold text-slate-50">Model</span>
+          <h2 class="text-base font-bold text-slate-50">Model</h2>
           <span class="text-xs text-slate-500">
             {all().length > 0 ? `${all().length} models from cante catalog` : "catalog unavailable"}
           </span>
@@ -107,6 +111,12 @@ export default function ModelPicker(props: ModelPickerProps): JSX.Element {
         }}
         value={query()}
         spellcheck={false}
+        role="combobox"
+        aria-label="Filter models"
+        aria-autocomplete="list"
+        aria-expanded="true"
+        aria-controls={LIST_ID}
+        aria-activedescendant={entries().length > 0 ? `${LIST_ID}-${selected()}` : undefined}
         placeholder="Filter models…"
         onInput={(event) => {
           setQuery(event.currentTarget.value);
@@ -124,18 +134,21 @@ export default function ModelPicker(props: ModelPickerProps): JSX.Element {
             pick(entries()[selected()]);
           }
         }}
-        class="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-sky-500 focus:outline-none"
+        class="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-sky-500"
       />
 
       <Show
         when={entries().length > 0}
         fallback={<span class="py-6 text-center text-sm text-slate-400">No models — press RELOAD.</span>}
       >
-        <div class="flex max-h-[320px] flex-col gap-1 overflow-y-auto">
+        <div id={LIST_ID} role="listbox" aria-label="Available models" class="flex max-h-[320px] flex-col gap-1 overflow-y-auto">
           <For each={entries()}>
             {(entry, index) => (
               <button
                 type="button"
+                id={`${LIST_ID}-${index()}`}
+                role="option"
+                aria-selected={index() === selected()}
                 onClick={() => pick(entry)}
                 onMouseEnter={() => setSelected(index())}
                 class={`flex flex-col gap-1 rounded-md border px-3 py-2 text-left ${

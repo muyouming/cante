@@ -5,7 +5,7 @@ description: "Build and run the Tauri desktop client that drives cante serve"
 
 The Cante desktop GUI is a graphical client for [`cante serve`](/usage/serve). It does not reimplement the agent: it spawns a `cante` binary as a child process, speaks the same [JSONL protocol](/reference/protocol-reference) as every other client, and renders the event stream as a window-shaped conversation.
 
-The client lives in [`gui/`](https://github.com/muyouming/cante/tree/main/gui) in this repository. It is a preview and is built from source — the downloadable release is the `cante` binary only — so expect rough edges alongside the rest of the beta.
+The client lives in [`gui/`](https://github.com/muyouming/cante/tree/main/gui) in this repository. It is a preview, built from source; the release workflow does package desktop bundles (see [Bundles](#bundles)), and they are unsigned. Expect rough edges alongside the rest of the beta.
 
 ## Stack
 
@@ -55,7 +55,7 @@ To produce a local bundle:
 bun run build
 ```
 
-`bun run build` runs `tauri build`, which needs the platform's bundling tools (and, on macOS, code-signing setup). It is a local step only — CI stops at tests.
+`bun run build` runs `tauri build`, which needs the platform's bundling tools. It is deliberately absent from the pull-request gate — `gui.yml` stops at `scripts/e2e.sh` — while the separate `gui-release.yml` workflow bundles both platforms on a `gui-v*` tag or a manual run.
 
 ### Tests
 
@@ -123,4 +123,107 @@ Keyboard: `Cmd/Ctrl+K` opens the command palette, `Cmd/Ctrl+M` the model picker,
 - **The event ring is bounded.** The bridge keeps the last 4096 events with a monotonic cursor; a client that falls too far behind is told `truncated` and reloads the transcript from state.
 - **Approvals need a human.** A turn paused for approval stays paused until the panel — or some other client — answers it.
 - **No fabricated events.** The bridge never synthesizes protocol messages, so the window shows exactly what the daemon emitted.
-- **Platform.** Same macOS and Linux support as Cante itself; on Windows, use WSL.
+- **Platform.** The release bundles target Apple silicon macOS and Windows x86_64; on Linux, build from source with Tauri's WebKitGTK prerequisites. The Rust bridge's tests run on both the Linux and Windows CI jobs.
+
+## Troubleshooting
+
+Each entry names the exact symptom, what causes it, and what to do. The string the window shows is quoted from the code, so you can search it.
+
+### "Desktop bridge unavailable"
+
+**Symptom.** A banner under the header reads "Desktop bridge unavailable — this is the browser preview; open the Cante desktop app to talk to the daemon"; the status bar repeats `desktop bridge unavailable — open the Cante desktop app`. The transcript stays empty and nothing sends.
+
+**Cause.** The page is running outside the Tauri shell. `src/tauri.ts` probes for `window.__TAURI_INTERNALS__`, which only Tauri injects; with no host every `invoke` rejects with `BridgeUnavailable`. This is the normal state of the Vite preview — `bun run dev:web`, or the dev-server URL (`http://localhost:1420`) opened in a browser — and `scripts/dom-smoke.sh` asserts the fallback paints so the shell never goes blank.
+
+**Fix.** Run the desktop window, not just Vite: `bun run dev`. If a browser tab is pointed at a dev server left over from an earlier checkout, close it and start from a clean `bun run dev`; `bun run dev:web` is a frontend preview only and can never reach the daemon.
+
+### The window is blank in a debug build
+
+**Symptom.** `cargo run` (or a debug build) opens the native window, but it is blank: no header, no transcript, no chips.
+
+**Cause.** `src-tauri/tauri.conf.json` points debug builds at `devUrl` (`http://localhost:1420`) and runs `beforeDevCommand: bun run dev:web` only when you go through `tauri dev`. A bare `cargo run` skips both, so the window loads a URL where nothing is listening. This is Tauri's dev behaviour, not a broken shell.
+
+**Fix.** Start Vite (or let Tauri start it): `bun run dev`. For a window that serves the built assets with no dev server, `bun run build` and open the bundle.
+
+### `cante` is not found
+
+**Symptom.** The window opens and the rail's bridge dot is green (`● bridge`) — the Tauri host is reachable — but the line below it and the status bar both read `daemon offline`, and there is no version next to the dot. At launch two probes fail and write the status-bar notice: the automatic `start_session` reports ``could not start `cante serve`: No such file or directory (os error 2)`` and the catalog probe reports ``catalog: could not run `cante catalog`: …`` (whichever resolves last is what you see; both name the binary, and the trailing OS text varies by platform). The transcript stays empty.
+
+**Cause.** The bridge resolves `CANTE_BIN` from the environment and otherwise falls back to `cante` on `PATH`. It spawns the daemon lazily, on the first op that needs it, so the window itself opens and `health` still answers (`ok: true`, `cante: null`, `daemon: false`); only the spawn fails. A failed spawn leaves no process behind, and the next op retries it.
+
+**Fix.** Install `cante`, put it on `PATH`, or point `CANTE_BIN` at it. `CANTE_BIN` is a **command spec**, not a path: leading arguments are kept and the daemon's own `serve` (or `catalog` / `--version`) is appended, and double-quoted tokens survive spaces, so a script or a Windows path with spaces works.
+
+```bash
+CANTE_BIN=/opt/cante/bin/cante bun run dev
+CANTE_BIN='"/Applications/Cante Tools/cante"' bun run dev
+CANTE_BIN="bun /path/to/fake-cante.ts" bun run dev   # script double, no install
+```
+
+After fixing the path, the next operation that needs the daemon retries the spawn — the rail's session chip, `New session` (`/new`) from the palette, or sending a prompt. No restart of the window is needed.
+
+### The daemon exits mid-session
+
+**Symptom.** A running turn stops. The status bar flips to `daemon offline`, any approval panel disappears, and the notice reads `cante daemon exited (<code>)` — or `cante daemon exited (signal)` when the child died by signal. The transcript keeps everything already rendered.
+
+**Cause.** The bridge emits `cante://exit`; the Rust side sets status `offline` and clears the session and pending approval, and the store's exit handler sets the same status and notice. Neither touches the event ring or the rendered rows, so the conversation stays on screen — only the live session is gone.
+
+**Fix.** Nothing to recover — the child is gone, and a new one is spawned lazily. Press the rail's session chip, or run `New session` (`/new`) from the palette; both clear the view and send `start_session`. Picking a model starts a fresh session too. The GUI never resumes the dead session.
+
+### The model picker is empty
+
+**Symptom.** `Cmd/Ctrl+M` (or the `MODEL` chip) opens the picker, the subtitle says `catalog unavailable`, the body says `No models — press RELOAD.`, and the status-bar notice begins with `catalog:`.
+
+**Cause.** The picker is built from `cante catalog`, which the bridge runs out-of-process with the same `CANTE_BIN` spec. If the binary is missing, the command exits without JSON, or it prints non-JSON to stdout, `loadCatalog` catches the failure and sets `catalog: <message>`. A **successful** catalog is cached for 60 seconds; a failure is not cached.
+
+**Fix.** Press `RELOAD`, and run the command by hand in the same environment to see the real error:
+
+```bash
+cante catalog
+```
+
+If it prints JSON with a `providers` array, the picker fills. A binary that is a fixture or wrapper and does not implement `catalog` (see [Running with no Cante install at all](#running-with-no-cante-install-at-all)) leaves the picker empty by design.
+
+### Building on macOS
+
+Two distinct traps, both macOS-only.
+
+**Xcode licence.** If `/usr/bin/cc` refuses to link with *"You have not agreed to the Xcode license agreements"*, the Rust build and Tauri's Swift bridge cannot link. Accept it once with `sudo xcodebuild -license accept`, or use the zig-based shims where they exist. `scripts/toolchain.sh` probes whether `cc` can link and either exports the zig compiler/linker variables or prints the one-line fix; `dev.sh` and `e2e.sh` source it, so those work unchanged. For a bare cargo command, source it yourself first:
+
+```bash
+cd gui && source scripts/toolchain.sh && cargo test --manifest-path src-tauri/Cargo.toml
+```
+
+On a licensed Mac and on Linux CI it is a no-op.
+
+**The `.dmg` step.** `bun run build` produces `.app + .dmg`, and the disk-image step drives Finder through AppleScript to lay out the window. A terminal without Automation permission — a sandboxed agent, a locked screen — cannot, so the `.dmg` step fails while the app itself bundles fine. Use `bun run build:app` for the `.app` alone; `gui-release.yml` has the permission and produces both.
+
+### The bundles are unsigned
+
+**Symptom.** On macOS, Gatekeeper warns on first launch. On Windows, SmartScreen asks for confirmation.
+
+**Cause.** The bundles are unsigned — the project has no signing identities, and `gui-release.yml` uploads the images as built. This is expected, not a corruption signal.
+
+**Fix.** Confirm the OS warning once to open the app: macOS's right-click → Open (or System Settings → Privacy & Security → Open Anyway) and SmartScreen's More info → Run anyway. Take installers only from the project's own `gui-v*` releases — the workflow attaches the `.dmg`, `.msi`, and NSIS `*setup.exe` — or build from source yourself.
+
+### Running with no Cante install at all
+
+**Goal.** See the shell without installing `cante`.
+
+**Fix.** [`gui/fixtures/fake-cante.ts`](https://github.com/muyouming/cante/tree/main/gui/fixtures) is a scripted `cante serve` double that speaks the real JSON Lines protocol, and `scripts/dev.sh` points `CANTE_BIN` at it (as an absolute path), seeds `FAKE_CANTE_SEED=1`, and runs `bun run dev`:
+
+```bash
+cd gui
+bash scripts/dev.sh
+FAKE_CANTE_SEED=0 bash scripts/dev.sh   # empty transcript instead
+```
+
+The seed is a finished exchange plus one pending approval, so the window opens populated and parked on an approval gate. The fixture answers the ops a session needs: `StartSession` → `SessionStart` (plus the seed), `UserInput` → `TurnStart` … `TurnPause` (an approval on `turn_1`), `ApprovalResponse` → `TurnResume` / `ToolEnd` / `UsageUpdate` / `TurnEnd`, `Goal` → `Info`, `Interrupt` → `TurnEnd`, and `Shutdown` → `Goodbye` then exit 0. `FAKE_CANTE_SLOW_DELTAS=1` splits a delta run across a tick.
+
+What it does **not** simulate:
+
+- **No model or provider.** The session is `fake-model` on provider `fake`; there is no API key and no network call.
+- **No real tools.** `Bash` and `Write` are scripted events with canned results — nothing on disk is read, written, or executed.
+- **No out-of-process subcommands.** `--version` and `catalog` return nothing, so the rail shows no version and the model picker stays `catalog unavailable`.
+- **No persistence.** The session is not saved and cannot be resumed.
+
+It is a test double and is never shipped.

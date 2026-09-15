@@ -140,6 +140,54 @@ function clampText(text: string, limit: number): string {
   return `${text.slice(0, limit - 1)}…`;
 }
 
+/** A finite number from the wire, or `fallback` for anything hostile. */
+function safeCount(value: unknown, fallback: number): number {
+  const num = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(num) ? num : fallback;
+}
+
+/** `JSON.stringify` that never throws on a hostile/circular tool argument. */
+function stringifyArgs(value: unknown): string {
+  try {
+    return JSON.stringify(value ?? {}) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * A `PendingApproval` the UI can actually answer.
+ *
+ * The wire is trusted for shape but not for content: drop entries without a
+ * usable `tool_use_id`, drop the whole approval when there is nothing to decide
+ * (an `approve` with an empty `responses` batch is meaningless) and when the
+ * turn id is missing (the response could never be correlated).
+ */
+function normalizeApproval(value: unknown): PendingApproval | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const turnId = typeof record.turn_id === "string" ? record.turn_id : "";
+  if (!turnId) return null;
+  const tools: PendingApproval["tools"] = [];
+  for (const entry of Array.isArray(record.tools) ? record.tools : []) {
+    if (!entry || typeof entry !== "object") continue;
+    const tool = entry as Record<string, unknown>;
+    const id = typeof tool.id === "string" ? tool.id : tool.id == null ? "" : String(tool.id);
+    if (!id) continue;
+    tools.push({
+      id,
+      name: typeof tool.name === "string" ? tool.name : String(tool.name ?? "tool"),
+      args: tool.args,
+    });
+  }
+  if (tools.length === 0) return null;
+  return {
+    turn_id: turnId,
+    message: typeof record.message === "string" ? record.message : "",
+    tools,
+  };
+}
+
 function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -373,6 +421,7 @@ export function createStore(): Store {
 
   function handleEvent(message: EventMsg): void {
     if (disposed) return;
+    if (!message || typeof message !== "object") return;
     if (!hydrated) {
       buffered.push(message);
       return;
@@ -415,7 +464,7 @@ export function createStore(): Store {
       id: `i${++rowSeq}`,
       kind: "info",
       label,
-      text,
+      text: clampText(text, MAX_ROW_TEXT),
       detail: "",
       tone,
       streaming: false,
@@ -427,7 +476,7 @@ export function createStore(): Store {
     if (!state) return;
     if (state.status) setDaemonStatus(state.status);
     if (state.session !== undefined) setSession(state.session ?? null);
-    if (state.pending_approval !== undefined) setApproval(state.pending_approval ?? null);
+    if (state.pending_approval !== undefined) setApproval(normalizeApproval(state.pending_approval));
     if (state.cante !== undefined) setCanteVersion(state.cante);
     if (state.cwd) setWorkspace(state.cwd);
   }
@@ -477,6 +526,7 @@ export function createStore(): Store {
   }
 
   function applyEvent(message: EventMsg, dedupe = true): void {
+    if (!message || typeof message !== "object") return;
     if (dedupe && !remember(message.id)) return;
     const event = message.event;
     const name = eventName(event);
@@ -487,7 +537,7 @@ export function createStore(): Store {
       case "UserInput": {
         const text = textOf(event, "UserInput");
         if (text && text !== lastUserText) {
-          setRows(pushRow({ id: `u${++rowSeq}`, kind: "user", label: "you", text, detail: "", tone: "accent", streaming: false, time: at }));
+          setRows(pushRow({ id: `u${++rowSeq}`, kind: "user", label: "you", text: clampText(text, MAX_ROW_TEXT), detail: "", tone: "accent", streaming: false, time: at }));
         }
         lastUserText = "";
         return;
@@ -532,8 +582,8 @@ export function createStore(): Store {
         setRows(pushRow({
           id: rowId,
           kind: "tool",
-          label: String(tool?.name ?? "tool"),
-          text: JSON.stringify(tool?.args ?? {}, null, 0) ?? "",
+          label: clampText(String(tool?.name ?? "tool"), MAX_ROW_TEXT),
+          text: clampText(stringifyArgs(tool?.args), MAX_ROW_TEXT),
           detail: "",
           tone: "accent",
           streaming: true,
@@ -578,7 +628,7 @@ export function createStore(): Store {
             ? textOf(event, "Info")
             : String(payload?.header ?? payload?.detail ?? "");
         if (!text) return;
-        setRows(pushRow({ id: `i${++rowSeq}`, kind: "info", label: "info", text, detail: "", tone: "muted", streaming: false, time: at }));
+        setRows(pushRow({ id: `i${++rowSeq}`, kind: "info", label: "info", text: clampText(text, MAX_ROW_TEXT), detail: "", tone: "muted", streaming: false, time: at }));
         return;
       }
       case "CompactStart":
@@ -616,34 +666,39 @@ export function createStore(): Store {
         return;
       }
       case "TurnPause": {
-        const payload = eventPayload<{ turn_id?: string; reason?: { Approval?: { tools?: PendingApproval["tools"]; message?: string } } }>(event, "TurnPause");
+        const payload = eventPayload<{ turn_id?: unknown; reason?: { Approval?: unknown } }>(event, "TurnPause");
         const gate = payload?.reason?.Approval;
         if (!gate) return;
-        setDaemonStatus("awaiting");
-        setApproval({
-          turn_id: String(payload?.turn_id ?? ""),
-          message: String(gate.message ?? ""),
-          tools: Array.isArray(gate.tools) ? gate.tools : [],
+        const gateRecord = typeof gate === "object" ? (gate as Record<string, unknown>) : {};
+        const pending = normalizeApproval({
+          turn_id: payload?.turn_id,
+          message: gateRecord.message,
+          tools: gateRecord.tools,
         });
+        if (!pending) return;
+        setDaemonStatus("awaiting");
+        setApproval(pending);
         return;
       }
       case "Error": {
         const text = textOf(event, "Error");
-        setRows(pushRow({ id: `e${++rowSeq}`, kind: "error", label: "error", text: text || "unknown error", detail: "", tone: "error", streaming: false, time: at }));
-        setNotice(text || "unknown error");
+        const message = clampText(text || "unknown error", MAX_ROW_TEXT);
+        setRows(pushRow({ id: `e${++rowSeq}`, kind: "error", label: "error", text: message, detail: "", tone: "error", streaming: false, time: at }));
+        setNotice(message);
         return;
       }
       case "TurnEnd": {
-        const payload = eventPayload<{ status?: TurnEndStatus; steps?: number }>(event, "TurnEnd");
+        const payload = eventPayload<{ status?: TurnEndStatus; steps?: unknown }>(event, "TurnEnd");
         const reason = readTurnEnd(payload?.status);
-        setSteps(Number(payload?.steps ?? steps()));
+        const stepCount = safeCount(payload?.steps, steps());
+        setSteps(stepCount);
         lastUserText = "";
         if (reason.kind === "ok") {
-          setRows(pushRow({ id: `r${++rowSeq}`, kind: "turn", label: "done", text: `turn complete · ${payload?.steps ?? 0} step(s)`, detail: "", tone: "ok", streaming: false, time: at }));
+          setRows(pushRow({ id: `r${++rowSeq}`, kind: "turn", label: "done", text: clampText(`turn complete · ${stepCount} step(s)`, MAX_ROW_TEXT), detail: "", tone: "ok", streaming: false, time: at }));
         } else if (reason.kind === "interrupted") {
-          setRows(pushRow({ id: `r${++rowSeq}`, kind: "turn", label: "stopped", text: reason.reason, detail: "", tone: "warn", streaming: false, time: at }));
+          setRows(pushRow({ id: `r${++rowSeq}`, kind: "turn", label: "stopped", text: clampText(reason.reason, MAX_ROW_TEXT), detail: "", tone: "warn", streaming: false, time: at }));
         } else {
-          setRows(pushRow({ id: `r${++rowSeq}`, kind: "turn", label: "failed", text: reason.headline, detail: reason.details.join(" · "), tone: "error", streaming: false, time: at }));
+          setRows(pushRow({ id: `r${++rowSeq}`, kind: "turn", label: "failed", text: clampText(reason.headline, MAX_ROW_TEXT), detail: clampText(reason.details.join(" · "), MAX_TOOL_DETAIL), tone: "error", streaming: false, time: at }));
           setNotice(reason.headline);
         }
         return;
@@ -688,7 +743,7 @@ export function createStore(): Store {
         id: `u${++rowSeq}`,
         kind: "user",
         label: "you",
-        text: trimmed,
+        text: clampText(trimmed, MAX_ROW_TEXT),
         detail: "",
         tone: "accent",
         streaming: false,
@@ -705,11 +760,18 @@ export function createStore(): Store {
   async function respond(decisions: ReviewDecision[], message?: string): Promise<void> {
     const pending = approval();
     if (!pending) return;
-    const responses: ToolDecision[] = pending.tools.map((tool, index) => ({
-      tool_use_id: tool.id,
-      decision: decisions[index] ?? decisions[0] ?? "Deny",
-      ...(message ? { message } : {}),
-    }));
+    const responses: ToolDecision[] = [];
+    pending.tools.forEach((tool, index) => {
+      if (!tool || typeof tool.id !== "string" || !tool.id) return;
+      responses.push({
+        tool_use_id: tool.id,
+        decision: decisions[index] ?? decisions[0] ?? "Deny",
+        ...(message ? { message } : {}),
+      });
+    });
+    // An empty batch has nothing for the daemon to answer and would leave the
+    // turn wedged; if sanitation emptied the list there is nothing to send.
+    if (responses.length === 0) return;
     const ok = await attempt(() => invoke("approve", { turn_id: pending.turn_id, responses }));
     if (ok) setApproval(null);
   }

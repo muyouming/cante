@@ -53,8 +53,10 @@ export default function StatusBar(props: StatusBarProps): JSX.Element {
   };
 
   return (
-    <footer class="flex h-[28px] w-full shrink-0 items-center gap-4 border-t border-slate-800 bg-[#0e141b] px-3">
-      <span class={statusTone(store.daemonStatus())}>{statusText(store.daemonStatus())}</span>
+    <footer class="flex h-[28px] w-full shrink-0 items-center gap-4 border-t border-slate-800 bg-[#0e141b] px-3" aria-label="Session status">
+      <span class={statusTone(store.daemonStatus())} aria-label={`Turn status: ${statusText(store.daemonStatus())}`}>
+        {statusText(store.daemonStatus())}
+      </span>
 
       <Show when={store.usage()}>
         <span class="text-xs text-slate-500">
@@ -76,11 +78,16 @@ export default function StatusBar(props: StatusBarProps): JSX.Element {
 
       <span class="flex-1" />
 
-      <Show when={store.notice()}>
-        <span class="max-w-[60%] truncate text-xs text-amber-400" title={store.notice() ?? ""}>
-          {store.notice()}
-        </span>
-      </Show>
+      {/* Always mounted so the live region exists before the first notice. */}
+      <span
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        class="max-w-[60%] truncate text-xs text-amber-400"
+        title={store.notice() ?? ""}
+      >
+        {store.notice() ?? ""}
+      </span>
     </footer>
   );
 }

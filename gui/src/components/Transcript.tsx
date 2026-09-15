@@ -3,10 +3,11 @@
 // `src/transcript.ts` turns rows into uniform 20px display lines — one chrome
 // line per entry plus wrapped body/output lines — and the virtual list windows
 // them. Clicking a line opens the full entry in `DetailModal`.
-import { Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
 import type { Row } from "../rows.ts";
+import type { Connection } from "../store.ts";
 import { LINE_HEIGHT, columnsFor, createLayoutCache, type Line } from "../transcript.ts";
 import TranscriptLine from "./TranscriptLine.tsx";
 import VirtualList from "./VirtualList.tsx";
@@ -16,6 +17,53 @@ const layout = createLayoutCache();
 export interface TranscriptProps {
   rows: Row[];
   onOpen(row: Row): void;
+  /** Tauri bridge reachability, so the empty state can name the real cause. */
+  connection: Connection;
+  /** False when no session has been opened yet. */
+  hasSession: boolean;
+  /** False in the plain-browser preview. */
+  bridge: boolean;
+}
+
+/** The copy shown when there is nothing to read, keyed on why that is. */
+function emptyText(props: TranscriptProps): { title: string; body: JSX.Element } {
+  if (!props.bridge) {
+    return {
+      title: "Browser preview",
+      body: (
+        <>
+          This is the browser preview — desktop bridge unavailable, so the daemon cannot be
+          reached. Open the Cante desktop app to talk to your session.
+        </>
+      ),
+    };
+  }
+  if (props.connection === "offline") {
+    return {
+      title: "Daemon offline",
+      body: (
+        <>
+          The cante daemon is not responding. The GUI reconnects on its own; check the status and the
+          last log line in the session rail.
+        </>
+      ),
+    };
+  }
+  if (!props.hasSession) {
+    return {
+      title: "No session yet",
+      body: <>The GUI is starting a session. If this stays empty, check the bridge status in the session rail.</>,
+    };
+  }
+  return {
+    title: "CANTE",
+    body: (
+      <>
+        Ask a question below, or press <span class="text-slate-300">⌘K</span> for commands. A leading{" "}
+        <span class="font-mono text-slate-300">/</span> runs a skill or built-in.
+      </>
+    ),
+  };
 }
 
 export default function Transcript(props: TranscriptProps): JSX.Element {
@@ -65,13 +113,8 @@ export default function Transcript(props: TranscriptProps): JSX.Element {
         }}
         empty={
           <div class="flex h-full w-full flex-col items-center justify-center gap-2 text-center">
-            <Show when={props.rows.length === 0}>
-              <span class="text-sm font-bold tracking-widest text-slate-600">CANTE</span>
-              <span class="max-w-[420px] text-sm text-slate-500">
-                Ask a question below, or press <span class="text-slate-300">⌘K</span> for commands.
-                A leading <span class="font-mono text-slate-300">/</span> runs a skill or built-in.
-              </span>
-            </Show>
+            <span class="text-sm font-bold tracking-widest text-slate-600">{emptyText(props).title}</span>
+            <span class="max-w-[420px] text-sm text-slate-500">{emptyText(props).body}</span>
           </div>
         }
       />

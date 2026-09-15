@@ -16,16 +16,27 @@ export interface SessionRailProps {
 function RailButton(props: {
   label: string;
   value: string;
+  /** Spoken name; defaults to label + value. */
+  name?: string;
   onPress(): void;
   tone?: "default" | "accent";
+  expanded?: boolean;
 }): JSX.Element {
   return (
     <button
       type="button"
-      onClick={() => props.onPress()}
+      aria-label={props.name ?? `${props.label}: ${props.value}`}
+      aria-haspopup={props.expanded === undefined ? undefined : "dialog"}
+      aria-expanded={props.expanded}
+      onClick={(event) => {
+        event.currentTarget.focus();
+        props.onPress();
+      }}
       class="flex w-full flex-col gap-1 rounded-md border border-slate-800 bg-slate-900 px-2 py-2 text-left hover:border-sky-500 hover:bg-slate-800"
     >
-      <span class="text-[10px] tracking-widest text-slate-500">{props.label.toUpperCase()}</span>
+      <span aria-hidden="true" class="text-[10px] tracking-widest text-slate-500">
+        {props.label.toUpperCase()}
+      </span>
       <span class={`truncate text-sm ${props.tone === "accent" ? "text-sky-300" : "text-slate-100"}`}>
         {props.value}
       </span>
@@ -33,16 +44,33 @@ function RailButton(props: {
   );
 }
 
-function RailAction(props: { label: string; onPress(): void }): JSX.Element {
+function RailAction(props: {
+  label: string;
+  name?: string;
+  onPress(): void;
+  expanded?: boolean;
+}): JSX.Element {
   return (
     <button
       type="button"
-      onClick={() => props.onPress()}
+      aria-label={props.name ?? props.label}
+      aria-haspopup={props.expanded === undefined ? undefined : "dialog"}
+      aria-expanded={props.expanded}
+      onClick={(event) => {
+        event.currentTarget.focus();
+        props.onPress();
+      }}
       class="w-full rounded-md border border-slate-800 bg-slate-900 px-2 py-2 text-left text-sm text-slate-100 hover:border-sky-500 hover:bg-slate-800"
     >
       {props.label}
     </button>
   );
+}
+
+function connectionLabel(connection: string): string {
+  if (connection === "online") return "bridge connected";
+  if (connection === "offline") return "bridge offline";
+  return "bridge connecting";
 }
 
 export default function SessionRail(props: SessionRailProps): JSX.Element {
@@ -58,27 +86,48 @@ export default function SessionRail(props: SessionRailProps): JSX.Element {
       <RailButton
         label="session"
         value={shortId(store.session()?.session_id)}
+        name={`Session ${shortId(store.session()?.session_id)} — start a new session`}
         onPress={() => {
           store.clearTranscript();
           void store.startSession();
         }}
       />
-      <RailButton label="model" value={modelLabel(store.session())} onPress={() => store.openPicker()} tone="accent" />
-      <RailButton label="provider" value={providerLabel(store.session())} onPress={() => store.openPicker()} />
+      <RailButton
+        label="model"
+        value={modelLabel(store.session())}
+        name={`Model: ${modelLabel(store.session())} — choose a model (⌘M)`}
+        expanded={store.pickerOpen()}
+        onPress={() => store.openPicker()}
+        tone="accent"
+      />
+      <RailButton
+        label="provider"
+        value={providerLabel(store.session())}
+        name={`Provider: ${providerLabel(store.session())} — choose a model (⌘M)`}
+        expanded={store.pickerOpen()}
+        onPress={() => store.openPicker()}
+      />
       <RailButton
         label="effort"
         value={store.session()?.model?.effort ?? "—"}
+        name={`Reasoning effort: ${store.session()?.model?.effort ?? "not set"} — cycle effort`}
         onPress={() => void store.cycleEffort()}
       />
       <RailButton
         label="permissions"
         value={store.session()?.permission_mode ?? "—"}
+        name={`Permissions: ${store.session()?.permission_mode ?? "not set"} — cycle permissions`}
         onPress={() => void store.cyclePermission()}
       />
 
       <div class="flex flex-col gap-2 pt-2">
-        <RailAction label="Commands…" onPress={() => store.openPalette()} />
-        <RailAction label="Clear view" onPress={() => store.clearTranscript()} />
+        <RailAction
+          label="Commands…"
+          name="Open the command palette (⌘K)"
+          expanded={store.paletteOpen()}
+          onPress={() => store.openPalette()}
+        />
+        <RailAction label="Clear view" name="Clear the transcript view" onPress={() => store.clearTranscript()} />
         <RailAction label="Compact history" onPress={() => void store.compact()} />
         <RailAction label="Context report" onPress={() => void store.requestContextReport()} />
       </div>
@@ -90,7 +139,7 @@ export default function SessionRail(props: SessionRailProps): JSX.Element {
         <span class="break-all text-xs text-slate-300">{store.session()?.cwd || store.workspace() || "—"}</span>
       </div>
 
-      <div class="flex flex-col gap-1 border-t border-slate-800 pt-2">
+      <div class="flex flex-col gap-1 border-t border-slate-800 pt-2" role="group" aria-label="Bridge and daemon status">
         <div class="flex items-center gap-2">
           <span
             class={
@@ -101,7 +150,7 @@ export default function SessionRail(props: SessionRailProps): JSX.Element {
                   : "text-xs text-amber-400"
             }
           >
-            {store.connection() === "online" ? "● bridge" : store.connection() === "offline" ? "● offline" : "● connecting"}
+            <span aria-hidden="true">●</span> {connectionLabel(store.connection())}
           </span>
           <Show when={store.canteVersion()}>
             <span class="truncate text-xs text-slate-600">{store.canteVersion()}</span>

@@ -80,6 +80,7 @@ export default function Composer(props: ComposerProps): JSX.Element {
               <button
                 type="button"
                 title={command.hint}
+                aria-label={`Run /${command.name} — ${command.title}`}
                 onClick={() => {
                   void store.runCommand(command);
                   field?.focus();
@@ -103,19 +104,21 @@ export default function Composer(props: ComposerProps): JSX.Element {
           value={store.draft()}
           style={{ height: `${height()}px` }}
           spellcheck={false}
+          aria-label="Message Cante"
           placeholder="Ask Cante…  (/  for commands)"
           onInput={(event) => {
             store.setDraft(event.currentTarget.value);
             resize();
           }}
           onKeyDown={onKeyDown}
-          class="min-h-[38px] flex-1 resize-none rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-sky-500 focus:outline-none"
+          class="min-h-[38px] flex-1 resize-none rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-sky-500"
         />
 
         <button
           type="button"
           onClick={() => void store.submit()}
           disabled={store.draft().trim().length === 0}
+          aria-label="Send message"
           class="h-[38px] w-[74px] shrink-0 rounded-md bg-sky-600 text-sm font-bold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
         >
           SEND
@@ -125,6 +128,7 @@ export default function Composer(props: ComposerProps): JSX.Element {
           type="button"
           onClick={() => void store.interrupt()}
           title="Interrupt (⌘.)"
+          aria-label={props.busy ? "Stop the running turn (⌘.)" : "Interrupt (⌘.)"}
           class={`h-[38px] w-[74px] shrink-0 rounded-md text-sm font-bold text-slate-100 ${props.busy ? "bg-red-600 hover:bg-red-500" : "bg-slate-800 hover:bg-slate-700"}`}
         >
           STOP
