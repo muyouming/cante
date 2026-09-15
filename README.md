@@ -20,7 +20,7 @@
 
 **A ghost in your shell.** Cante is a self-contained coding agent that lives in your terminal and self-organizes. One ~15MB compressed download from [Antigma Labs](https://antigma.ai) that expands to a single Rust executable with zero runtime dependencies, built to get the most out of any model.
 
-It works like Claude Code or Codex, with none of their dependencies or model constraints. It can also be the optimized core for [building your own harness](examples/mini-tui) and high-performing assistants, and it ships with a [graphical client](examples/gui) built on PocketJS.
+It works like Claude Code or Codex, with none of their dependencies or model constraints. It can also be the optimized core for [building your own harness](examples/mini-tui) and high-performing assistants.
 
 ```sh
 curl -fsSL https://cante.run/install.sh | bash
@@ -226,7 +226,6 @@ We open sourced what really matters in the age of agentic coding, all under Apac
 2. **The protocol and client SDKs.** [`crates/protocol-shape`](crates/protocol-shape) defines the wire messages and schema spoken by `cante serve`; [`crates/cante-sdk`](crates/cante-sdk) is the async Rust SDK for controlling Cante over stdio or Unix domain sockets; [`cante-acp`](cante-acp) provides Agent Client Protocol support.
 3. **Core primitives and execution engine.** As parts of the private core stabilize, they are open-sourced here: [`crates/exec`](crates/exec) provides bounded async process execution, and [`crates/llm`](crates/llm) supplies provider profiles and shared LLM primitives.
 4. **The eval pipeline, constraint and continuous improvement.** [`cante-harbor/`](cante-harbor) is the Harbor agent adapter behind our Terminal-Bench results: use it to reproduce any run at [antigma.ai/eval](https://antigma.ai/eval). [`CHANGELOG.md`](CHANGELOG.md) records the improvement, release by release.
-5. **A graphical client.** [`examples/gui/`](examples/gui) is a PocketJS app — session rail, streaming transcript, tool cards, approval panel — plus the loopback bridge that adapts Cante's `Op`/`Evt` stream to the guest runtime's bounded HTTP client. See the [Graphical Client guide](https://docs.antigma.ai/usage/gui).
 
 Alongside these, [`curated/`](curated) is a shared space for reusable pieces from the team and community, laid out to mirror `~/.cante/`: settings profiles like [`pi`](curated/pi.settings.json) and [`plan`](curated/plan.settings.json), and skills.
 
