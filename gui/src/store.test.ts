@@ -366,6 +366,167 @@ describe("the command surface", () => {
   });
 });
 
+describe("the slash palette", () => {
+  test("typing / opens it and every keystroke refilters the commands", async () => {
+    const { store, dispose } = await setup();
+    expect(store.paletteVisible()).toBe(false);
+    expect(store.paletteMatches()).toHaveLength(0);
+
+    store.setDraft("/");
+    expect(store.paletteVisible()).toBe(true);
+    expect(store.paletteQuery()).toBe("");
+    expect(store.paletteMatches()).toHaveLength(store.commands().length);
+
+    store.setDraft("/comp");
+    expect(store.paletteQuery()).toBe("comp");
+    expect(store.paletteMatches().map((command) => command.name)).toEqual(["compact"]);
+
+    // The session's skill is filterable too.
+    store.setDraft("/simpl");
+    expect(store.paletteMatches().map((command) => command.name)).toEqual(["simplify"]);
+    dispose();
+  });
+
+  test("a prefix that matches nothing stays visible with an empty list", async () => {
+    const { store, dispose } = await setup();
+    store.setDraft("/zzz");
+    expect(store.paletteVisible()).toBe(true);
+    expect(store.paletteQuery()).toBe("zzz");
+    expect(store.paletteMatches()).toHaveLength(0);
+    dispose();
+  });
+
+  test("plain text and a name followed by a space leave the palette closed", async () => {
+    const { store, dispose } = await setup();
+    store.setDraft("hello");
+    expect(store.paletteVisible()).toBe(false);
+    expect(store.paletteQuery()).toBe("");
+    store.setDraft("/goal ship");
+    expect(store.paletteVisible()).toBe(false);
+    expect(store.paletteMatches()).toHaveLength(0);
+    dispose();
+  });
+
+  test("arrow keys move the highlight and clamp at both ends", async () => {
+    const { store, dispose } = await setup();
+    store.setDraft("/");
+    const last = store.paletteMatches().length - 1;
+    expect(store.paletteIndex()).toBe(0);
+
+    store.movePalette(1);
+    expect(store.paletteIndex()).toBe(1);
+    store.movePalette(-1);
+    expect(store.paletteIndex()).toBe(0);
+    store.movePalette(-1);
+    expect(store.paletteIndex()).toBe(0);
+    store.movePalette(999);
+    expect(store.paletteIndex()).toBe(last);
+
+    store.selectPalette(3);
+    expect(store.paletteIndex()).toBe(3);
+    store.selectPalette(-4);
+    expect(store.paletteIndex()).toBe(0);
+    store.selectPalette(999);
+    expect(store.paletteIndex()).toBe(last);
+    dispose();
+  });
+
+  test("the highlight clamps when the filter shrinks", async () => {
+    const { store, dispose } = await setup();
+    store.setDraft("/");
+    store.movePalette(5);
+    expect(store.paletteIndex()).toBe(5);
+
+    store.setDraft("/comp");
+    expect(store.paletteMatches()).toHaveLength(1);
+    expect(store.paletteIndex()).toBe(0);
+    dispose();
+  });
+
+  test("Tab completes the highlighted name without running it", async () => {
+    const { store, dispose } = await setup();
+    store.setDraft("/comp");
+    store.completePalette();
+    expect(store.draft()).toBe("/compact ");
+    expect(opCalls("compact")).toHaveLength(0);
+    // The trailing space ends the name, so the palette folds away.
+    expect(store.paletteVisible()).toBe(false);
+
+    store.setDraft("/simpl");
+    store.completePalette();
+    expect(store.draft()).toBe("/simplify ");
+    expect(opCalls("slash")).toHaveLength(0);
+    dispose();
+  });
+
+  test("Enter runs the highlighted command, falling back to the first", async () => {
+    const { store, dispose } = await setup();
+    store.setDraft("/goal");
+    expect(store.paletteMatches().map((command) => command.name)).toEqual(["goal", "goal-clear"]);
+
+    store.movePalette(1);
+    expect(store.paletteMatches()[store.paletteIndex()]!.name).toBe("goal-clear");
+    await store.runPalette();
+    expect(opCalls("goal")).toEqual([{ command: "Clear" }]);
+    // Running consumes the draft.
+    expect(store.draft()).toBe("");
+
+    // With nothing moved, Enter falls back to the first match (goal prefills).
+    store.setDraft("/goal");
+    await store.runPalette();
+    expect(opCalls("goal")).toHaveLength(1);
+    expect(store.draft()).toBe("/goal ");
+    dispose();
+  });
+
+  test("built-ins run in the client and skills go to the daemon", async () => {
+    const { store, dispose } = await setup();
+    store.setDraft("/comp");
+    await store.runPalette();
+    expect(opCalls("compact")).toHaveLength(1);
+
+    store.setDraft("/simpl");
+    await store.runPalette();
+    expect(opCalls("slash")).toEqual([{ name: "simplify", args: "" }]);
+    dispose();
+  });
+
+  test("clicking a row runs that command even when it is not the highlight", async () => {
+    const { store, dispose } = await setup();
+    store.setDraft("/");
+    const context = store.paletteMatches().find((command) => command.name === "context")!;
+    expect(store.paletteMatches()[store.paletteIndex()]!.name).not.toBe("context");
+
+    await store.runPaletteCommand(context);
+    expect(opCalls("context_report")).toHaveLength(1);
+    expect(store.draft()).toBe("");
+    expect(store.paletteVisible()).toBe(false);
+    dispose();
+  });
+
+  test("an argument-taking command prefills instead of running", async () => {
+    const { store, dispose } = await setup();
+    store.setDraft("/goal");
+    await store.runPalette();
+    expect(opCalls("goal")).toHaveLength(0);
+    expect(store.draft()).toBe("/goal ");
+    dispose();
+  });
+
+  test("Esc dismisses the palette but keeps the draft until the next keystroke", async () => {
+    const { store, dispose } = await setup();
+    store.setDraft("/comp");
+    store.dismissPalette();
+    expect(store.paletteVisible()).toBe(false);
+    expect(store.draft()).toBe("/comp");
+
+    store.setDraft("/compa");
+    expect(store.paletteVisible()).toBe(true);
+    expect(store.paletteMatches().map((command) => command.name)).toEqual(["compact"]);
+    dispose();
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Adversarial streams — a real daemon (or a future protocol version) can send
 // anything. These tests assert the invariants that must hold for *every* batch,
