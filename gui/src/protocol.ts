@@ -80,16 +80,24 @@ export type TurnEndStatus =
 export type TurnEndReason = { kind: "ok" } | { kind: "interrupted"; reason: string } | { kind: "error"; headline: string; details: string[] };
 
 export function readTurnEnd(status: TurnEndStatus | undefined): TurnEndReason {
-  if (status === undefined || status === "Completed") return { kind: "ok" };
-  if (typeof status === "object" && "Interrupted" in status) {
-    return { kind: "interrupted", reason: status.Interrupted?.reason ?? "interrupted by user" };
+  // The daemon is trusted for shape, but a future/older version or a partial
+  // write must not crash the reducer: only accept fields of the right type.
+  if (status === undefined || status === null || status === "Completed") return { kind: "ok" };
+  if (typeof status !== "object") return { kind: "ok" };
+  if ("Interrupted" in status) {
+    const reason = (status as { Interrupted?: { reason?: unknown } }).Interrupted?.reason;
+    return { kind: "interrupted", reason: typeof reason === "string" && reason ? reason : "interrupted by user" };
   }
-  if (typeof status === "object" && "Error" in status) {
-    return {
-      kind: "error",
-      headline: status.Error?.headline ?? "turn failed",
-      details: status.Error?.details ?? [],
-    };
+  if ("Error" in status) {
+    const error = (status as { Error?: { headline?: unknown; details?: unknown } }).Error;
+    const headline = typeof error?.headline === "string" && error.headline ? error.headline : "turn failed";
+    const raw = error?.details;
+    const details = Array.isArray(raw)
+      ? raw.filter((item): item is string => typeof item === "string")
+      : typeof raw === "string"
+        ? [raw]
+        : [];
+    return { kind: "error", headline, details };
   }
   return { kind: "ok" };
 }
@@ -165,7 +173,7 @@ export function previewJson(value: unknown, limit = 220): string {
 }
 
 /** The human-readable body carried by a tool result, when there is one. */
-export function toolResultText(result: unknown): string {
+export function toolResultText(result: unknown, depth = 0): string {
   if (typeof result === "string") return result;
   if (result && typeof result === "object") {
     const record = result as Record<string, unknown>;
@@ -174,8 +182,10 @@ export function toolResultText(result: unknown): string {
       if (typeof value === "string" && value.trim()) return value;
     }
     const nested = record.result;
-    if (nested && typeof nested === "object") {
-      const inner = toolResultText(nested);
+    // `result` is recursive in the protocol; bound the walk so a hostile or
+    // corrupt payload cannot blow the stack.
+    if (nested && typeof nested === "object" && depth < 16) {
+      const inner = toolResultText(nested, depth + 1);
       if (inner) return inner;
     }
   }
