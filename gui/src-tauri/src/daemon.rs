@@ -490,15 +490,32 @@ pub fn split_binary(spec: &str) -> (String, Vec<String>) {
     (program, iter.collect())
 }
 
+/// Windows: `cante.exe` is a console program, so spawning it from a GUI process
+/// flashes a console window (and can steal focus). `CREATE_NO_WINDOW` keeps the
+/// child invisible while still giving it the piped stdio we own.
+#[cfg(windows)]
+fn hide_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+/// Everywhere else there is nothing to hide.
+#[cfg(not(windows))]
+fn hide_console(_command: &mut Command) {}
+
 fn spawn_child(bin: &str, cwd: &Path) -> Result<Child, String> {
     let (program, mut args) = split_binary(bin);
     args.push("serve".to_string());
-    Command::new(&program)
+    let mut command = Command::new(&program);
+    command
         .args(&args)
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console(&mut command);
+    command
         .spawn()
         .map_err(|error| format!("could not start `{bin} serve`: {error}"))
 }
@@ -597,13 +614,16 @@ fn run_capture(
     timeout: Duration,
 ) -> Result<(String, String), String> {
     let (program, leading) = split_binary(bin);
-    let mut child = Command::new(&program)
+    let mut command = Command::new(&program);
+    command
         .args(&leading)
         .args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    hide_console(&mut command);
+    let mut child = command
         .spawn()
         .map_err(|error| format!("could not run `{bin} {}`: {error}", args.join(" ")))?;
     let mut stdout = child.stdout.take().ok_or_else(|| "no stdout".to_string())?;
