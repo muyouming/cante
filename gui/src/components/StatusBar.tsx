@@ -1,5 +1,7 @@
 // Bottom status strip: turn state, token accounting, context occupancy, steps,
-// and the last notice the GUI wants the user to see.
+// and the last notice the GUI wants the user to see. When the transcript is
+// scrolled away from the tail it also carries the jump-back affordance, so the
+// way back is visible even after the pill scrolls out of sight.
 import { Show } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -7,6 +9,9 @@ import { formatTokens, type Store } from "../store.ts";
 
 export interface StatusBarProps {
   store: Store;
+  /** False while the transcript is scrolled up; omit to hide the affordance. */
+  following?: boolean;
+  onJumpToLatest?(): void;
 }
 
 function statusText(status: string): string {
@@ -75,6 +80,18 @@ export default function StatusBar(props: StatusBarProps): JSX.Element {
       </Show>
 
       <span class="text-xs text-slate-500">steps {store.steps()}</span>
+
+      <Show when={props.following === false}>
+        <button
+          type="button"
+          class="flex items-center gap-1 rounded border border-sky-800 bg-sky-950 px-2 py-[1px] text-xs text-sky-200 hover:bg-sky-900"
+          onClick={() => props.onJumpToLatest?.()}
+          aria-label="Scrolled back — jump to the latest output"
+        >
+          <span aria-hidden="true">↓</span>
+          latest
+        </button>
+      </Show>
 
       <span class="flex-1" />
 
