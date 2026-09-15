@@ -1,7 +1,23 @@
 #!/usr/bin/env bun
 // Test double for `cante serve` — reads `OpMsg` JSON Lines on stdin and
-// answers with a scripted `EventMsg` stream. Only the shapes `bridge.test.ts`
-// asserts on are modeled; it is never shipped.
+// answers with a scripted `EventMsg` stream. It is never shipped. The ops and
+// events use the real externally-tagged wire shapes from
+// `crates/protocol-shape/src/msg.rs`, so the Rust bridge can forward them
+// verbatim and `../src/protocol.ts` can read them.
+//
+// Scripted by op:
+//   StartSession     -> SessionStart (+ FAKE_CANTE_SEED=1: a seeded transcript)
+//   UserInput        -> TurnStart … approval TurnPause (turn_1)
+//   ApprovalResponse -> TurnResume, ToolEnd, UsageUpdate, TurnEnd (Completed)
+//   Goal             -> Info
+//   Interrupt        -> TurnEnd (Interrupted)
+//   Shutdown         -> Goodbye, then exit 0
+//
+// Env knobs:
+//   FAKE_CANTE_SLOW_DELTAS=1  split the delta run across a tick, no TurnStart,
+//                             to prove the bridge's quiet-window coalescing.
+//   FAKE_CANTE_SEED=1         on StartSession, emit a finished exchange plus a
+//                             pending approval, so the window opens populated.
 export {};
 
 let eventSeq = 0;
@@ -26,11 +42,56 @@ const SESSION = {
   subagents: [],
 };
 
+// A short, already-finished turn followed by a turn parked on approval. Every
+// event below is a shape real cante emits (see `Evt` in protocol-shape).
+function seedTranscript(parent: string): void {
+  emit({ UserInput: "Summarise the repository layout" }, parent);
+  emit({ TurnStart: { turn_id: "turn_seed_1" } }, parent);
+  emit({ ThinkingDelta: "scanning the workspace " }, parent);
+  emit({ MessageDelta: "The repo is a Rust workspace" }, parent);
+  emit({ AgentMessage: "The repo is a Rust workspace with a docs site, examples and this Tauri GUI." }, parent);
+  emit({ ToolStart: { id: "tool_seed_1", name: "Bash", args: { command: "ls" } } }, parent);
+  emit({ ToolUpdate: { tool_use_id: "tool_seed_1", seq: 1, message: "listing" } }, parent);
+  emit(
+    {
+      ToolEnd: {
+        tool_use_id: "tool_seed_1",
+        tool_name: "Bash",
+        status: "Completed",
+        result_json: { content: "crates\ndocs-site\ngui" },
+      },
+    },
+    parent,
+  );
+  emit(
+    { UsageUpdate: { usage: { input_tokens: 120, output_tokens: 18 }, context: { used_tokens: 138, limit_tokens: 200_000 } } },
+    parent,
+  );
+  emit({ TurnEnd: { turn_id: "turn_seed_1", status: "Completed", steps: 2 } }, parent);
+  emit({ TurnStart: { turn_id: "turn_seed_2" } }, parent);
+  emit({ AgentMessage: "I would like to write the missing README." }, parent);
+  emit({ ToolStart: { id: "tool_seed_2", name: "Write", args: { path: "gui/README.md", content: "…" } } }, parent);
+  emit(
+    {
+      TurnPause: {
+        turn_id: "turn_seed_2",
+        reason: {
+          Approval: {
+            tools: [{ id: "tool_seed_2", name: "Write", args: { path: "gui/README.md" } }],
+            message: "Allow Write to gui/README.md?",
+          },
+        },
+      },
+    },
+    parent,
+  );
+}
+
 function handle(op: unknown, id: string): void {
   if (typeof op === "string") {
     switch (op) {
       case "Interrupt":
-        emit({ TurnEnd: { turn_id: "turn_1", status: "Interrupted", steps: 1 } }, id);
+        emit({ TurnEnd: { turn_id: "turn_1", status: { Interrupted: { reason: "user" } }, steps: 1 } }, id);
         return;
       case "Shutdown":
         emit("Goodbye", id);
@@ -43,6 +104,7 @@ function handle(op: unknown, id: string): void {
   const record = op as Record<string, unknown>;
   if ("StartSession" in record) {
     emit({ SessionStart: SESSION }, id);
+    if (process.env.FAKE_CANTE_SEED === "1") seedTranscript(id);
     return;
   }
   if ("Goal" in record) {
