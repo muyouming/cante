@@ -16,6 +16,7 @@ import {
   type Command,
 } from "./commands.ts";
 import type { Row, RowTone } from "./rows.ts";
+import { persistLocalOnly, readLocalOnly, type PrivacyState } from "./simple/privacy.ts";
 import {
   EFFORTS,
   PERMISSION_MODES,
@@ -108,6 +109,8 @@ export interface GoalState {
   condition: string | null;
   note: string | null;
 }
+
+export type { PrivacyState } from "./simple/privacy.ts";
 
 export interface SessionOverrides {
   model?: string;
@@ -202,6 +205,11 @@ export interface Store {
   requestGoalStatus(): Promise<void>;
   /** Best-effort spinner phrase for the in-progress draft. */
   requestAmbientPhrase(draft: string): Promise<void>;
+  // ---- privacy (r5-privacy) -----------------------------------------------
+  /** What may leave this computer, and who receives it. */
+  privacy: Accessor<PrivacyState>;
+  /** The "只在本机处理" switch; remembered between launches. */
+  setLocalOnly(value: boolean): Promise<void>;
 }
 
 /**
@@ -447,6 +455,7 @@ export function createStore(): Store {
   const [ambient, setAmbient] = createSignal<AmbientState>({ phrase: null, suggestion: null });
   const [goal, setGoalState] = createSignal<GoalState>({ condition: null, note: null });
   const [terminal, setTerminal] = createSignal<TerminalEntry[]>([]);
+  const [localOnly, setLocalOnlySignal] = createSignal<boolean>(readLocalOnly());
 
   // Plain accessors rather than `createMemo`s: `bun test` resolves Solid's
   // server build, where a memo is computed once and never re-runs. These must
@@ -1369,6 +1378,30 @@ export function createStore(): Store {
     setSteps(0);
   }
 
+  // ---- privacy ------------------------------------------------------------
+  // One boolean answers both questions the panel asks: may content leave this
+  // machine, and may the assistant search the web. `online` mirrors it, so the
+  // privacy panel, the run record and the result card all read one value.
+  function privacy(): PrivacyState {
+    const local = localOnly();
+    const provider = providerLabel(session());
+    return {
+      online: !local,
+      provider: local || provider === "—" ? null : provider,
+      localOnly: local,
+    };
+  }
+
+  async function setLocalOnly(value: boolean): Promise<void> {
+    setLocalOnlySignal(value);
+    persistLocalOnly(value);
+    setNotice(
+      value
+        ? "已打开「只在本机处理」：内容不会离开这台电脑，联网搜索也已关闭。"
+        : "已关闭「只在本机处理」：整理内容时会联网，内容会发给帮你整理的服务方。",
+    );
+  }
+
   return {
     mode,
     setMode,
@@ -1437,6 +1470,8 @@ export function createStore(): Store {
     clearGoal,
     requestGoalStatus,
     requestAmbientPhrase,
+    privacy,
+    setLocalOnly,
   };
 }
 
