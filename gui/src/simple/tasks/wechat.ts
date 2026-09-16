@@ -25,6 +25,8 @@ export interface TaskDef {
   needs: "files" | "folder" | "none" | "text";
   accept?: string[];
   plan: string[];
+  /** #63 — see `tasks/index.ts`: concrete, checkable limits shown before running. */
+  risks?: string[];
   prompt(files: string[], instruction: string): string;
   summaryHints: string[];
 }
@@ -77,6 +79,11 @@ export const wechatTableTask: TaskDef = {
   needs: "files",
   accept: WECHAT_ACCEPT,
   plan: TABLE_PLAN,
+  risks: [
+    "聊天记录里缺时间的消息，我会保留下来并标「时间看不清」，不会丢掉。",
+    "语音、图片、表情在导出的记录里通常没有文字，表格里不会有这些内容。",
+    "同一个人改过昵称时，可能被当成两个人在问你，请你按原话核对。",
+  ],
   prompt(files: string[], instruction: string): string {
     return buildPrompt({
       what: "只做整理：读取下面的聊天记录，把内容整理成一张表格，另存为一个新的表格文件。",
@@ -108,6 +115,11 @@ export const wechatDraftTask: TaskDef = {
   needs: "files",
   accept: WECHAT_ACCEPT,
   plan: DRAFT_PLAN,
+  risks: [
+    "草稿只按聊天记录里的话写；记录里没提到的价格、日期我不会编，会留出来提醒你补。",
+    "语气按常见的礼貌写法，不一定是你和对方平时的说话方式，发之前请自己读一遍。",
+    "这些草稿不会自动发出去，要你自己复制过去发。",
+  ],
   prompt(files: string[], instruction: string): string {
     return buildPrompt({
       what: "只做整理和起草：读取下面的聊天记录，先列出需要回复的消息清单，再为每一条写一条回复草稿，另存为一个新文件。",
@@ -138,6 +150,11 @@ export const wechatBatchTask: TaskDef = {
   needs: "files",
   accept: WECHAT_ACCEPT,
   plan: BATCH_PLAN,
+  risks: [
+    "清单按记录里的话列，记录里没提到的信息我不会编，会留出来提醒你补。",
+    "同一个人改过昵称时，可能被当成两个人在问你，请你核对。",
+    "草稿的语气按常见的礼貌写法，发之前请自己读一遍；一条都不会自动发出去。",
+  ],
   prompt(files: string[], instruction: string): string {
     return buildPrompt({
       what: "只做整理和起草：读取下面的聊天记录，先给出需要回复的清单，再为清单上的每一条写一条回复草稿，把清单和草稿放在同一个新文件里。",

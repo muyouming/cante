@@ -309,3 +309,36 @@ export function isRetryable(input: unknown): boolean {
   const { what } = explainError(input);
   return what !== ERRORS.formatWhat && what !== ERRORS.authWhat && what !== ERRORS.modelWhat;
 }
+
+// ---------------------------------------------------------------------------
+// Trust — known limits (#63) and the real track record (#64)
+//
+// Two claims shown next to a task, both of which have to stay literally true:
+// "here is where this job is known to get things wrong" (the text comes from
+// the task's own `risks`, never invented here) and "here is how often it
+// actually worked on this computer" (the numbers come from the run history,
+// and no history means no line at all).
+// ---------------------------------------------------------------------------
+
+export const TRUST = {
+  /** Heading over a task's `risks`, right below the plan on the confirm page. */
+  limitsTitle: "这个任务可能不准的地方",
+  /** Heading over the assistant's own 【需要你核对】 paragraph on the result. */
+  checkTitle: "需要你核对",
+  /** Reveal the newest failed attempt under the counts. */
+  failureShow: "看看上次为什么没成",
+  failureHide: "收起",
+} as const;
+
+/**
+ * #64 — the one-line track record. Only ever called with numbers a caller got
+ * from `evidenceFor`, so `runs` is always ≥ 1. The success count never gets
+ * rounded up in words: 3 out of 4 is said as 3, not as "mostly works".
+ */
+export function evidenceLine(runs: number, ok: number): string {
+  if (runs <= 0) return "";
+  const base = `在这台电脑上做过 ${runs} 次`;
+  if (ok >= runs) return `${base}，每次都做成了。`;
+  if (ok <= 0) return `${base}，都还没做成。`;
+  return `${base}，其中 ${ok} 次做成了。`;
+}

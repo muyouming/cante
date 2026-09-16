@@ -11,7 +11,10 @@
 import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
+import { TRUST, evidenceLine } from "./copy.ts";
+import { evidenceFor, failureFor } from "./evidence.ts";
 import { fileName, folderName, hasActiveRisk, planRisks } from "./run.ts";
+import { risksForTask } from "./tasks/index.ts";
 import type { Store } from "../store.ts";
 
 export interface ConfirmSheetProps {
@@ -27,6 +30,7 @@ const RISK_ICON: Record<string, string> = {
 export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   const [allowOverwrite, setAllowOverwrite] = createSignal(false);
   const [showAllFiles, setShowAllFiles] = createSignal(false);
+  const [showFailure, setShowFailure] = createSignal(false);
   let cancelButton: HTMLButtonElement | undefined;
 
   const run = () => props.store.currentRun();
@@ -34,6 +38,11 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   const risky = () => hasActiveRisk(risks());
   const files = () => run()?.files ?? [];
   const visibleFiles = () => (showAllFiles() ? files() : files().slice(0, 6));
+  // #63 — the job's own known limits, straight from its card definition.
+  const taskRisks = () => risksForTask(run()?.taskId ?? "");
+  // #64 — what this computer's own history says, or nothing at all.
+  const track = () => evidenceFor(props.store.runs(), run()?.taskId ?? "");
+  const failure = () => failureFor(props.store.runs(), run()?.taskId ?? "");
 
   function focusCancel(element: HTMLButtonElement): void {
     cancelButton = element;
@@ -76,6 +85,50 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
                 )}
               </For>
             </ol>
+
+            <Show when={taskRisks().length > 0}>
+              <h3 class="mt-6 text-base font-semibold text-slate-200">{TRUST.limitsTitle}</h3>
+              <ul class="mt-2 space-y-1.5">
+                <For each={taskRisks()}>
+                  {(risk) => (
+                    <li class="flex gap-2 text-[16px] leading-relaxed text-amber-100/90">
+                      <span aria-hidden="true" class="text-amber-400">•</span>
+                      <span>{risk}</span>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </Show>
+
+            <Show when={track()}>
+              {(record) => (
+                <div class="mt-4 rounded-2xl border border-emerald-800 bg-emerald-950/30 px-4 py-3">
+                  <p class="text-[16px] leading-relaxed text-emerald-100">
+                    {evidenceLine(record().runs, record().ok)}
+                  </p>
+                  <Show when={failure()}>
+                    {(bad) => (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setShowFailure((open) => !open)}
+                          aria-expanded={showFailure()}
+                          class="mt-1 min-h-[44px] rounded-lg px-2 text-[16px] text-sky-300 hover:bg-slate-800"
+                        >
+                          {showFailure() ? TRUST.failureHide : TRUST.failureShow}
+                        </button>
+                        <Show when={showFailure()}>
+                          <p class="mt-1 text-[16px] leading-relaxed text-slate-300">
+                            {bad().when}：{bad().what}
+                            {bad().how}
+                          </p>
+                        </Show>
+                      </>
+                    )}
+                  </Show>
+                </div>
+              )}
+            </Show>
 
             <h3 class="mt-6 text-base font-semibold text-slate-200">
               要处理的文件（{files().length} 个）

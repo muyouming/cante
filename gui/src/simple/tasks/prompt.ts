@@ -78,6 +78,23 @@ export function buildPrompt(parts: {
     userWordsBlock(parts.instruction).trimEnd(),
     "",
     `【做完告诉我】${parts.done}`,
+    "",
+    CHECK_NOTE_BLOCK,
   );
   return blocks.join("\n");
 }
+
+/**
+ * #63 — the last block of every instruction. The result card reads back the
+ * `【需要你核对】` paragraph and shows it verbatim, so this is the one place the
+ * assistant is allowed to admit that something in *this* run is uncertain.
+ *
+ * It is deliberately strict: only what actually happened this time, no generic
+ * hedging, and "nothing to check" is a perfectly good answer. A fabricated
+ * warning shown next to a real result would be worse than none.
+ */
+export const CHECK_NOTE_BLOCK = [
+  "【最后再加一段】做完以后，在回复的最后单独用一段「【需要你核对】」开头，只写这一次真实发生、我也需要核对的情况，例如：哪一行拿不准、哪个文件没处理、哪个数字可能不对、哪一步跳过了。",
+  "这一次确实没有，就写「没有发现需要核对的地方」。",
+  "不要写「仅供参考」「可能有误差」这类没有信息量的话，也不要为了凑字数编一条出来。",
+].join("\n");
