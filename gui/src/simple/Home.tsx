@@ -17,6 +17,9 @@ import {
   visibleTasks,
 } from "./admin-config.ts";
 import { SCHEDULE } from "./copy-schedule.ts";
+// r13 — 排好的活（一次说好几件事）：首页要看得见，也要随时能停。
+import { QUEUE } from "./copy-queue.ts";
+import { describeQueue, nextWaiting, queueSummary } from "./queue.ts";
 import { LIBRARY } from "./copy-library.ts";
 import { describe as describeSchedule } from "./schedule.ts";
 import TaskCard from "./TaskCard.tsx";
@@ -55,6 +58,38 @@ export default function Home(props: HomeProps): JSX.Element {
     const run = pendingRun();
     if (!run) return;
     props.onPickTask(taskById(run.taskId) ?? freeTask(run.instruction));
+  };
+
+  // r13 — 排好的活。首页上要能看见三件事：还有几件、手上这件在等什么、
+  // 下一件是什么。看的就是这份账，和界面上的说法来自同一个纯逻辑。
+  const queued = () => props.store.queue();
+  const queueFacts = () => queueSummary(queued());
+  /** 已经摆在她面前的那件（在确认页上，或者正在做）。 */
+  const stagedRun = () => {
+    const run = props.store.currentRun();
+    return run && (run.state === "preview" || run.state === "running") ? run : null;
+  };
+  /** 停在她面前的那件就是排队里的：那就不用再拿另一条「到点了」重复说一遍。 */
+  const stagedFromQueue = () => queued().some((job) => job.state === "running");
+  /** 「还有 2 件：正在等你确认……，下一件是……」——跟着数据变的那一句。 */
+  const queueLine = () => {
+    const run = stagedRun();
+    return describeQueue(
+      queueFacts(),
+      run ? (run.state === "running" ? "doing" : "confirm") : undefined,
+    );
+  };
+  const canOpenQueued = (): boolean => stagedRun() !== null || nextWaiting(queued()) !== null;
+  const openNextQueued = (): void => {
+    const run = stagedRun();
+    if (run) {
+      // 它已经在确认页上等着了：把她直接带到那一页，不做第二件事。
+      props.onPickTask(taskById(run.taskId) ?? freeTask(run.instruction));
+      return;
+    }
+    // 队列不自己往下走：这一步是她说「好，做下一件」才往前走的。
+    const job = props.store.startNextQueued();
+    if (job) props.onPickTask(taskById(job.taskId) ?? freeTask(job.instruction));
   };
 
   // #58 — 启动时读一次技术同事设好的配置。读到了就重画：被关掉的任务卡要消失。
@@ -103,7 +138,7 @@ export default function Home(props: HomeProps): JSX.Element {
           <p class="mt-2 text-[16px] text-slate-400">{HOME.intro}</p>
 
           {/* #55 — 到点的自动任务在等她确认；它不会自己动手，得让她找得到入口。 */}
-          <Show when={pendingRun()}>
+          <Show when={pendingRun() && !stagedFromQueue()}>
             <section class="mt-5 rounded-2xl border-2 border-sky-600 bg-sky-950/40 px-5 py-4">
               <h2 class="text-[20px] font-semibold text-sky-100">{SCHEDULE.pendingTitle}</h2>
               <p class="mt-1 text-[16px] leading-relaxed text-slate-300">{SCHEDULE.pendingBody}</p>
@@ -114,6 +149,35 @@ export default function Home(props: HomeProps): JSX.Element {
               >
                 {SCHEDULE.pendingOpen}
               </button>
+            </section>
+          </Show>
+
+          {/* r13 — 排好的活：还有几件、手上这件在等什么、下一件是什么，以及随时能
+              停掉剩下的。（停掉剩下的不等于打断正在做的那件。） */}
+          <Show when={queued().length > 0}>
+            <section class="mt-5 rounded-2xl border-2 border-sky-700 bg-sky-950/40 px-5 py-4">
+              <h2 class="text-[20px] font-semibold text-sky-100">{QUEUE.homeTitle}</h2>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-200">{queueLine()}</p>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-400">{QUEUE.homeConfirmNote}</p>
+              <div class="mt-3 flex flex-wrap items-center gap-3">
+                <Show when={canOpenQueued()}>
+                  <button
+                    type="button"
+                    onClick={openNextQueued}
+                    class="min-h-[48px] rounded-xl bg-sky-500 px-6 text-[16px] font-bold text-slate-950 hover:bg-sky-400"
+                  >
+                    {QUEUE.homeOpen}
+                  </button>
+                </Show>
+                <button
+                  type="button"
+                  onClick={() => props.store.clearQueue()}
+                  class="min-h-[44px] rounded-xl border border-slate-600 px-6 text-[16px] font-semibold text-slate-200 hover:bg-slate-800"
+                >
+                  {QUEUE.homeStop}
+                </button>
+              </div>
+              <p class="mt-2 text-[16px] leading-relaxed text-slate-400">{QUEUE.homeStopNote}</p>
             </section>
           </Show>
 
