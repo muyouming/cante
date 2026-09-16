@@ -73,14 +73,18 @@ text = html.unescape(re.sub(r"<[^>]+>", "\n", body))
 lines = [line.strip() for line in text.split("\n") if line.strip()]
 
 required = {
-    "header mark": "CANTE",
-    "model chip": "MODEL",
-    "permissions chip": "PERM",
-    "palette chip": "MENU",
-    "composer send": "SEND",
-    "composer stop": "STOP",
-    "status bar": "steps 0",
-    "browser-preview fallback": "desktop bridge unavailable",
+    # Always on screen (the header is above every screen in simple mode).
+    "app name": "Cante",
+    "history entry": "历史",
+    "privacy entry": "隐私",
+    # A first run (fresh Chrome profile) lands on the wizard, which is the
+    # screen the product promises a non-technical user: three plain steps.
+    "wizard step 1": "欢迎",
+    "wizard step 2": "检查电脑",
+    "wizard step 3": "开始使用",
+    # The product promise itself — if this sentence ever disappears, the
+    # safety story is gone with it.
+    "no-touch promise": "原文件我不会乱动",
 }
 missing = [name for name, needle in required.items() if not any(needle in line for line in lines)]
 print(f"dom-smoke: {len(lines)} text node(s) rendered")
@@ -88,5 +92,5 @@ for line in lines[:12]:
     print("  |", line[:88])
 if missing:
     sys.exit("dom-smoke: missing from the rendered shell: " + ", ".join(missing))
-print("dom-smoke: OK — the shell rendered with every required element")
+print("dom-smoke: OK — the simple shell rendered with every required element")
 PY

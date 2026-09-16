@@ -16,6 +16,26 @@ import {
   type Command,
 } from "./commands.ts";
 import type { Row, RowTone } from "./rows.ts";
+import { persistLocalOnly, readLocalOnly, type PrivacyState } from "./simple/privacy.ts";
+import {
+  OVERWRITE_CONSENT,
+  buildResult,
+  diffSnapshots,
+  dryRunInstruction,
+  emptyImpact,
+  fallbackPlan,
+  impactOf,
+  newRunId,
+  normalizeEntries,
+  runIsOnline,
+  type RunImpact,
+  type RunResult,
+  type RunState,
+  type SnapshotDiff,
+  type SnapshotEntry,
+  type TaskRun,
+  type TaskRunUndo,
+} from "./simple/run.ts";
 import {
   EFFORTS,
   PERMISSION_MODES,
@@ -53,6 +73,14 @@ import {
 } from "./tauri.ts";
 
 export type Connection = "connecting" | "online" | "offline";
+
+/**
+ * Which face of the app is showing. `simple` is the default — big Chinese
+ * task cards for people who do not work in IT; `pro` is the original
+ * transcript shell, kept for the people who want it. The choice survives a
+ * restart via `localStorage`.
+ */
+export type UiMode = "simple" | "pro";
 
 export type { DaemonStatus, LogEntry } from "./tauri.ts";
 // Views import their store types from here.
@@ -101,6 +129,12 @@ export interface GoalState {
   note: string | null;
 }
 
+export type { PrivacyState } from "./simple/privacy.ts";
+// ---------------------------------------------------------------------------
+// #41–#43 — one job a simple-mode user handed over, and how to undo it.
+// The shape is frozen; `gui/src/simple/tasks/index.ts` mirrors it.
+// ---------------------------------------------------------------------------
+
 export interface SessionOverrides {
   model?: string;
   provider?: string;
@@ -111,6 +145,9 @@ export interface SessionOverrides {
 }
 
 export interface Store {
+  /** Which face of the app is showing (simple by default). */
+  mode: Accessor<UiMode>;
+  setMode(mode: UiMode): void;
   /** Tauri bridge reachability (not the daemon's own status). */
   connection: Accessor<Connection>;
   daemonStatus: Accessor<DaemonStatus>;
@@ -191,6 +228,41 @@ export interface Store {
   requestGoalStatus(): Promise<void>;
   /** Best-effort spinner phrase for the in-progress draft. */
   requestAmbientPhrase(draft: string): Promise<void>;
+  // ---- privacy (r5-privacy) -----------------------------------------------
+  /** What may leave this computer, and who receives it. */
+  privacy: Accessor<PrivacyState>;
+  /** The "只在本机处理" switch; remembered between launches. */
+  setLocalOnly(value: boolean): Promise<void>;
+  // ---- files and trust (r5-trust) -----------------------------------------
+  /** Native file picker; returns the chosen absolute paths (empty on cancel). */
+  pickFiles(opts?: { multiple?: boolean; extensions?: string[] }): Promise<string[]>;
+  pickFolder(): Promise<string | null>;
+  /** Open a result with the system's default program. */
+  openPath(path: string): Promise<void>;
+  /** Show a result inside its folder. */
+  revealPath(path: string): Promise<void>;
+  /** The run waiting on the confirmation sheet (or the finished one on screen). */
+  currentRun: Accessor<TaskRun | null>;
+  /** Finished runs, newest first, restored from disk on launch.
+   *  (Kept separate from `history`, which is the composer's prompt history.) */
+  runs: Accessor<TaskRun[]>;
+  /** Stage a run and open the confirmation sheet. Nothing runs until `confirmRun`. */
+  startRun(
+    task: { id: string; title: string; plan: string[] },
+    files: string[],
+    instruction: string,
+  ): Promise<void>;
+  /** The user pressed 开始. `allowOverwrite` only after the red checkbox. */
+  confirmRun(allowOverwrite?: boolean): Promise<void>;
+  /** #42 "先试跑给我看": ask the assistant to explain, never to touch files. */
+  dryRun(): Promise<void>;
+  cancelRun(): void;
+  /** Hide the finished/failed card and go back to the task list. */
+  dismissRun(): void;
+  /** #43 — put a run back without the assistant's help. */
+  undoRun(id: string): Promise<void>;
+  /** Re-read the on-disk run log (also runs at launch). */
+  refreshRuns(): Promise<void>;
 }
 
 /**
@@ -207,6 +279,8 @@ const MAX_ROW_TEXT = 8_000;
 const MAX_TOOL_DETAIL = 4_000;
 const MAX_LOGS = 200;
 const MAX_HISTORY = 50;
+/** Run-log cap in the UI; Rust keeps its own, larger cap on disk. */
+const MAX_HISTORY_RUNS = 200;
 const MAX_TERMINAL = 50;
 const MAX_TERMINAL_TEXT = 8_000;
 /** The daemon prefixes goal confirmations/status with the target emoji. */
@@ -389,7 +463,29 @@ function normalizeCatalog(wire: WireCatalogProvider[] | undefined): CatalogProvi
   return providers;
 }
 
+/** Where the simple/pro choice is remembered across restarts. */
+const MODE_KEY = "cante:ui:mode";
+
+function readStoredMode(): UiMode {
+  try {
+    if (typeof localStorage === "undefined") return "simple";
+    return localStorage.getItem(MODE_KEY) === "pro" ? "pro" : "simple";
+  } catch {
+    // A webview with storage disabled still works; it just forgets the choice.
+    return "simple";
+  }
+}
+
+function persistMode(mode: UiMode): void {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    /* keep the in-memory value */
+  }
+}
+
 export function createStore(): Store {
+  const [mode, setModeSignal] = createSignal<UiMode>(readStoredMode());
   const [connection, setConnection] = createSignal<Connection>("connecting");
   const [daemonStatus, setDaemonStatus] = createSignal<DaemonStatus>("offline");
   const [session, setSession] = createSignal<SessionInfo | null>(null);
@@ -414,6 +510,14 @@ export function createStore(): Store {
   const [ambient, setAmbient] = createSignal<AmbientState>({ phrase: null, suggestion: null });
   const [goal, setGoalState] = createSignal<GoalState>({ condition: null, note: null });
   const [terminal, setTerminal] = createSignal<TerminalEntry[]>([]);
+  const [localOnly, setLocalOnlySignal] = createSignal<boolean>(readLocalOnly());
+  const [currentRun, setCurrentRun] = createSignal<TaskRun | null>(null);
+  const [runs, setRuns] = createSignal<TaskRun[]>([]);
+
+  // Snapshot taken when a run starts, so the end-of-run diff and the persisted
+  // undo metadata do not depend on the assistant cooperating.
+  let pendingSnapshot: { before: SnapshotEntry[]; roots: string[]; unbacked: string[] } | null = null;
+  let runFinishing = false;
 
   // Plain accessors rather than `createMemo`s: `bun test` resolves Solid's
   // server build, where a memo is computed once and never re-runs. These must
@@ -514,6 +618,7 @@ export function createStore(): Store {
     }
     await hydrate();
     if (disposed) return;
+    void refreshRuns();
     reconcileTimer = setInterval(() => void reconcile(), RECONCILE_MS);
     void ping();
   }
@@ -620,6 +725,9 @@ export function createStore(): Store {
       setApproval(null);
       setNotice(`cante daemon exited (${payload?.code ?? "signal"})`);
     });
+    if (currentRun()?.state === "running") {
+      void finishRun("failed", "运行中的程序退出了。");
+    }
   }
 
   // ---- reducer ------------------------------------------------------------
@@ -914,6 +1022,7 @@ export function createStore(): Store {
         const message = clampText(text || "unknown error", MAX_ROW_TEXT);
         setRows(pushRow({ id: `e${++rowSeq}`, kind: "error", label: "error", text: message, detail: "", tone: "error", streaming: false, time: at }));
         setNotice(message);
+        if (currentRun()?.state === "running") void finishRun("failed", message);
         return;
       }
       case "TurnEnd": {
@@ -931,6 +1040,12 @@ export function createStore(): Store {
           setNotice(reason.headline);
         }
         maybeRequestSuggestion();
+        // #41/#43 — close out a simple-mode run with its own before/after diff.
+        if (currentRun()?.state === "running") {
+          if (reason.kind === "ok") void finishRun("done");
+          else if (reason.kind === "interrupted") void finishRun("cancelled");
+          else void finishRun("failed", reason.headline);
+        }
         return;
       }
       case "SessionEnd":
@@ -1031,6 +1146,11 @@ export function createStore(): Store {
     const order: readonly ViewDensity[] = ["normal", "verbose", "summary"];
     const index = order.indexOf(viewDensity());
     setViewDensity(order[(index + 1) % order.length]!);
+  }
+
+  function setMode(next: UiMode): void {
+    setModeSignal(next);
+    persistMode(next);
   }
 
   async function startSession(overrides: SessionOverrides = {}): Promise<void> {
@@ -1331,7 +1451,285 @@ export function createStore(): Store {
     setSteps(0);
   }
 
+  // ---- privacy ------------------------------------------------------------
+  // One boolean answers both questions the panel asks: may content leave this
+  // machine, and may the assistant search the web. `online` mirrors it, so the
+  // privacy panel, the run record and the result card all read one value.
+  function privacy(): PrivacyState {
+    const local = localOnly();
+    const provider = providerLabel(session());
+    return {
+      online: !local,
+      provider: local || provider === "—" ? null : provider,
+      localOnly: local,
+    };
+  }
+
+  async function setLocalOnly(value: boolean): Promise<void> {
+    setLocalOnlySignal(value);
+    persistLocalOnly(value);
+    setNotice(
+      value
+        ? "已打开「只在本机处理」：内容不会离开这台电脑，联网搜索也已关闭。"
+        : "已关闭「只在本机处理」：整理内容时会联网，内容会发给帮你整理的服务方。",
+    );
+  }
+
+  // ---- files and trust (#41–#43) ------------------------------------------
+
+  /** Chinese detail for a bridge/file failure; never leaks the English banner. */
+  function trustDetail(error: unknown): string {
+    if (error instanceof BridgeUnavailable) return "这个功能要在 Cante 桌面版里使用。";
+    return errorText(error);
+  }
+
+  function stringList(value: unknown): string[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is string => typeof item === "string" && item.length > 0);
+  }
+
+  function normalizeRuns(value: unknown): TaskRun[] {
+    if (!Array.isArray(value)) return [];
+    const records: TaskRun[] = [];
+    for (const raw of value) {
+      if (!raw || typeof raw !== "object") continue;
+      const record = raw as Record<string, unknown>;
+      if (typeof record.id !== "string" || !record.id) continue;
+      records.push(raw as unknown as TaskRun);
+    }
+    return records.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  }
+
+  async function pickFiles(opts: { multiple?: boolean; extensions?: string[] } = {}): Promise<string[]> {
+    try {
+      const response = (await invokeOp("pick_files", {
+        multiple: opts.multiple ?? false,
+        extensions: opts.extensions ?? [],
+      })) as { paths?: unknown };
+      return stringList(response?.paths);
+    } catch (error) {
+      setNotice(`打不开选择文件的窗口。${trustDetail(error)}`);
+      return [];
+    }
+  }
+
+  async function pickFolder(): Promise<string | null> {
+    try {
+      const response = (await invokeOp("pick_folder", {})) as { path?: unknown };
+      return typeof response?.path === "string" && response.path ? response.path : null;
+    } catch (error) {
+      setNotice(`打不开选择文件夹的窗口。${trustDetail(error)}`);
+      return null;
+    }
+  }
+
+  async function openPath(path: string): Promise<void> {
+    if (!path) return;
+    try {
+      await invokeOp("open_path", { path });
+      setNotice(null);
+    } catch (error) {
+      setNotice(`打不开这个文件。你可以自己找到它再双击打开。${trustDetail(error)}`);
+    }
+  }
+
+  async function revealPath(path: string): Promise<void> {
+    if (!path) return;
+    try {
+      await invokeOp("reveal_path", { path });
+      setNotice(null);
+    } catch (error) {
+      setNotice(`打不开它所在的文件夹。${trustDetail(error)}`);
+    }
+  }
+
+  /** Snapshot the run's folders and copy the files at risk, before anything runs. */
+  async function beginSnapshot(run: TaskRun): Promise<void> {
+    pendingSnapshot = null;
+    if (run.files.length === 0) {
+      pendingSnapshot = { before: [], roots: [], unbacked: [] };
+      return;
+    }
+    try {
+      const response = (await invokeOp("begin_run", { id: run.id, paths: run.files })) as {
+        entries?: unknown;
+        roots?: unknown;
+        unbacked?: unknown;
+      };
+      pendingSnapshot = {
+        before: normalizeEntries(response?.entries),
+        roots: stringList(response?.roots),
+        unbacked: stringList(response?.unbacked),
+      };
+    } catch {
+      // No bridge (browser preview): run anyway, with an empty before-state.
+      pendingSnapshot = { before: [], roots: [], unbacked: [] };
+    }
+  }
+
+  function sendRunInstruction(text: string): void {
+    void invoke("send_input", { text, mode: "prompt" }).catch((error) => {
+      void finishRun("failed", trustDetail(error));
+    });
+  }
+
+  function runError(detail: string | undefined, run: TaskRun): TaskRun["error"] {
+    return {
+      what: run.dryRun ? "这次试跑没能做完。" : "这件事没有做完。",
+      how: "原来的文件都还在。可以再试一次，或者换一种说法告诉我要做什么。",
+      detail: detail && detail.length > 0 ? detail : "没有更多说明。",
+    };
+  }
+
+  async function persistRun(
+    run: TaskRun,
+    diff: SnapshotDiff,
+    snapshot: { roots: string[]; unbacked: string[] } | null,
+  ): Promise<void> {
+    const undo: TaskRunUndo = {
+      roots: snapshot?.roots ?? [],
+      created: diff.created,
+      modified: diff.modified,
+      deleted: diff.deleted,
+      unbacked: snapshot?.unbacked ?? [],
+    };
+    // Show it in history immediately, even if the disk write fails.
+    setRuns((list) => [run, ...list.filter((item) => item.id !== run.id)].slice(0, MAX_HISTORY_RUNS));
+    try {
+      await invokeOp("save_run", { run: { ...run, undo } });
+    } catch {
+      // The record stays in memory for this launch; it just will not reload.
+    }
+  }
+
+  async function refreshRuns(): Promise<void> {
+    try {
+      const response = (await invokeOp("run_log")) as { runs?: unknown };
+      setRuns(normalizeRuns(response?.runs));
+    } catch {
+      // Bridge unavailable: keep whatever is already in memory.
+    }
+  }
+
+  async function startRun(
+    task: { id: string; title: string; plan: string[] },
+    files: string[],
+    instruction: string,
+  ): Promise<void> {
+    pendingSnapshot = null;
+    setCurrentRun({
+      id: newRunId(),
+      taskId: task.id,
+      taskTitle: task.title,
+      files: [...files],
+      instruction,
+      state: "preview",
+      plan: task.plan.length > 0 ? [...task.plan] : fallbackPlan(files),
+      impact: emptyImpact(),
+      result: null,
+      online: runIsOnline(true),
+      error: null,
+      createdAt: Date.now(),
+    });
+  }
+
+  async function confirmRun(allowOverwrite = false): Promise<void> {
+    const run = currentRun();
+    if (!run || run.state !== "preview") return;
+    const next: TaskRun = { ...run, state: "running", ...(allowOverwrite ? { overwrite: true } : {}) };
+    setCurrentRun(next);
+    await beginSnapshot(next);
+    sendRunInstruction(allowOverwrite ? run.instruction + OVERWRITE_CONSENT : run.instruction);
+  }
+
+  async function dryRun(): Promise<void> {
+    const run = currentRun();
+    if (!run || run.state !== "preview") return;
+    const next: TaskRun = { ...run, state: "running", dryRun: true };
+    setCurrentRun(next);
+    await beginSnapshot(next);
+    sendRunInstruction(dryRunInstruction(run.instruction));
+  }
+
+  function cancelRun(): void {
+    const run = currentRun();
+    if (!run) return;
+    if (run.state === "running") {
+      void attempt(() => invoke("interrupt"));
+      void finishRun("cancelled");
+      return;
+    }
+    pendingSnapshot = null;
+    setCurrentRun(null);
+  }
+
+  function dismissRun(): void {
+    pendingSnapshot = null;
+    setCurrentRun(null);
+  }
+
+  /**
+   * End of a run. The metadata-only before/after diff is taken here, not from
+   * the assistant's own report, so the numbers can be trusted even when the
+   * assistant is confused.
+   */
+  async function finishRun(state: "done" | "failed" | "cancelled", detail?: string): Promise<void> {
+    const run = currentRun();
+    if (!run || run.state !== "running" || runFinishing) return;
+    runFinishing = true;
+    try {
+      const snapshot = pendingSnapshot;
+      let after: SnapshotEntry[] = [];
+      if (run.files.length > 0) {
+        try {
+          const response = (await invokeOp("snapshot_paths", { paths: run.files })) as { entries?: unknown };
+          after = normalizeEntries(response?.entries);
+        } catch {
+          after = [];
+        }
+      }
+      const before = snapshot?.before ?? [];
+      const diff = diffSnapshots(before, after);
+      const result = buildResult(before, after, diff, { dryRun: run.dryRun });
+      const touched = diff.created.length + diff.modified.length + diff.deleted.length;
+      const failed = state === "failed";
+      const next: TaskRun = {
+        ...run,
+        state,
+        impact: impactOf(diff),
+        result: failed && touched === 0 ? null : result,
+        error: failed ? runError(detail, run) : null,
+      };
+      setCurrentRun(next);
+      await persistRun(next, diff, snapshot);
+      await refreshRuns();
+    } finally {
+      runFinishing = false;
+      pendingSnapshot = null;
+    }
+  }
+
+  async function undoRun(id: string): Promise<void> {
+    try {
+      const response = (await invokeOp("undo_run", { id })) as { restored?: unknown; failed?: unknown };
+      const restored = stringList(response?.restored);
+      const failed = stringList(response?.failed);
+      if (failed.length === 0) {
+        setNotice(`已经放回去了：${restored.length} 个文件恢复原样。`);
+      } else {
+        setNotice(
+          `放回去了 ${restored.length} 个文件；还有 ${failed.length} 个没能自动还原，请按提示去文件夹里看看。`,
+        );
+      }
+      await refreshRuns();
+    } catch (error) {
+      setNotice(`没能撤销。${trustDetail(error)}`);
+    }
+  }
+
   return {
+    mode,
+    setMode,
     connection,
     daemonStatus,
     session,
@@ -1397,8 +1795,24 @@ export function createStore(): Store {
     clearGoal,
     requestGoalStatus,
     requestAmbientPhrase,
+    privacy,
+    setLocalOnly,
+    pickFiles,
+    pickFolder,
+    openPath,
+    revealPath,
+    currentRun,
+    runs,
+    startRun,
+    confirmRun,
+    dryRun,
+    cancelRun,
+    dismissRun,
+    undoRun,
+    refreshRuns,
   };
 }
 
 // Re-exported so views do not need to reach into protocol.ts for copy.
 export { EFFORTS, PERMISSION_MODES, formatTokens };
+export type { RunState, TaskRun, TaskRunUndo } from "./simple/run.ts";
