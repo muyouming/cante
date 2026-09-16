@@ -4,6 +4,7 @@ pub mod commands;
 pub mod daemon;
 pub mod files;
 pub mod protocol;
+pub mod sheets;
 
 use std::sync::Arc;
 
@@ -66,6 +67,7 @@ pub fn run() {
             commands::slash,
             commands::goal,
             commands::catalog,
+            commands::sheet_capability,
             commands::set_cwd,
             commands::shutdown,
             files::pick_files,

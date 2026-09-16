@@ -78,11 +78,28 @@ export function buildPrompt(parts: {
     "",
     userWordsBlock(parts.instruction).trimEnd(),
     "",
-    `【做完告诉我】${parts.done}`,
-    "",
-    CHECK_NOTE_BLOCK,
   );
+  // #75 — 这台电脑有没有表格读写工具。默认没有这一节，提示词形状保持不变。
+  if (sheetHelper) {
+    blocks.push("【这台电脑怎么读写表格】", sheetHelper, "");
+  }
+  blocks.push(`【做完告诉我】${parts.done}`, "", CHECK_NOTE_BLOCK);
   return blocks.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// 表格读写能力（#75）
+// ---------------------------------------------------------------------------
+
+/**
+ * 能力探测只做一次，结果写到这里；默认是 null，所以现有的提示词一字不变。
+ * 由 `simple/capabilities.ts` 在启动时设置。
+ */
+let sheetHelper: string | null = null;
+
+/** 设置（或清空）这台电脑读写表格的说明。 */
+export function setSheetHelper(line: string | null): void {
+  sheetHelper = line;
 }
 
 /**
