@@ -2,6 +2,7 @@
 // `TODO(A)` markers; this file must keep `run()` as the entry point.
 pub mod commands;
 pub mod daemon;
+pub mod files;
 pub mod protocol;
 
 use std::sync::Arc;
@@ -38,6 +39,10 @@ pub fn run() {
         // Remember window geometry between runs. Rust-side only, so no JS
         // permission is involved.
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Native pickers plus "open / show in folder" for simple mode. The
+        // commands live in `files.rs`, so the webview imports no JS plugin.
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let emitter: Arc<dyn daemon::Emitter> =
                 Arc::new(TauriEmitter { app: app.handle().clone() });
@@ -63,6 +68,15 @@ pub fn run() {
             commands::catalog,
             commands::set_cwd,
             commands::shutdown,
+            files::pick_files,
+            files::pick_folder,
+            files::open_path,
+            files::reveal_path,
+            files::begin_run,
+            files::snapshot_paths,
+            files::save_run,
+            files::run_log,
+            files::undo_run,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Cante");
