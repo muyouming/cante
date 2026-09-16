@@ -1,0 +1,6 @@
+# 普查的中间产物：每次现场生成的脏输入、每张卡的副本和产出、plan/prompts。
+# 不进仓库——报告（report.md）才是结论。
+work/
+
+# Python 字节码
+__pycache__/

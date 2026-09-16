@@ -1,0 +1,6 @@
+# 现场生成的脏输入是二进制的（.xlsx/.docx/.pdf），不进仓库。
+# 生成器是 generate.py，内容可 diff。
+generated/
+
+# Python 字节码
+__pycache__/
