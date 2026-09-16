@@ -9,7 +9,10 @@ import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { HOME, TASK_GROUPS, taskGroupRank } from "./copy.ts";
+import { LIBRARY } from "./copy-library.ts";
 import TaskCard from "./TaskCard.tsx";
+import TaskLibrary from "./TaskLibrary.tsx";
+import { createStore, type Store } from "../store.ts";
 import { TASKS, type TaskDef } from "./tasks/index.ts";
 
 export interface HomeProps {
@@ -17,11 +20,24 @@ export interface HomeProps {
   onPickTask(task: TaskDef): void;
   /** The free-form box was submitted: handle this sentence. */
   onSubmitText(text: string): void;
+  /**
+   * The app's shared store (#74), handed down by the shell. Optional so Home
+   * still renders on its own — see the note by `fallbackStore` below.
+   */
+  store?: Store;
 }
 
 export default function Home(props: HomeProps): JSX.Element {
   const [text, setText] = createSignal("");
   const [hint, setHint] = createSignal<string | null>(null);
+  // #74 — the ability centre is a local overlay; the shell does not need to know.
+  const [libraryOpen, setLibraryOpen] = createSignal(false);
+  // Home is normally given the shell's store. If it is rendered without one the
+  // ability centre still needs a store object, so use a private, never-connected
+  // one rather than letting the entry become a dead end. The shell passes the
+  // real store, and every real action still goes through `onPickTask`.
+  const fallbackStore = props.store ? null : createStore();
+  const store = (): Store => props.store ?? (fallbackStore as Store);
 
   // Group the catalogue once; unknown groups fall to the end rather than
   // disappearing, so a task with a new group is never silently lost.
@@ -61,6 +77,21 @@ export default function Home(props: HomeProps): JSX.Element {
         <div class="mx-auto w-full max-w-3xl">
           <h1 class="text-[26px] leading-tight font-bold text-slate-100">{HOME.greeting}</h1>
           <p class="mt-2 text-[16px] text-slate-400">{HOME.intro}</p>
+
+          {/* #74 — 除了下面几张常用卡片，还能按「想做的事」去整个任务库搜。 */}
+          <div class="mt-6 flex flex-col gap-3 rounded-2xl border border-sky-800 bg-sky-950/30 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 class="text-[20px] font-semibold text-slate-100">{LIBRARY.entryHint}</h2>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-400">{LIBRARY.entryBody}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setLibraryOpen(true)}
+              class="min-h-[52px] shrink-0 rounded-xl bg-sky-600 px-6 text-[18px] font-semibold text-white hover:bg-sky-500"
+            >
+              {LIBRARY.entryButton(TASKS.length)}
+            </button>
+          </div>
 
           <Show when={sections().length === 0}>
             <div class="mt-6 rounded-2xl border border-dashed border-slate-700 bg-[#111820] px-5 py-6">
@@ -125,6 +156,18 @@ export default function Home(props: HomeProps): JSX.Element {
           </Show>
         </form>
       </div>
+
+      {/* #74 — 全屏的任务库。挑中一张卡片就关掉它，交给原来的任务流程。 */}
+      <Show when={libraryOpen()}>
+        <TaskLibrary
+          store={store()}
+          onPick={(task) => {
+            setLibraryOpen(false);
+            props.onPickTask(task);
+          }}
+          onClose={() => setLibraryOpen(false)}
+        />
+      </Show>
     </div>
   );
 }
