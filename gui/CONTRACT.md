@@ -213,3 +213,67 @@ accepted): `PATH=/tmp/bin:$PATH CC=/tmp/zigcc.sh CXX=/tmp/zigcxx.sh
 AR=/tmp/zigar.sh RANLIB=/tmp/zigranlib.sh
 CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=/tmp/zigcc.sh cargo …`.
 CI (Linux) needs none of it.
+
+## 夹具的覆盖面（守卫：gui/src/fixture-parity.test.ts）
+
+`fixtures/fake-cante.ts` 是一份脚本化的 `cante serve` 替身：没有守护进程的机器靠它把整套测试跑起来，Windows CI 也是靠它才全绿。代价是它把一些**现实**藏了起来——我们已经被同一类事故咬过两次（卡片提示词从未发出；Windows 原生根本没有守护进程）。这一节把「它到底能演什么、演不了什么、演不了的部分靠什么保证」写下来，`gui/src/fixture-parity.test.ts` 是它的守卫：改了夹具或改了这里的清单而两边对不上，测试就红。
+
+三种东西故意分开写，不混成一句笼统的「只能在真机上验」：
+
+1. 夹具**能演出**的事件（下面第一份清单，由测试从夹具源码里核对）；
+2. 夹具**没演**的事件（多数是纯协议形状，本可以演，只是没人写脚本——列出来是为了不让人把「夹具没演」误读成「已经覆盖」）；
+3. 夹具**结构上无法**演出的现实（这些才是真正「只能在真机上验」的部分）。
+
+### 夹具能演出的事件
+
+```fixture-performed
+SessionStart
+UserInput
+TurnStart
+ThinkingDelta
+MessageDelta
+AgentMessage
+ToolStart
+ToolUpdate
+TurnPause
+TurnResume
+ToolEnd
+UsageUpdate
+TurnEnd
+Info
+Goodbye
+```
+
+### 夹具没演的事件
+
+| 事件 | 夹具为什么不演 | 只能在真机上验的部分 | 现在靠什么保证 |
+| --- | --- | --- | --- |
+| SessionUpdated | 夹具只在 StartSession 演一次会话信息，没有 UpdateSession 的脚本；换模型或改标题后守护进程重发 SessionInfo 这件事没演 | 真实守护进程是否在 UpdateSession 后真的发 SessionUpdated、字段是否齐全，只能在真机上验 | Rust 状态归约 gui/src-tauri/tests/state.rs；前端 store.test.ts 的恶意形状与随机流喂过这个形状；会话头随改动更新没有真机验证 |
+| ExtensionRefreshed | 夹具的 SessionStart 里 skills 和 subagents 恒为空，也从不发刷新事件 | 真实守护进程会在会话里发它，带上真实的 skills、subagents 和 MCP 清单（2026-09 真机 excel.merge 两轮各见过 1 次）；这份清单只能来自真机 | 未验证：issue #107（简单界面不渲染刷新事件，起步只读 SessionStart 的 skills——真实 SessionStart 的 skills 也可能是空的，两者都没人验） |
+| SessionEnd | 夹具用 Goodbye 收尾，没有演会话被替换或关闭时的 SessionEnd（带 reason 和 usage） | 真实守护进程关会话时是否发 SessionEnd、usage 是否可信，只能在真机上验 | Rust 状态归约 gui/src-tauri/tests/state.rs；前端 store.test.ts 的随机流喂过这个形状 |
+| ShellOutput | 夹具不执行任何 shell 命令，也没有 stdout、stderr、退出码 | 真实命令的 stdout、stderr、退出码，只能在真机上验 | 未验证：issue #107（简单界面没有终端或命令面板入口；协议里有这个事件但产品不走） |
+| Thinking | 夹具只演流式的 ThinkingDelta，没演一次性发整段思考的 Thinking | 真实守护进程在同一轮里既发 Thinking 也发 ThinkingDelta（2026-09 真机 excel.merge 两轮分别见过 11 和 12 次 Thinking），何时发哪种只能在真机上验 | 前端 store.ts 有分支；store.test.ts 的恶意形状与随机流覆盖了形状 |
+| InfoBlockStart | 夹具只演单行 Info，没演带 header 的分组信息块（例如 MCP 预热） | 真实后台分组信息何时出现、header 写什么，只能在真机上验 | store.test.ts 的形状与随机流用例覆盖了渲染 |
+| InfoBlockAppend | 夹具没演分组信息块的子行 | 真实子行何时追加、内容是什么，只能在真机上验 | store.test.ts 的形状与随机流用例覆盖了渲染 |
+| Error | 夹具从不失败，也不会发 Error | 真实的网络、鉴权或网关错误何时以 Error 到达，只能在真机上验 | Rust 状态归约 state.rs；store.test.ts 覆盖了渲染与失败归因；真机错误在 sweep 报告里出现过 |
+| CompactStart | 夹具不压缩历史，也从不发压缩开始事件 | 真实上下文占用到阈值后是否触发压缩，只能在真机上验 | store.test.ts 覆盖了渲染形状 |
+| CompactEnd | 夹具不压缩历史，也从不发压缩结束事件 | 压缩摘要来自真实模型，只能在真机上验 | store.test.ts 覆盖了渲染形状（summary 有和无两种） |
+| ContextReport | 夹具不回答 ContextReport（要真会话才有分类占用） | 真实会话的分类 token 占用，只能在真机上验 | store.test.ts 覆盖了渲染形状 |
+| Ambient | 夹具不发 Ambient（思考短语或输入建议） | 真实便宜模型产出的建议文本，只能在真机上验 | Rust ops.rs 覆盖了发出对应 op；简单界面不显示 Ambient，前端没有覆盖 |
+
+### 夹具演不出的现实
+
+| 现实 | 为什么夹具挡不住 | 现在靠什么保证 |
+| --- | --- | --- |
+| daemon-exists | 夹具的 CANTE_BIN 永远指向一个能跑的脚本，这台电脑上没有守护进程这件事它演不出来 | gui/src-tauri/tests/missing_binary.rs 在 CI 双平台覆盖「找不到二进制时健康检查仍能回答」；Windows 原生没有守护进程的产品级交代见 issue #103 |
+| vision-image-sent | 夹具的 SessionStart 不带 support_vision，也根本没有图片字节，它无法证明图片真的随请求送出去了 | issue #48；目前只有本机 mlx-serve 视觉模型那次真机验证过图真的到了，没有自动化 |
+| real-model-output | 夹具把 AgentMessage、ToolStart、TurnPause、CompactEnd 的文本都写死了 | 真机普查 gui/scripts/task-sweep.sh（需要模型端点，CI 不跑）会把真实产出读回来核对 |
+| real-filesystem | 夹具的 ToolEnd.result_json 是写死的字符串，没有任何文件被真的读写 | 真机普查用 cante-sheets 和 cante-pdf 把产出读回来核对（需要真机）；产品自己的文件事实有 Rust files.rs 测试 |
+| real-context | 夹具把 UsageUpdate 的 token 数字写死，也从不压缩 | 真机才有的上下文占用与压缩；前端只测了写死数字的渲染 |
+
+### 真机对照（2026-09）
+
+`bash gui/scripts/task-sweep.sh excel.merge`（真实守护进程 + 真实模型）跑完后，`gui/scripts/sweep/work/runs/*/sweep-events.jsonl` 里实际出现的事件种类是：`AgentMessage`、`ExtensionRefreshed`、`MessageDelta`、`Thinking`、`ThinkingDelta`、`ToolEnd`、`ToolStart`、`TurnEnd`、`TurnPause`、`TurnResume`、`TurnStart`、`UsageUpdate`、`UserInput`。
+
+其中 `Thinking` 和 `ExtensionRefreshed` 正是夹具没演的两个。清单没漏（它们在上面已经列出），但这也说明「夹具没演」确实会在真机上出现：真实守护进程同一轮里既发 `Thinking` 又发 `ThinkingDelta`；`ExtensionRefreshed` 会带上真实的 skills、subagents 与 MCP 清单，而夹具的 `SessionStart` 里这些恒为空——真实会话起步时的 skills 也可能为空，那条刷新路径至今没人验。
+
