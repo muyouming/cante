@@ -118,6 +118,21 @@ pub struct BeforeState {
     pub unbacked: Vec<String>,
 }
 
+/// One plain fact about one path, for the result card's 核对 line (#trust).
+///
+/// This is a *report*, not a verdict: a path that does not exist, is a folder,
+/// or cannot be opened is a fact worth showing the user, never an error that
+/// turns into a stack trace. `readable` means "a regular file we can open for
+/// reading right now" — a folder is therefore not readable as a result file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FileFact {
+    pub path: String,
+    pub exists: bool,
+    pub size: Option<u64>,
+    pub modified_ms: Option<i64>,
+    pub readable: bool,
+}
+
 // ---------------------------------------------------------------------------
 // Scanning
 // ---------------------------------------------------------------------------
@@ -478,6 +493,60 @@ fn strings(value: Option<&Value>) -> Vec<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Facts about claimed result files (#trust)
+// ---------------------------------------------------------------------------
+
+fn modified_ms(meta: &fs::Metadata) -> Option<i64> {
+    meta.modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|delta| delta.as_millis() as i64)
+}
+
+/// What is actually on disk at `path` right now. Never panics, never returns an
+/// error: a path that cannot even be inspected (missing parent, no permission)
+/// comes back `exists: false`, which is exactly what the card needs to say
+/// "没找到" rather than crash on.
+pub fn fact_for(path: &Path) -> FileFact {
+    let shown = display(path);
+    match fs::metadata(path) {
+        Ok(meta) if meta.is_dir() => FileFact {
+            path: shown,
+            exists: true,
+            size: None,
+            modified_ms: modified_ms(&meta),
+            // A folder is not an openable result file; `size` has no meaning.
+            readable: false,
+        },
+        Ok(meta) => {
+            // `metadata` proves it is there; `File::open` proves we may read it
+            // (permissions, a lock, a disconnected network share).
+            let readable = fs::File::open(path).is_ok();
+            FileFact {
+                path: shown,
+                exists: true,
+                size: Some(meta.len()),
+                modified_ms: modified_ms(&meta),
+                readable,
+            }
+        }
+        Err(_) => FileFact {
+            path: shown,
+            exists: false,
+            size: None,
+            modified_ms: None,
+            readable: false,
+        },
+    }
+}
+
+/// Facts for a batch of paths, in the order asked. An empty list yields nothing
+/// (there is no result to check), rather than an error.
+pub fn facts_of(paths: &[PathBuf]) -> Vec<FileFact> {
+    paths.iter().map(|path| fact_for(path)).collect()
+}
+
+// ---------------------------------------------------------------------------
 // Tauri commands
 // ---------------------------------------------------------------------------
 
@@ -579,6 +648,15 @@ pub async fn begin_run(app: tauri::AppHandle, id: String, paths: Vec<String>) ->
         "unbacked": state.unbacked,
         "truncated": truncated,
     }))
+}
+
+/// Report what is actually on disk for a set of paths, so the result card can
+/// say "I checked" with the real answer instead of repeating the assistant.
+/// Pure and infallible by construction: every path produces one fact.
+#[tauri::command]
+pub fn file_facts(paths: Vec<String>) -> Vec<FileFact> {
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    facts_of(&paths)
 }
 
 /// Snapshot the same folders again when the run ends. The frontend diffs the

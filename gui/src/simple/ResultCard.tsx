@@ -8,16 +8,18 @@
 // one-click undo right next to it.
 //
 // A failure is never a stack trace: 发生了什么 + 你可以怎么做.
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { FOLLOWUP, TRUST } from "./copy.ts";
+import { VERIFY } from "./copy-verify.ts";
 import { SCHEDULE } from "./copy-schedule.ts";
 import { checkNoteFromRows, lastAgentText } from "./evidence.ts";
 import { endedWithQuestion } from "./followup.ts";
 import { fileName, folderName, onlineHint, onlineLabel } from "./run.ts";
 import { describe as describeSchedule, describeCadence, type Cadence, type Schedule } from "./schedule.ts";
 import type { TaskRun } from "./tasks/index.ts";
+import { verifyResultFiles, type Verification } from "./verify.ts";
 import type { Store } from "../store.ts";
 
 export interface ResultCardProps {
@@ -54,6 +56,41 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
   const lastText = () => lastAgentText(props.store.rows()) ?? "";
   const producedFiles = () => run()?.result?.files.length ?? 0;
   const asking = () => show() && endedWithQuestion(lastText(), producedFiles());
+
+  // 信任层：运行结束后，拿它声称产出的文件再问本机一次（verify.ts）。结论分三种：
+  // 都在能打开 / 它说有却找不到 / 没能核对。核对没做成时绝不假装核对过。
+  const [verification, setVerification] = createSignal<Verification | null>(null);
+  const [copyNote, setCopyNote] = createSignal("");
+  let verifyKey = "";
+  createEffect(() => {
+    const current = run();
+    const claimed = files().map((file) => file.path);
+    // 撤销之后结果文件已经被移走，那时再喊「找不到」只会吓人。
+    if (!show() || claimed.length === 0 || current?.undone === true) {
+      verifyKey = "";
+      setVerification(null);
+      return;
+    }
+    const key = `${current?.id ?? ""}|${claimed.join("\n")}`;
+    if (key === verifyKey) return;
+    verifyKey = key;
+    setVerification(null);
+    void verifyResultFiles(claimed).then((report) => {
+      // 迟到的回答：画面已经换成另一次运行的话，就不要贴旧结论。
+      if (verifyKey === key) setVerification(report);
+    });
+  });
+
+  async function copyVerifyDetail(): Promise<void> {
+    const text = verification()?.detail ?? "";
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyNote(VERIFY.copied);
+    } catch {
+      setCopyNote(VERIFY.copyFailed);
+    }
+  }
 
   async function sendReply(text: string): Promise<void> {
     const trimmed = text.trim();
@@ -186,6 +223,81 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
         </Show>
 
         <p class="text-lg text-slate-100">{run()?.result?.summary}</p>
+
+        {/* 信任层：把「它说做好了」落到本机事实上。三种情况三种说法，找不到时
+            给出出路（再让它做一次 / 打开文件夹 / 复制详情）。 */}
+        <Show when={verification() !== null && verification()!.kind !== "none"}>
+          <div
+            class="rounded-2xl border px-4 py-3"
+            classList={{
+              "border-emerald-700 bg-emerald-950/40": verification()!.kind === "ok",
+              "border-rose-600 bg-rose-950/40": verification()!.kind === "missing",
+              "border-slate-600 bg-slate-800/40": verification()!.kind === "unknown",
+            }}
+          >
+            <h3
+              class="text-[20px] font-bold"
+              classList={{
+                "text-emerald-100": verification()!.kind === "ok",
+                "text-rose-100": verification()!.kind === "missing",
+                "text-slate-100": verification()!.kind === "unknown",
+              }}
+            >
+              {VERIFY.title}
+            </h3>
+            <p
+              class="mt-1 text-[16px] leading-relaxed"
+              classList={{
+                "text-emerald-100": verification()!.kind === "ok",
+                "text-rose-100": verification()!.kind === "missing",
+                "text-slate-200": verification()!.kind === "unknown",
+              }}
+            >
+              {verification()!.message}
+              <Show when={verification()!.sizeText}>
+                {" "}
+                {VERIFY.okSize(verification()!.sizeText!)}
+              </Show>
+            </p>
+            <Show when={verification()!.kind === "missing"}>
+              <p class="mt-1 text-[16px] leading-relaxed text-rose-100/90">{VERIFY.missingHint}</p>
+            </Show>
+            <Show when={verification()!.kind === "unknown"}>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-300">{VERIFY.unknownHint}</p>
+            </Show>
+            <Show when={verification()!.kind === "missing" || verification()!.kind === "unknown"}>
+              <div class="mt-3 flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void rerun()}
+                  class="min-h-[48px] rounded-xl border border-slate-500 px-5 text-[16px] font-semibold text-slate-100 hover:bg-slate-800"
+                >
+                  {VERIFY.retry}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = verification()!.files[0]?.path;
+                    if (target) void props.store.revealPath(target);
+                  }}
+                  class="min-h-[48px] rounded-xl border border-slate-500 px-5 text-[16px] font-semibold text-slate-100 hover:bg-slate-800"
+                >
+                  {VERIFY.openFolder}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copyVerifyDetail()}
+                  class="min-h-[48px] rounded-xl border border-slate-500 px-5 text-[16px] font-semibold text-slate-100 hover:bg-slate-800"
+                >
+                  {VERIFY.copyDetail}
+                </button>
+                <Show when={copyNote()}>
+                  <span class="text-[16px] text-slate-300">{copyNote()}</span>
+                </Show>
+              </div>
+            </Show>
+          </div>
+        </Show>
 
         <Show when={checkNote()}>
           <div class="rounded-2xl border border-amber-700 bg-amber-950/40 px-4 py-3">
