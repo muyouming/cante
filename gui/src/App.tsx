@@ -4,6 +4,11 @@
 // transcript in the middle, a composer pinned to the bottom, and a status strip
 // under it. One store fed by the Tauri bridge drives every panel; keyboard
 // shortcuts live here.
+//
+// Two drawers hang off this shell and are owned here so the header chips, the
+// keyboard and the panels agree on one open/closed state: the capabilities
+// panel on the right (CAPS / Esc) and the terminal along the bottom (TERM / ⌘`).
+// Both start closed. The goal bar sits between the transcript and the composer.
 import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -13,13 +18,16 @@ import { createStore } from "./store.ts";
 import { isBridgeAvailable } from "./tauri.ts";
 import type { VirtualListApi } from "./components/VirtualList.tsx";
 import ApprovalPanel from "./components/ApprovalPanel.tsx";
+import CapabilitiesPanel from "./components/CapabilitiesPanel.tsx";
 import CommandPalette from "./components/CommandPalette.tsx";
 import Composer from "./components/Composer.tsx";
 import DetailModal from "./components/DetailModal.tsx";
+import GoalBar from "./components/GoalBar.tsx";
 import Header from "./components/Header.tsx";
 import ModelPicker from "./components/ModelPicker.tsx";
 import SessionRail from "./components/SessionRail.tsx";
 import StatusBar from "./components/StatusBar.tsx";
+import TerminalPane from "./components/TerminalPane.tsx";
 import Transcript from "./components/Transcript.tsx";
 
 /** The rail folds away below this width (contract: usable at 800×560). */
@@ -29,12 +37,22 @@ export default function App(): JSX.Element {
   const store = createStore();
   const [width, setWidth] = createSignal(typeof window === "undefined" ? 1180 : window.innerWidth);
   const [detail, setDetail] = createSignal<Row | null>(null);
+  // Drawers: capabilities on the right, the terminal along the bottom.
+  const [capsOpen, setCapsOpen] = createSignal(false);
+  const [terminalOpen, setTerminalOpen] = createSignal(false);
   // Whether the transcript is following the newest line; the status bar offers
   // a jump back when it is not.
   const [following, setFollowing] = createSignal(true);
   let transcript: VirtualListApi | undefined;
 
   const compact = (): boolean => width() < COMPACT_WIDTH;
+  // A running turn: Enter in the composer steers it instead of sending a fresh
+  // prompt. `awaiting` is deliberately included nowhere — the approval gate
+  // owns the turn then, and it is answered, not steered.
+  const turnRunning = (): boolean => {
+    const status = store.daemonStatus();
+    return status === "streaming" || status === "thinking";
+  };
   // The webview is the desktop app when the Tauri host is present; a plain
   // browser tab can never reach the daemon, and says so instead.
   const bridge = isBridgeAvailable();
@@ -54,9 +72,36 @@ export default function App(): JSX.Element {
       else store.openPicker();
       return;
     }
+    if (meta && key === "o") {
+      event.preventDefault();
+      store.cycleDensity();
+      return;
+    }
+    // ⌘` / Ctrl+` — the terminal drawer. `code` keeps it working on layouts
+    // where the key is a dead key or sits elsewhere on the keyboard.
+    if (meta && (event.code === "Backquote" || event.key === "`")) {
+      event.preventDefault();
+      setTerminalOpen((open) => !open);
+      return;
+    }
     if (meta && event.key === ".") {
       event.preventDefault();
       void store.interrupt();
+      return;
+    }
+    // Escape closes the drawers, but an open overlay or slash palette owns it
+    // first (Overlay stops propagation; the inline palette does not).
+    if (
+      event.key === "Escape" &&
+      !store.paletteVisible() &&
+      !store.paletteOpen() &&
+      !store.pickerOpen()
+    ) {
+      if (capsOpen()) {
+        setCapsOpen(false);
+        return;
+      }
+      if (terminalOpen()) setTerminalOpen(false);
       return;
     }
     // Overlays own Escape: they restore focus to their opener on close. The
@@ -79,7 +124,14 @@ export default function App(): JSX.Element {
 
   return (
     <div class="relative flex h-screen w-screen flex-col overflow-hidden bg-[#0b0f14] text-slate-100">
-      <Header store={store} compact={compact()} />
+      <Header
+        store={store}
+        compact={compact()}
+        capsOpen={capsOpen()}
+        onToggleCaps={() => setCapsOpen((open) => !open)}
+        terminalOpen={terminalOpen()}
+        onToggleTerminal={() => setTerminalOpen((open) => !open)}
+      />
 
       <Show when={store.connection() === "offline"}>
         <div
@@ -111,12 +163,14 @@ export default function App(): JSX.Element {
               transcript = api;
             }}
           />
-          <Composer
-            store={store}
-            busy={store.daemonStatus() === "streaming" || store.daemonStatus() === "thinking"}
-          />
+          <GoalBar store={store} />
+          <Composer store={store} busy={turnRunning()} />
         </main>
       </div>
+
+      <Show when={terminalOpen()}>
+        <TerminalPane store={store} onClose={() => setTerminalOpen(false)} />
+      </Show>
 
       <StatusBar
         store={store}
@@ -151,6 +205,36 @@ export default function App(): JSX.Element {
       />
 
       <DetailModal row={detail()} onClose={() => setDetail(null)} />
+
+      {/* Right-side capabilities drawer; closed until the CAPS chip is pressed. */}
+      <Show when={capsOpen()}>
+        <div
+          class="fixed inset-0 z-30 bg-black/30"
+          aria-hidden="true"
+          onClick={() => setCapsOpen(false)}
+        />
+        <aside
+          aria-label="Capabilities drawer"
+          class="fixed inset-y-0 right-0 z-40 flex w-[340px] max-w-full flex-col border-l border-slate-800 bg-[#0e141b] shadow-2xl"
+        >
+          {/* The panel brings its own CAPABILITIES title; this strip is only
+              the drawer's own chrome. */}
+          <div class="flex shrink-0 items-center justify-end gap-2 border-b border-slate-800 px-3 py-2">
+            <button
+              type="button"
+              onClick={() => setCapsOpen(false)}
+              aria-label="Close capabilities"
+              title="Close capabilities (Esc)"
+              class="rounded-md border border-slate-800 bg-slate-900 px-2 py-1 text-[10px] tracking-widest text-slate-400 hover:border-sky-500 hover:text-slate-100"
+            >
+              CLOSE
+            </button>
+          </div>
+          <div class="min-h-0 flex-1 overflow-y-auto p-3">
+            <CapabilitiesPanel store={store} />
+          </div>
+        </aside>
+      </Show>
     </div>
   );
 }

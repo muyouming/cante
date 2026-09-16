@@ -1,9 +1,11 @@
 // Top bar: identity on the left, live session switches on the right.
 //
-// Every chip is a button: model/provider open the picker, effort and
-// permissions cycle, and MENU opens the command palette (same as ⌘K). Chips
-// that open an overlay carry `aria-haspopup` / `aria-expanded` so a screen
-// reader can tell whether the palette or picker is currently open.
+// Every chip is a button: model/provider open the picker, effort,
+// permissions and density cycle, CAPS opens the capabilities drawer, TERM the
+// terminal drawer, and MENU opens the command palette (same as ⌘K). Chips that
+// open an overlay or a drawer carry `aria-haspopup` / `aria-expanded` so a
+// screen reader can tell whether the palette, the picker or a drawer is
+// currently open.
 import { Show } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -13,6 +15,12 @@ import { modelLabel, providerLabel, type Store } from "../store.ts";
 export interface HeaderProps {
   store: Store;
   compact: boolean;
+  /** The right-side capabilities drawer (closed until the chip is pressed). */
+  capsOpen: boolean;
+  onToggleCaps(): void;
+  /** The bottom terminal drawer (closed until ⌘` or the chip is pressed). */
+  terminalOpen: boolean;
+  onToggleTerminal(): void;
 }
 
 function Chip(props: {
@@ -96,6 +104,29 @@ export default function Header(props: HeaderProps): JSX.Element {
           name={`Permissions: ${store.session()?.permission_mode ?? "not set"} — cycle permissions`}
           title="Cycle permissions"
           onPress={() => void store.cyclePermission()}
+        />
+        <Chip
+          label="density"
+          value={store.viewDensity()}
+          name={`View density: ${store.viewDensity()} — cycle density (⌘O)`}
+          title="Cycle view density (⌘O)"
+          onPress={() => store.cycleDensity()}
+        />
+        <Chip
+          label="caps"
+          value={props.capsOpen ? "open" : "closed"}
+          name={`Capabilities drawer: ${props.capsOpen ? "open" : "closed"}`}
+          title="MCP servers, skills and subagents"
+          expanded={props.capsOpen}
+          onPress={() => props.onToggleCaps()}
+        />
+        <Chip
+          label="term"
+          value="⌘`"
+          name={`Terminal drawer: ${props.terminalOpen ? "open" : "closed"}`}
+          title="Toggle the terminal drawer (⌘`)"
+          expanded={props.terminalOpen}
+          onPress={() => props.onToggleTerminal()}
         />
         <Chip
           label="menu"
