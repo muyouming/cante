@@ -1,12 +1,27 @@
-// Plain-language failure view (#44).
+// Plain-language failure view (#44, r14).
 //
 // Every failure is shown as 发生了什么 + 你可以怎么做, never as a raw English
 // stack trace. The technical text is still available — behind 复制详情 — so it
 // can be forwarded to someone who can read it.
-import { Show, createSignal } from "solid-js";
+//
+// The exits are not the old three generic ones (重试 / 换个方法 / 复制详情): the
+// list is built by `actionsFor`, which reads the failure for checkable signs
+// (EBUSY, ENOENT, Permission denied, 「我拿不准」 …) and names the one next step
+// that actually applies — 关掉那个窗口再试 / 重新选一次文件 / 换个位置保存.
+// When nothing is recognised it falls back to the three generic exits instead of
+// inventing a specific button.
+//
+// A button only renders when the screen can actually carry the action out
+// (a caller passed the matching handler); otherwise the action shows as a plain
+// step, so there are never dead buttons. All the wording lives in
+// copy-recovery.ts — this file is scanned by copy-guard, so it holds no Chinese
+// literals of its own.
+import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { COMMON, ERROR_VIEW, explainError } from "./copy.ts";
+import { actionsFor } from "./recovery.ts";
+import type { RecoveryAction, RecoveryContext } from "./recovery.ts";
 
 export interface ErrorViewProps {
   /** Anything thrown below: a string, an Error, or a `TaskRun.error`. */
@@ -16,6 +31,15 @@ export interface ErrorViewProps {
   /** Called after the detail was copied (for analytics/history, optional). */
   onCopied?(): void;
   onBack?(): void;
+  /**
+   * Hand a specific recovery action to the screen that owns it (re-open the file
+   * picker, save somewhere else, open the folder …). When a caller has not wired
+   * this yet, the action falls back to `onRetry` / `onAlternative`; if neither
+   * exists the action is shown as a plain step rather than a dead button.
+   */
+  onAction?(action: RecoveryAction): void;
+  /** What this job needed, so the generic fallback picks a fitting exit. */
+  context?: RecoveryContext;
 }
 
 async function copyText(text: string): Promise<boolean> {
@@ -46,10 +70,16 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
+const BUTTON_CLASS =
+  "min-h-[52px] w-full rounded-xl bg-sky-600 px-5 text-[18px] font-semibold text-white hover:bg-sky-500";
+const STEP_CLASS =
+  "min-h-[52px] w-full rounded-xl border border-slate-700 bg-[#0e141b] px-5 text-left text-[18px] font-semibold text-slate-200";
+
 export default function ErrorView(props: ErrorViewProps): JSX.Element {
   const [copied, setCopied] = createSignal(false);
   const [copyFailed, setCopyFailed] = createSignal(false);
   const human = (): ReturnType<typeof explainError> => explainError(props.error);
+  const actions = (): RecoveryAction[] => actionsFor(human(), props.context);
 
   async function onCopy(): Promise<void> {
     const detail = human().detail || `${human().what}\n${human().how}`;
@@ -57,6 +87,29 @@ export default function ErrorView(props: ErrorViewProps): JSX.Element {
     setCopied(ok);
     setCopyFailed(!ok);
     if (ok) props.onCopied?.();
+  }
+
+  /** The callback a button fires, or null when the screen cannot carry it out. */
+  function handlerFor(item: RecoveryAction): (() => void) | null {
+    if (item.kind === "copy-detail") return () => void onCopy();
+    if (props.onAction) return () => props.onAction?.(item);
+    switch (item.kind) {
+      case "retry":
+      case "close-file":
+        // 关掉窗口之后的下一步就是重跑，所以这两类都走「再试一次」。
+        return props.onRetry ? () => props.onRetry?.() : null;
+      case "pick-files":
+      case "explain-in-words":
+      case "save-elsewhere":
+      case "open-folder":
+        return props.onAlternative ? () => props.onAlternative?.() : null;
+      default:
+        return null;
+    }
+  }
+
+  function labelFor(item: RecoveryAction): string {
+    return item.kind === "copy-detail" && copied() ? COMMON.copied : item.label;
   }
 
   return (
@@ -70,33 +123,31 @@ export default function ErrorView(props: ErrorViewProps): JSX.Element {
         <h2 class="mt-5 text-[20px] font-semibold text-slate-200">{ERROR_VIEW.howTitle}</h2>
         <p class="mt-1 text-[17px] leading-relaxed text-slate-300">{human().how}</p>
 
-        <div class="mt-6 flex flex-col gap-3 sm:flex-row">
-          <Show when={props.onRetry}>
-            <button
-              type="button"
-              onClick={() => props.onRetry?.()}
-              class="min-h-[52px] flex-1 rounded-xl bg-sky-600 px-5 text-[18px] font-semibold text-white hover:bg-sky-500"
-            >
-              {COMMON.retry}
-            </button>
-          </Show>
-          <Show when={props.onAlternative}>
-            <button
-              type="button"
-              onClick={() => props.onAlternative?.()}
-              class="min-h-[52px] flex-1 rounded-xl border border-slate-600 px-5 text-[18px] font-semibold text-slate-100 hover:border-slate-400"
-            >
-              {COMMON.alternative}
-            </button>
-          </Show>
-          <button
-            type="button"
-            onClick={() => void onCopy()}
-            class="min-h-[52px] flex-1 rounded-xl border border-slate-700 px-5 text-[18px] font-semibold text-slate-300 hover:border-slate-500"
-          >
-            {copied() ? COMMON.copied : COMMON.copyDetail}
-          </button>
-        </div>
+        <ul class="mt-5 flex flex-col gap-4">
+          <For each={actions()}>
+            {(item) => {
+              const run = handlerFor(item);
+              return (
+                <li class="flex flex-col">
+                  <Show
+                    when={run}
+                    fallback={
+                      <p class={STEP_CLASS}>
+                        <span class="mr-2 text-slate-500">→</span>
+                        {item.label}
+                      </p>
+                    }
+                  >
+                    <button type="button" onClick={() => run?.()} class={BUTTON_CLASS}>
+                      {labelFor(item)}
+                    </button>
+                  </Show>
+                  <p class="mt-1.5 text-[16px] leading-relaxed text-slate-400">{item.why}</p>
+                </li>
+              );
+            }}
+          </For>
+        </ul>
 
         <Show when={copyFailed()}>
           <p class="mt-3 text-[16px] text-amber-400" role="alert">
