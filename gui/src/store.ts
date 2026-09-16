@@ -18,6 +18,14 @@ import {
 import type { Row, RowTone } from "./rows.ts";
 import { persistLocalOnly, readLocalOnly, type PrivacyState } from "./simple/privacy.ts";
 import {
+  initialProgress,
+  onAssistantText,
+  onTool,
+  progressView,
+  type Progress,
+  type RunProgressView,
+} from "./simple/progress.ts";
+import {
   OVERWRITE_CONSENT,
   buildResult,
   diffSnapshots,
@@ -157,6 +165,8 @@ export interface Store {
   usage: Accessor<Usage | null>;
   context: Accessor<ContextWindow | null>;
   steps: Accessor<number>;
+  /** #62 — the plan as a live checklist while a job runs, plus its clock. */
+  progress: Accessor<RunProgressView>;
   notice: Accessor<string | null>;
   logs: Accessor<LogEntry[]>;
   catalog: Accessor<CatalogProvider[]>;
@@ -514,6 +524,15 @@ export function createStore(): Store {
   const [currentRun, setCurrentRun] = createSignal<TaskRun | null>(null);
   const [runs, setRuns] = createSignal<TaskRun[]>([]);
 
+  // ---- #62 running progress -----------------------------------------------
+  // The started-at clock is a signal so entering `running` redraws at once;
+  // the cursor and the frozen elapsed time are plain values that move with the
+  // event stream, and `progressTick` is what makes the elapsed seconds tick.
+  const [progressStartedAt, setProgressStartedAt] = createSignal<number | null>(null);
+  const [progressTick, setProgressTick] = createSignal(0);
+  let runProgress: Progress = initialProgress();
+  let runElapsedMs = 0;
+
   // Snapshot taken when a run starts, so the end-of-run diff and the persisted
   // undo metadata do not depend on the assistant cooperating.
   let pendingSnapshot: { before: SnapshotEntry[]; roots: string[]; unbacked: string[] } | null = null;
@@ -654,6 +673,9 @@ export function createStore(): Store {
 
   async function reconcile(): Promise<void> {
     if (disposed) return;
+    // The existing reconcile beat doubles as the running screen's clock, so the
+    // elapsed time moves without a second timer (and never on a worker thread).
+    if (currentRun()?.state === "running") tickProgress();
     try {
       const response = await invoke("events_since", { cursor });
       if (disposed) return;
@@ -833,6 +855,9 @@ export function createStore(): Store {
         const text = textOf(event, name);
         if (delta) lastAgentText = clampText(lastAgentText + text, MAX_ROW_TEXT);
         else if (text) lastAgentText = text;
+        // #62 — only the finished message is folded in: a plan that arrives in
+        // streaming pieces would otherwise look like a sequence of steps.
+        if (!delta && text) noteAssistantProgress(text);
         const list = rows();
         const last = list[list.length - 1];
         if (last && last.kind === "agent" && last.streaming && delta) {
@@ -864,6 +889,7 @@ export function createStore(): Store {
       case "ToolStart": {
         const tool = eventPayload<{ id?: string; name?: string; args?: unknown }>(event, "ToolStart");
         const id = String(tool?.id ?? `tool_${rowSeq}`);
+        noteToolProgress(String(tool?.name ?? ""));
         const rowId = `k${++rowSeq}`;
         toolRows.set(id, rowId);
         setRows(pushRow({
@@ -1451,6 +1477,79 @@ export function createStore(): Store {
     setSteps(0);
   }
 
+  // ---- #62 — what the running screen shows --------------------------------
+  //
+  // The store owns the clock and the cursor; `progress.ts` owns the logic. The
+  // accessor is a plain function (not a memo) like the others here: `bun test`
+  // resolves Solid's server build, where a memo is computed once and never
+  // re-runs.
+
+  function tickProgress(): void {
+    setProgressTick((value) => value + 1);
+  }
+
+  /** A run entered `running`: start the clock on the first step. */
+  function markProgressRunning(): void {
+    runProgress = initialProgress();
+    runElapsedMs = 0;
+    setProgressStartedAt(Date.now());
+    tickProgress();
+  }
+
+  /** A run left `running`: freeze the elapsed time so it cannot keep counting. */
+  function markProgressFinished(): void {
+    const startedAt = progressStartedAt();
+    if (startedAt !== null) runElapsedMs = Math.max(0, Date.now() - startedAt);
+    tickProgress();
+  }
+
+  /** A run was staged or thrown away: back to nothing. */
+  function resetProgress(): void {
+    runProgress = initialProgress();
+    runElapsedMs = 0;
+    setProgressStartedAt(null);
+    tickProgress();
+  }
+
+  function noteToolProgress(name: string): void {
+    const run = currentRun();
+    if (!run || run.state !== "running") return;
+    const next = onTool(runProgress, name, run.plan.length);
+    if (next.index !== runProgress.index) {
+      runProgress = next;
+      tickProgress();
+    }
+  }
+
+  function noteAssistantProgress(text: string): void {
+    const run = currentRun();
+    if (!run || run.state !== "running" || !text) return;
+    const next = onAssistantText(runProgress, text, run.plan.length);
+    if (next.index !== runProgress.index) {
+      runProgress = next;
+      tickProgress();
+    }
+  }
+
+  function progress(): RunProgressView {
+    // Reading the tick keeps the elapsed time moving on screen.
+    progressTick();
+    const run = currentRun();
+    const state = run?.state;
+    const running = state === "running";
+    const finished =
+      run !== null && state !== "running" && state !== "preview" && state !== "draft";
+    return progressView({
+      plan: run?.plan ?? [],
+      cursor: runProgress,
+      running,
+      finished,
+      startedAt: progressStartedAt(),
+      now: Date.now(),
+      elapsedMs: runElapsedMs,
+    });
+  }
+
   // ---- privacy ------------------------------------------------------------
   // One boolean answers both questions the panel asks: may content leave this
   // machine, and may the assistant search the web. `online` mirrors it, so the
@@ -1631,6 +1730,7 @@ export function createStore(): Store {
       error: null,
       createdAt: Date.now(),
     });
+    resetProgress();
   }
 
   async function confirmRun(allowOverwrite = false): Promise<void> {
@@ -1638,6 +1738,7 @@ export function createStore(): Store {
     if (!run || run.state !== "preview") return;
     const next: TaskRun = { ...run, state: "running", ...(allowOverwrite ? { overwrite: true } : {}) };
     setCurrentRun(next);
+    markProgressRunning();
     await beginSnapshot(next);
     sendRunInstruction(allowOverwrite ? run.instruction + OVERWRITE_CONSENT : run.instruction);
   }
@@ -1647,6 +1748,7 @@ export function createStore(): Store {
     if (!run || run.state !== "preview") return;
     const next: TaskRun = { ...run, state: "running", dryRun: true };
     setCurrentRun(next);
+    markProgressRunning();
     await beginSnapshot(next);
     sendRunInstruction(dryRunInstruction(run.instruction));
   }
@@ -1661,11 +1763,13 @@ export function createStore(): Store {
     }
     pendingSnapshot = null;
     setCurrentRun(null);
+    resetProgress();
   }
 
   function dismissRun(): void {
     pendingSnapshot = null;
     setCurrentRun(null);
+    resetProgress();
   }
 
   /**
@@ -1701,6 +1805,7 @@ export function createStore(): Store {
         error: failed ? runError(detail, run) : null,
       };
       setCurrentRun(next);
+      markProgressFinished();
       await persistRun(next, diff, snapshot);
       await refreshRuns();
     } finally {
@@ -1738,6 +1843,7 @@ export function createStore(): Store {
     usage,
     context,
     steps,
+    progress,
     notice,
     logs,
     catalog,
@@ -1816,3 +1922,4 @@ export function createStore(): Store {
 // Re-exported so views do not need to reach into protocol.ts for copy.
 export { EFFORTS, PERMISSION_MODES, formatTokens };
 export type { RunState, TaskRun, TaskRunUndo } from "./simple/run.ts";
+export type { ProgressStep, RunProgressView } from "./simple/progress.ts";
