@@ -211,3 +211,87 @@ powershell -ExecutionPolicy Bypass -File gui\scripts\task-sweep.ps1 --work "$env
 还有一条要说在明处：**RDP 会话里的普查本身没人验过**。如果同一张卡在 Windows 上
 的结论与 macOS 上明显不同（比如从「通过」变「失败」），先怀疑环境（驱动器盘符、
 路径长度、编码、WebView2 版本、有没有装 WPS/微信），再怀疑模型与提示词。
+
+## 用 WSL 跑真实端到端验收
+
+上面那份清单能证明"装得上、起得来、点得动"，但证明不了**真跑一张卡真的做完了事**。
+这一节专门解决它：让 Windows 上的应用连上一个**真的守护进程**，把一张卡从头跑到尾。
+
+### 为什么只能这样
+
+上游的 `cante`/`ante` **只有 Linux 与 macOS 构建**（官方 README 说 Windows 建议用 WSL）。
+Windows 上没有原生守护进程，应用就会去找 `cante`（`CANTE_BIN` 或 PATH），找不到就没有会话——
+这正是 `gui/README.md` 里写的"没有守护进程"那一类故障。所以唯一可行的路是：
+
+**守护进程跑在 WSL 里，Windows 上的应用用 `CANTE_BIN` 指过去。**
+
+WSL 里的 Linux 能访问局域网网关（上游二进制里本来就要连那个模型端点），这条路我们已经在
+Windows 11 + WSL（Ubuntu）上确认过能起来。
+
+### 三步
+
+1. **在 WSL 里装好 Linux 版 `ante`**（一次就够，之后可重复运行）：
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File gui\scripts\windows\wsl-ante-setup.ps1
+   ```
+
+   脚本会下载并解包到 WSL 里的 `~/cante-bin/`，跑 `ante --version` 和 `ante --help` 自检，
+   最后**打印出该设的 `CANTE_BIN` 值**。默认版本是 `0.preview.99`，可以 `-Version nightly` 换。
+
+2. **把打印出来的值设成 `CANTE_BIN`**。它长这样：
+
+   ```
+   wsl.exe -e /home/<你的用户>/cante-bin/ante serve
+   ```
+
+   只对当前窗口生效（验收最省事）：
+
+   ```powershell
+   $env:CANTE_BIN = "wsl.exe -e /home/<你的用户>/cante-bin/ante serve"
+   ```
+
+   或设成用户级（之后新开的窗口都带上，**要重新登录**才会传给开始菜单启动的程序）：
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable("CANTE_BIN", "wsl.exe -e /home/<你的用户>/cante-bin/ante serve", "User")
+   ```
+
+3. **从带了这个变量的窗口启动应用**，走一遍要验收的卡：
+
+   ```powershell
+   & "$env:LOCALAPPDATA\Cante\Cante.exe"     # 换成实际安装位置
+   ```
+
+   应用把 `CANTE_BIN` 当"命令"看，不是当路径：它认得这条里已经写好的 `serve`，不会再自己补一个
+   （所以不会变成 `ante serve serve`）。这条规则有测试：`gui/src-tauri/tests/binary_spec.rs`。
+
+### 怎么确认真的连上了（别只看窗口在不在）
+
+| 看什么 | 通过的标准 |
+| --- | --- |
+| WSL 里 | `wsl.exe -e /home/<用户>/cante-bin/ante --version` 打印出版本号（脚本已经替你跑过） |
+| 应用首次检查 | 过程走完、进到"准备好了"，**不是**"干活需要的组件还没装好"——后者说明版本探测没到位 |
+| 供应商列表 | 能列出来。这份列表来自 `ante catalog`，列得出来就说明应用真的在跟 WSL 里那个二进制说话 |
+| 真跑一张卡 | 挑一张**只读、不依赖 Windows 专有工具**的卡（例如合并两张表），能出结果文件、能在资源管理器里看到 |
+| 日志 | 应用里没有出现"组件没装好"这类提示，也没有意外的守护进程退出（`cante://exit`）；stdout 里没有一堆非 JSON 行 |
+
+一条卡跑完**至少留 1800 秒**（慢模型实测 850 秒；超时设 600 会把成功误判成失败）。
+
+### 明确的限制（这些是"我们验收的临时办法"，不是产品方案）
+
+- **这不是交付给用户的方案**。王姐不会装 WSL，也不该需要。它只是我们自己的验收手段；
+  用户机器上"没有守护进程"这件事仍然要靠安装包和面向用户的说明去解决，这条临时的路替代不了它。
+- **路径映射**：应用选出来的是 Windows 路径（`C:\Users\...\表.xlsx`），而 Linux 侧看到的是
+  `/mnt/c/Users/.../表.xlsx`。模型得自己把这层对上。**验收时要专门看这一条**：如果它说找不到文件，
+  那是路径映射的问题，不是"卡本身不行"——记下来，这需要另一张单子去改桥接层。
+- **性能不是真机结论**：虚拟机/WSL 上的耗时不能当作画像机（16GB 无独显）的体感。
+- **`bash -lc '……'` 那种写法别用**：作为 `CANTE_BIN` 它能起来，但应用的 `--version` / `catalog`
+  探测没法插到那段命令里（整串就是命令本身），首次检查会以为组件没装。用上面打印的那种简单写法。
+- **SSH 会话里看不到窗口**：从 SSH 起的 GUI 没有交互桌面，截图是空的。要看窗口必须走 **RDP**，
+  或把进程挂到已登录的会话上。
+
+### 这条路什么时候算"验收过"
+
+一份能让别人复核的最小证据：`ante --version` 的输出、应用里那张"准备好了"的截图（或供应商列表）、
+**一张卡的结果文件**（含文件路径和内容），以及跑这一轮的 `CANTE_BIN` 原文。缺哪一样都算没跑。

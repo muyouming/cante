@@ -515,27 +515,51 @@ pub fn update_session_op(
 // Child process plumbing
 // ---------------------------------------------------------------------------
 
-/// Split a `CANTE_BIN` spec into the program and any leading arguments.
+/// The daemon's own subcommand.
+///
+/// `CANTE_BIN` is allowed to spell it out — AGENTS.md §6 tells Windows users to
+/// write `wsl.exe -e /home/<user>/cante-bin/ante serve` — so the callers below
+/// have to recognize it instead of appending a second copy. `ante serve serve`
+/// fails, and the failure reads like "the setting did not take effect" rather
+/// than "the spec is misspelled".
+const SERVE_SUBCOMMAND: &str = "serve";
+
+/// Split a `CANTE_BIN` spec into the program and the arguments that follow it.
 ///
 /// The spec may carry arguments so a script can stand in for `cante` on hosts
 /// without shebang handling — Windows cannot execute `fake-cante.ts` directly,
-/// so tests point `CANTE_BIN` at `"bun <script>"` there. Tokens may be
-/// double-quoted, because a Windows path may contain spaces. The daemon's own
-/// subcommand is appended after these arguments, so the child always sees
-/// `… serve` exactly like the real binary would.
+/// so tests point `CANTE_BIN` at `"bun <script>"` there. Tokens may be quoted
+/// with either quote style, because a Windows path may contain spaces and a WSL
+/// bridge may carry a shell command line:
+///
+/// - `"C:\Program Files\cante\cante.exe" serve`
+/// - `wsl.exe -d Ubuntu -e bash -lc 'cd /home/x && ./ante serve'`
+///
+/// Whitespace inside quotes is literal, so `&&` and friends stay inside one
+/// argument instead of being shredded into several (which would make `-lc` run
+/// `cd` and then a separate `./ante`). An unbalanced quote is tolerated — the
+/// rest of the spec is taken literally — and an empty quoted token (`''`) is
+/// dropped, because an empty program argument is never what a spec means.
+///
+/// This split is purely lexical: what a trailing `serve` means is decided by
+/// [`serve_argv`] / [`helper_argv`], not here.
 pub fn split_binary(spec: &str) -> (String, Vec<String>) {
     let mut parts: Vec<String> = Vec::new();
     let mut current = String::new();
-    let mut quoted = false;
+    let mut quote: Option<char> = None;
     for ch in spec.trim().chars() {
-        match ch {
-            '"' => quoted = !quoted,
-            c if c.is_whitespace() && !quoted => {
-                if !current.is_empty() {
-                    parts.push(std::mem::take(&mut current));
+        match quote {
+            Some(open) if ch == open => quote = None,
+            Some(_) => current.push(ch),
+            None => match ch {
+                '"' | '\'' => quote = Some(ch),
+                c if c.is_whitespace() => {
+                    if !current.is_empty() {
+                        parts.push(std::mem::take(&mut current));
+                    }
                 }
-            }
-            c => current.push(c),
+                c => current.push(c),
+            },
         }
     }
     if !current.is_empty() {
@@ -544,6 +568,66 @@ pub fn split_binary(spec: &str) -> (String, Vec<String>) {
     let mut iter = parts.into_iter();
     let program = iter.next().unwrap_or_else(|| "cante".to_string());
     (program, iter.collect())
+}
+
+/// `program` plus the exact arguments to spawn the daemon with.
+///
+/// A spec that already names the subcommand keeps the one the user wrote instead
+/// of getting a second one: `wsl.exe -e /home/win11/cante-bin/ante serve` runs
+/// `ante serve`, not `ante serve serve`. A spec whose command line lives in a
+/// shell payload (`bash -lc '<the whole command>'`) is passed through
+/// untouched — the payload *is* the command line, and an extra `serve` would
+/// only land in bash's `$0`.
+pub fn serve_argv(spec: &str) -> (String, Vec<String>) {
+    let (program, mut args) = split_binary(spec);
+    if !names_serve(&args) {
+        args.push(SERVE_SUBCOMMAND.to_string());
+    }
+    (program, args)
+}
+
+/// `program` plus the arguments for one of the daemon's *other* subcommands
+/// (`--version`, `catalog`).
+///
+/// Those are not accepted after `serve` (`ante serve --version` is not a
+/// thing), so a `serve` the spec names is dropped and `extra` takes its place:
+/// `wsl.exe -e /home/win11/cante-bin/ante serve` + `--version` runs
+/// `wsl.exe -e /home/win11/cante-bin/ante --version`. A spec without `serve`
+/// (the fixture's `bun <script>`) is unchanged.
+///
+/// This is what makes the WSL bridge shippable at all: `health` needs a version
+/// before the app considers itself ready (otherwise it says the engine is not
+/// installed) and `catalog` feeds the provider list, so both have to reach the
+/// binary *in front of* its subcommand.
+///
+/// A spec whose command line lives in a shell payload cannot be probed this
+/// way — the payload would start the daemon instead. Use the plain form
+/// (`wsl.exe -e /home/<user>/cante-bin/ante serve`) for anything the app has to
+/// probe.
+pub fn helper_argv(spec: &str, extra: &[&str]) -> (String, Vec<String>) {
+    let (program, mut args) = split_binary(spec);
+    if args.last().map(String::as_str) == Some(SERVE_SUBCOMMAND) {
+        args.pop();
+    }
+    args.extend(extra.iter().map(|arg| arg.to_string()));
+    (program, args)
+}
+
+/// Whether these arguments already name the daemon subcommand — as its own
+/// token (`… ante serve`) or inside the shell payload of a `-c`-style flag
+/// (`… bash -lc 'cd /home/x && ./ante serve'`), which takes the whole command
+/// line as one argument.
+fn names_serve(args: &[String]) -> bool {
+    let Some(last) = args.last() else { return false };
+    if last == SERVE_SUBCOMMAND {
+        return true;
+    }
+    let is_payload =
+        args.len() >= 2 && matches!(args[args.len() - 2].as_str(), "-c" | "-lc" | "--command");
+    match last.strip_suffix(SERVE_SUBCOMMAND) {
+        Some(head) => is_payload && (head.is_empty() || head.ends_with([' ', ';', '&', '|'])),
+        None => false,
+    }
 }
 
 /// Windows: `cante.exe` is a console program, so spawning it from a GUI process
@@ -561,8 +645,7 @@ fn hide_console(command: &mut Command) {
 fn hide_console(_command: &mut Command) {}
 
 fn spawn_child(bin: &str, cwd: &Path) -> Result<Child, String> {
-    let (program, mut args) = split_binary(bin);
-    args.push("serve".to_string());
+    let (program, args) = serve_argv(bin);
     let mut command = Command::new(&program);
     command
         .args(&args)
@@ -571,9 +654,11 @@ fn spawn_child(bin: &str, cwd: &Path) -> Result<Child, String> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     hide_console(&mut command);
-    command
-        .spawn()
-        .map_err(|error| format!("could not start `{bin} serve`: {error}"))
+    let line = std::iter::once(program.as_str())
+        .chain(args.iter().map(String::as_str))
+        .collect::<Vec<_>>()
+        .join(" ");
+    command.spawn().map_err(|error| format!("could not start `{line}`: {error}"))
 }
 
 fn stdout_loop(stdout: ChildStdout, inner: Arc<Mutex<Inner>>, emitter: Arc<dyn Emitter>) {
@@ -709,11 +794,10 @@ fn run_capture(
     cwd: &Path,
     timeout: Duration,
 ) -> Result<(String, String), String> {
-    let (program, leading) = split_binary(bin);
+    let (program, leading) = helper_argv(bin, args);
     let mut command = Command::new(&program);
     command
         .args(&leading)
-        .args(args)
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
