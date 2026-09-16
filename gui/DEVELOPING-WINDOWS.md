@@ -92,3 +92,29 @@ Apple Silicon 只能虚拟化**同架构**的客户机，所以跑的是 **Windo
 4. **机器信息**（Windows 版本、内存、是虚拟机还是真机——虚拟机上的性能问题不等于真机问题）。
 
 我会把它落成 issue，按"能不能看懂 / 会不会弄坏她的东西 / 是不是白等"三条产品律排优先级。
+
+## 第一次真机验收记录（2026-09，Windows 11）
+
+**完整报告：[WINDOWS-ACCEPTANCE-1.md](./WINDOWS-ACCEPTANCE-1.md)**（那份文档里每句结论都有命令或原始输出；
+可复跑的取证脚本在 `scripts/windows/`）。这里只留结论：
+
+- 机器：`HOMEWIN`，Windows 11 Home 25H2 / build 26200.9457 / x64 / 39.65GB 内存；WebView2 `153.0.4234.32` 已装。
+  验的是 SSH 会话（**没有交互桌面**），所以上面那份 8 条清单里的需要人眼看的部分**全部没走**。
+- 受测产物是 Release `gui-v0.1.0-rc1`，而它指向的提交 **比"简单模式成为唯一界面"早一个集成轮次**——
+  所以这份安装包打开的是**英文的旧开发者界面**，不是王姐的中文简单模式。
+- 装得上、打得开、**WebView2 真的起来了**（`cante-gui.exe` 拉起 `msedgewebview2.exe`，窗口 1193x796，
+  `Responding = True`），普通用户静默安装退出码 0，Defender 全程没报威胁。
+- **但什么活都干不了**：NSIS 与 MSI 里各自只有 `cante-gui.exe` + `uninstall.exe`——
+  没有守护进程，也没有 `cante-sheets` / `cante-pdf`。
+  （`tauri.conf.json` 的 `bundle.resources` 在 Windows 上少了 `.exe`，两个工具进不了包。）
+  窗口状态栏上写着 `could not start \`cante serve\`: program not found`——英文原文直接端给用户。
+- **没验证的（重要）**：真实双击的 SmartScreen 第一印象（命令行下载的文件没有 Mark of the Web，
+  SmartScreen 在物理上不会触发）、窗口观感/字体/中文排版、**控制台黑窗**（连 `cante serve` 都没起来，
+  这条路径根本没被触发，所以这次对它是零信息）、中文路径全流程、WPS/微信/输入法、
+  Rust 侧与打包（这台机器没有 `cargo`，`scripts/e2e.sh` 断在第 6 步）。
+- 顺手测到的好消息：**Windows 上前端门禁全绿**——`bun test src` 542 通过 0 失败、
+  `bunx tsc --noEmit` 干净、`bun run build:web` 成功；只有需要 `cargo` 的那一步断掉。
+- 两个留给下一轮修的工具坑：`scripts/dom-smoke.sh` 在 Windows 上跑不动（写死 `python3`、
+  中文输出撞 cp1252、`CHROME` 默认是 macOS 路径）；`scripts/windows/*.ps1` 必须存成 **UTF-8 with BOM**，
+  否则 Windows PowerShell 5.1 按 GBK 解析，中文直接报语法错。
+- 下一步最要紧的一条：**给一个从当前 main 打出来的 Windows 包**，否则后面所有体验类结论都在测旧产品。
