@@ -297,3 +297,19 @@ fn upsert_refuses_a_record_without_an_id() {
     let error = upsert_run(temp.path(), json!({ "taskTitle": "没有编号" })).unwrap_err();
     assert!(error.contains("编号"));
 }
+
+#[test]
+fn paths_are_reported_with_forward_slashes() {
+    // Windows is the majority platform, and its APIs accept both separators, so
+    // every path the product shows or stores is spelled with `/`.
+    let temp = TempDir::new("slashes");
+    let folder = temp.path().join("work");
+    write(&folder.join("nested/deep.txt"), "x");
+    let (entries, _) = scan_roots(std::slice::from_ref(&folder), 100);
+    let paths: Vec<&str> = entries.iter().map(|entry| entry.path.as_str()).collect();
+    assert!(
+        paths.iter().all(|path| !path.contains('\\')),
+        "every path uses `/`: {paths:?}"
+    );
+    assert!(paths.iter().any(|path| path.ends_with("nested/deep.txt")), "{paths:?}");
+}

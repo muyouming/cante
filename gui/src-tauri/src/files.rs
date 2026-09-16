@@ -390,8 +390,15 @@ pub fn undo_files(
 // Run-log persistence
 // ---------------------------------------------------------------------------
 
+/// A path as the rest of the product spells it: `/` separated.
+///
+/// Windows is the majority platform here, and Windows APIs accept both
+/// separators, so normalising costs nothing and buys one canonical spelling for
+/// every consumer — the confirmation list, the prompt we hand the assistant,
+/// the run log, and the before/after diff keys. Without it the same file is
+/// `nested\\deep.txt` in the snapshot and `nested/deep.txt` everywhere else.
 fn display(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
+    path.to_string_lossy().replace('\\', "/")
 }
 
 fn sanitize_id(id: &str) -> String {
