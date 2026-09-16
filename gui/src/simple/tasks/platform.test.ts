@@ -18,9 +18,12 @@
 // 为什么这个东西在目标电脑上一定可用；已经不再命中的白名单会被要求删掉。
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
-const TASKS_DIR = dirname(new URL(import.meta.url).pathname);
+// `import.meta.dir`（Bun 提供）在 Windows 上给的是 `D:\a\...`；而
+// `new URL(import.meta.url).pathname` 会给成 `/D:/a/...`，后者在 Windows 上
+// scandir 直接 ENOENT —— 跨平台守卫自己先踩了一次跨平台路径的坑（Windows CI 抓到的）。
+const TASKS_DIR = import.meta.dir;
 
 // 目录必须先加载：卡片模块是从 index.ts 反向 import 出来的（这个 worktree 还
 // 没做「只依赖叶子模块」那轮整理），先 import 单张卡会把循环导入引到半初始化
