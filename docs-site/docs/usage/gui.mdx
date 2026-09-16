@@ -42,7 +42,8 @@ The task catalogue is grouped the way the work is, not the way the technology is
 
 | Group | Tasks |
 | --- | --- |
-| 表格 | Merge several sheets into one and remove duplicates · pick the rows you want out of a big sheet · split one column into two · group totals and a chart for the monthly report · tidy formats and compare two lists |
+| 表格 | Merge several sheets into one and remove duplicates · pick the rows you want out of a big sheet · split one column into two · group totals and a chart for the monthly report · tidy formats and compare two lists · turn a folder of invoice PDFs into a ledger · find duplicate invoices · merge tables by person (attendance, rosters) · list what changed between two versions of a table · list what is about to expire |
+| 核对 | Check a sheet's totals against its detail and list what does not add up · reconcile two sheets into three buckets (only in one, only in the other, in both but different) with the row each line came from |
 | 文件 | Batch rename, file by type, find duplicate files · file a folder's contents into month subfolders · merge, split or convert PDFs |
 | 微信 | Turn an exported chat log into a table · write reply drafts you send yourself |
 | 文书 | Notices, leave requests, weekly reports — pick a template, fill two or three blanks, adjust the tone · turn long documents into a one-page summary where every point names its source |
@@ -66,7 +67,7 @@ Tasks that need WeChat get their own screen, because that screen has a job: it e
 
 ## Spreadsheets in and out
 
-Excel files are what people actually have, so the app carries a small spreadsheet tool of its own (`cante-sheets`): it reads `.xlsx`, `.xls` and `.csv`, and writes real `.xlsx`. A second one handles PDFs (`cante-pdf`): page counts, merging, splitting, and text extraction that is honest about when it cannot be trusted. Its job is narrow and boring on purpose — keep what the cells meant. Dates stay dates, whole numbers do not sprout a trailing `.0`, a customer number like `00123` keeps its leading zeros, empty cells stay empty, and Chinese sheet names survive the round trip.
+Excel files are what people actually have, so the app carries a small spreadsheet tool of its own (`cante-sheets`): it reads `.xlsx`, `.xls` and `.csv`, and writes real `.xlsx`. A second one handles PDFs (`cante-pdf`): page counts, merging, splitting, and text extraction that is honest about when it cannot be trusted — including the case where the text is visibly on the page but the file carries no way to recover it, which is common for Chinese PDFs that came out of a print or export pipeline. Its job is narrow and boring on purpose — keep what the cells meant. Dates stay dates, whole numbers do not sprout a trailing `.0`, a customer number like `00123` keeps its leading zeros, empty cells stay empty, and Chinese sheet names survive the round trip.
 
 At the start of a session the app looks for that tool once; if it finds it, it tells the assistant where it is — in the same place it is told everything else about the job, never guessed. If it is missing, the confirmation sheet says so in the same breath as the plan, with the two honest choices: save the sheet as CSV first, or have a technical colleague install the tool once. What it never does is run for two minutes and then admit, at the end, that it could not write the file.
 

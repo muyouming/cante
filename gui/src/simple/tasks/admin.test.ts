@@ -109,11 +109,14 @@ describe("行政月度例事三张卡的目录形状（#85）", () => {
     }
   });
 
-  test("三张卡的 id 在本族里唯一，也不和已有的卡片撞", () => {
+  test("三张卡的 id 在本族里唯一，并且都真的进了目录（各一次）", () => {
     const ids = ADMIN_TASKS.map((item) => item.id);
     expect(new Set(ids).size).toBe(ids.length);
-    const existing = new Set(TASKS.map((item) => item.id));
-    for (const id of ids) expect(existing.has(id)).toBe(false);
+    // 接线由集成者负责：这三张卡必须出现在 `TASKS` 里，而且**只出现一次**
+    // （漏接线 → 用户看不到；重复接线 → 首页出现两张一样的卡）。
+    for (const id of ids) {
+      expect(TASKS.filter((item) => item.id === id)).toHaveLength(1);
+    }
   });
 
   test("风险都是具体可核对的一句话，不是空话", () => {

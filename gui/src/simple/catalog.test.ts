@@ -102,8 +102,17 @@ describe("按「想做的事」搜索", () => {
   });
 
   test("同分时保持目录原顺序（常用的在前）", () => {
+    // 期望值写死而不是从 TASKS 推导：这样"目录顺序变了"会被人看见并审一遍，
+    // 而不是悄悄跟着变。接龙/报名两张卡（#86）排在原来的三张之后，因为它们是
+    // "更专门的场景"，遇到「微信」这个词时，通用卡先出现更符合直觉。
     const results = ids(searchTasks("微信")).filter((id) => id.startsWith("wechat."));
-    expect(results).toEqual(["wechat.table", "wechat.draft", "wechat.batch"]);
+    expect(results).toEqual([
+      "wechat.table",
+      "wechat.draft",
+      "wechat.batch",
+      "wechat.rollcall",
+      "wechat.missing",
+    ]);
   });
 
   test("空搜索词（含纯空白）返回全部，顺序不变", () => {
