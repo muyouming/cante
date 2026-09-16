@@ -1042,3 +1042,75 @@ describe("goal", () => {
     dispose();
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe("replyToRun", () => {
+  const TASK = {
+    id: "excel.merge",
+    title: "把几张表合成一张",
+    plan: ["打开这几张表", "合成一张新表"],
+  };
+
+  /** Start a run, name step 2 so the cursor moves, and let the turn finish. */
+  async function stoppedRun(store: Store): Promise<void> {
+    await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这两张表合成一张");
+    await store.confirmRun();
+    emit("event", event("AgentMessage", "第 2 步：开始合成"));
+    emit("event", event("TurnEnd", { status: "Completed", steps: 2 }));
+    await Bun.sleep(20);
+  }
+
+  test("does nothing when there is no run", async () => {
+    const { store, dispose } = await setup();
+    await store.replyToRun("金额（元）就是金额");
+    expect(opCalls("send_input")).toEqual([]);
+    expect(opCalls("begin_run")).toEqual([]);
+    dispose();
+  });
+
+  test("blank text sends nothing", async () => {
+    const { store, dispose } = await setup();
+    await stoppedRun(store);
+    const before = opCalls("send_input").length;
+    await store.replyToRun("   \n  ");
+    expect(opCalls("send_input").length).toBe(before);
+    expect(store.currentRun()?.state).toBe("done");
+    dispose();
+  });
+
+  test("a stopped run resumes, clears the old result, and keeps the progress cursor", async () => {
+    const { store, dispose } = await setup();
+    await stoppedRun(store);
+    expect(store.currentRun()?.state).toBe("done");
+    expect(store.currentRun()?.result).not.toBeNull();
+
+    await store.replyToRun("金额（元）就是金额");
+
+    const run = store.currentRun();
+    expect(run?.state).toBe("running");
+    expect(run?.result).toBeNull();
+    expect(run?.error).toBeNull();
+    // The original sentence stays clean; the reply is a separate turn.
+    expect(run?.instruction).toBe("把这两张表合成一张");
+    const sent = opCalls("send_input");
+    expect(sent[sent.length - 1]).toEqual({ text: "金额（元）就是金额", mode: "prompt" });
+    // The cursor only moves forward: step 1 was already done when it asked.
+    const steps = store.progress().steps;
+    expect(steps[0]?.state).toBe("done");
+    expect(steps[1]?.state).toBe("active");
+    dispose();
+  });
+
+  test("a running run does not send a second instruction", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/a.xlsx"], "把这两张表合成一张");
+    await store.confirmRun();
+    expect(store.currentRun()?.state).toBe("running");
+    const before = opCalls("send_input").length;
+    await store.replyToRun("金额（元）就是金额");
+    expect(opCalls("send_input").length).toBe(before);
+    expect(store.currentRun()?.state).toBe("running");
+    dispose();
+  });
+});

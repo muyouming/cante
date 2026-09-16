@@ -11,8 +11,9 @@
 import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
-import { TRUST } from "./copy.ts";
-import { checkNoteFromRows } from "./evidence.ts";
+import { FOLLOWUP, TRUST } from "./copy.ts";
+import { checkNoteFromRows, lastAgentText } from "./evidence.ts";
+import { endedWithQuestion } from "./followup.ts";
 import { fileName, folderName, onlineHint, onlineLabel } from "./run.ts";
 import type { TaskRun } from "./tasks/index.ts";
 import type { Store } from "../store.ts";
@@ -31,6 +32,8 @@ const STATE_TITLE: Record<string, string> = {
 
 export default function ResultCard(props: ResultCardProps): JSX.Element {
   const [showDetail, setShowDetail] = createSignal(false);
+  const [reply, setReply] = createSignal("");
+  const [sending, setSending] = createSignal(false);
   const run = () => props.run ?? props.store.currentRun();
   const state = () => run()?.state ?? "done";
   const show = () => state() === "done" || state() === "failed" || state() === "cancelled";
@@ -43,6 +46,24 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
   // #63 — the assistant's own 【需要你核对】 paragraph for THIS run. Absent unless
   // it actually wrote one, so the card never shows a canned warning.
   const checkNote = () => checkNoteFromRows(props.store.rows());
+  // r7 — sometimes the assistant stops with a question instead of a result. The
+  // turn's last words and its result-file count say whether this is one of
+  // those endings, and the answer box below is where she gets to reply.
+  const lastText = () => lastAgentText(props.store.rows()) ?? "";
+  const producedFiles = () => run()?.result?.files.length ?? 0;
+  const asking = () => show() && endedWithQuestion(lastText(), producedFiles());
+
+  async function sendReply(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed || sending()) return;
+    setSending(true);
+    setReply("");
+    try {
+      await props.store.replyToRun(trimmed);
+    } finally {
+      setSending(false);
+    }
+  }
 
   async function rerun(): Promise<void> {
     const current = run();
@@ -131,6 +152,57 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
               {checkNote()}
             </p>
           </div>
+        </Show>
+
+        {/* r7 — the assistant stopped on a question. Without this box she has
+            nowhere to answer, so the job dead-ends right here. */}
+        <Show when={asking()}>
+          <section class="rounded-2xl border-2 border-sky-600 bg-sky-950/40 px-4 py-4">
+            <p class="text-base font-bold text-sky-100">{FOLLOWUP.title}</p>
+            <p class="mt-1 text-[16px] leading-relaxed text-sky-100/90">{FOLLOWUP.hint}</p>
+            <label class="mt-3 block text-[16px] font-medium text-slate-200" for="run-reply">
+              {FOLLOWUP.inputLabel}
+            </label>
+            <textarea
+              id="run-reply"
+              rows={3}
+              class="mt-2 min-h-[96px] w-full resize-y rounded-xl border border-slate-600 bg-slate-900/70 px-3 py-2 text-[16px] leading-relaxed text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+              placeholder={FOLLOWUP.placeholder}
+              value={reply()}
+              disabled={sending()}
+              onInput={(event) => setReply(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                // Enter sends; Shift+Enter keeps the newline for a longer answer.
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void sendReply(reply());
+                }
+              }}
+            />
+            <div class="mt-3 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                disabled={reply().trim().length === 0 || sending()}
+                onClick={() => void sendReply(reply())}
+                class="min-h-[48px] rounded-xl bg-sky-500 px-8 text-[16px] font-bold text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+              >
+                {FOLLOWUP.send}
+              </button>
+              <span class="text-[14px] text-slate-400">{FOLLOWUP.enterHint}</span>
+            </div>
+            {/* The exit: she does not have to answer. One tap says "you decide". */}
+            <div class="mt-4 border-t border-slate-700 pt-3">
+              <button
+                type="button"
+                disabled={sending()}
+                onClick={() => void sendReply(FOLLOWUP.letItDecideText)}
+                class="min-h-[48px] rounded-xl border border-slate-600 px-6 text-[16px] font-semibold text-slate-200 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {FOLLOWUP.letItDecide}
+              </button>
+              <p class="mt-1 text-[14px] text-slate-400">{FOLLOWUP.letItDecideHint}</p>
+            </div>
+          </section>
         </Show>
 
         <Show when={files().length > 0}>
