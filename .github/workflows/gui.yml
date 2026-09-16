@@ -79,3 +79,44 @@ jobs:
       # `CANTE_BIN="bun <script>"` because Windows has no shebang handling.
       - name: Run the app's e2e gate
         run: bash gui/scripts/e2e.sh
+
+      # --- The one thing this job never did: open the window ------------------
+      #
+      # Everything above compiles and unit-tests on Windows without ever showing
+      # a window, and `scripts/dom-smoke.sh` (macOS only) renders the frontend in
+      # Chrome. Neither says anything about WebView2, which is the runtime the
+      # product actually ships into. These steps build the app without bundling
+      # and drive the real window through `tauri-driver` + Edge WebDriver.
+      #
+      # Deliberately NOT part of `scripts/e2e.sh`: that script is also the local
+      # macOS gate, and macOS has no native WebDriver for WKWebView. See
+      # gui/e2e-windows/ and the section in gui/README.md.
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      # Edge and the WebView2 runtime are upgraded together with the runner
+      # image, so the driver version is resolved at run time: a pinned one stops
+      # matching, and the failure mode is a *hung* session rather than an error.
+      # The step prints the three versions it saw. `tauri-driver` finds
+      # `msedgedriver.exe` through the PATH this step exports.
+      - name: Install the matching msedgedriver
+        run: bash gui/e2e-windows/install-msedgedriver.sh
+
+      - name: Build the app for the smoke test (debug, no bundle)
+        working-directory: gui
+        run: bunx tauri build --debug --no-bundle
+
+      - name: UI smoke test (real WebView2 window)
+        working-directory: gui
+        run: bun run e2e:windows
+
+      # On failure this is the diagnosis: a screenshot, the rendered text and the
+      # page HTML, next to the tauri-driver log in the step output.
+      - name: Upload the UI smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-ui-smoke
+          path: gui/e2e-windows/artifacts/**
+          if-no-files-found: ignore
+          retention-days: 7
