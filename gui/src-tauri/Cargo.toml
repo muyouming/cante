@@ -18,6 +18,15 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Spreadsheet read/write for simple mode's flagship job (issue #75). Reading
+# uses calamine (xlsx/xls/ods/...), writing uses rust_xlsxwriter; both are pure
+# Rust, so the shipped `cante-sheets` helper needs no interpreter or Office.
+calamine = "0.36"
+rust_xlsxwriter = "0.99"
+
+[[bin]]
+name = "cante-sheets"
+path = "src/bin/cante-sheets.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
