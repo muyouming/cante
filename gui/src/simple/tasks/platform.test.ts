@@ -17,6 +17,10 @@
 // 白名单默认是空的。确实必须留一条时，在 ALLOW 里写 file/term/why，why 要说明
 // 为什么这个东西在目标电脑上一定可用；已经不再命中的白名单会被要求删掉。
 import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+
+const TASKS_DIR = dirname(new URL(import.meta.url).pathname);
 
 // 目录必须先加载：卡片模块是从 index.ts 反向 import 出来的（这个 worktree 还
 // 没做「只依赖叶子模块」那轮整理），先 import 单张卡会把循环导入引到半初始化
@@ -32,6 +36,8 @@ import { SUMMARY_TASKS } from "./summary.ts";
 import { CHECK_TASKS } from "./check.ts";
 import { INVOICE_TASKS } from "./invoice.ts";
 import { ADMIN_TASKS } from "./admin.ts";
+import { RESEARCH_TASKS } from "./research.ts";
+import { VISION_TASKS } from "./vision.ts";
 import { WECHAT_ALL_TASKS } from "./wechat.ts";
 import {
   CHECK_NOTE_BLOCK,
@@ -251,6 +257,8 @@ const MODULES: readonly { file: string; tasks: readonly TaskDef[] }[] = [
   { file: "check.ts", tasks: CHECK_TASKS },
   { file: "invoice.ts", tasks: INVOICE_TASKS },
   { file: "admin.ts", tasks: ADMIN_TASKS },
+  { file: "vision.ts", tasks: VISION_TASKS },
+  { file: "research.ts", tasks: RESEARCH_TASKS },
   { file: "wechat.ts", tasks: WECHAT_ALL_TASKS },
 ];
 
@@ -389,8 +397,24 @@ describe("跨平台守卫（Windows 优先）", () => {
   test("目录里每一张卡都在守卫的清单里（加新卡要来这里登记文件）", () => {
     const registered = MODULES.flatMap((module) => module.tasks.map((task) => task.id));
     expect(new Set(registered).size).toBe(registered.length);
-    // 集合相等即可：顺序由 index.ts 决定，这里只保证没有漏登记的卡。
-    expect([...new Set(registered)].sort()).toEqual(TASKS.map((task) => task.id).sort());
+
+    // 没登记的卡要**指名文件**：从 tasks/ 目录里自动找出"导出了 *_TASKS 的文件"，
+    // 跟已登记的文件名比一比，这样失败信息直接告诉你该把哪一行加进 MODULES。
+    const registeredFiles = new Set(MODULES.map((module) => module.file));
+    const declaringFiles = readdirSync(TASKS_DIR)
+      .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
+      // index.ts 是 barrel（它只是把各族的数组拼成 TASKS），types.ts 只有类型。
+      .filter((name) => name !== "index.ts" && name !== "types.ts" && name !== "prompt.ts")
+      .filter((name) => /export const \w*_?TASKS\b/.test(readFileSync(join(TASKS_DIR, name), "utf8")));
+    const unregistered = declaringFiles.filter((name) => !registeredFiles.has(name));
+
+    const missing = TASKS.map((task) => task.id).filter((id) => !registered.includes(id));
+    expect(
+      { missing, unregistered },
+      `这些卡还没登记进本文件的 MODULES（没有登记的卡不会被跨平台守卫扫到）：\n` +
+        `  缺的卡：${missing.join("、") || "（无）"}\n` +
+        `  该登记的文件：${unregistered.join("、") || "（无）"}`,
+    ).toEqual({ missing: [], unregistered: [] });
   });
 
   test("任务卡与信封里没有只在一台电脑上成立的命令、路径或界面叫法", () => {

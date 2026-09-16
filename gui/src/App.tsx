@@ -178,7 +178,27 @@ function SimpleApp(props: SimpleAppProps): JSX.Element {
                     : <TaskSeam active={current()} onBack={exit} />
                 }
               >
-                <ErrorView error={failure()} onRetry={retry} onAlternative={exit} onBack={exit} />
+                {/* 恢复动作的接线（#r14）：能就地重试的就重试；凡是需要她"重新
+                    选文件 / 换个说法 / 另存到别处"的，都退回卡片那一步（那里才有
+                    文件选择器和输入框）。认不出来的动作一律当重试，不摆死按钮。 */}
+                <ErrorView
+                  error={failure()}
+                  onRetry={retry}
+                  onAlternative={exit}
+                  onBack={exit}
+                  context={{ needs: current().task?.needs }}
+                  onAction={(action) => {
+                    switch (action.kind) {
+                      case "pick-files":
+                      case "explain-in-words":
+                      case "save-elsewhere":
+                        exit();
+                        break;
+                      default:
+                        retry();
+                    }
+                  }}
+                />
               </Show>
             )}
           </Show>
