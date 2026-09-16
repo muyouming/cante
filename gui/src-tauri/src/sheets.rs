@@ -620,7 +620,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn money_written_with_two_decimals_stays_a_number() {
         // 财务表里的金额通常写成 `2040.00`。它必须是**数字**，否则她在 Excel 里
         // 一求和会得到 0 —— 而求和是她唯一熟练的操作。

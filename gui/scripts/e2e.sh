@@ -33,6 +33,12 @@ step "bun test src" bun test src
 step "bunx tsc --noEmit" bunx tsc --noEmit
 step "bun run build:web" bun run build:web
 step "bun test fixtures" bun test fixtures
-step "cargo test (src-tauri)" cargo test --manifest-path src-tauri/Cargo.toml
+# CI 把编译警告当错误（`build.warnings = deny`），而本机默认没有这个配置 —— 于是
+# "本地全绿、CI 红" 这类事故一定会发生（已经发生过一次：一个重复的 `#[test]`
+# 属性）。这里用 `-D warnings` 让本地的判据与 CI 对齐：rustc 的 lint 一律当错误。
+# 注意它只影响 rustc 的 lint，不影响依赖构建脚本打出的 cargo:warning（例如本机
+# 那套 Xcode 许可绕行脚本的提示），所以本机仍然跑得动。
+CARGO_WARNINGS_DENIED="${RUSTFLAGS:-} -D warnings"
+step "cargo test (src-tauri)" env RUSTFLAGS="$CARGO_WARNINGS_DENIED" cargo test --manifest-path src-tauri/Cargo.toml
 
 printf '\ne2e: OK (%d/%d steps passed)\n' "$current" "$total"
