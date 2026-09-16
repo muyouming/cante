@@ -6,6 +6,8 @@
 // 你可以怎么做. Keeping the strings in one module makes the whole surface
 // reviewable at a glance instead of hunting through JSX.
 
+import { DAEMON } from "./copy-daemon.ts";
+
 export const APP_NAME = "Cante";
 
 /** Shared controls; anything with the same meaning reads the same everywhere. */
@@ -173,6 +175,22 @@ interface ErrorRule {
 }
 
 /**
+ * #103 — 真正干活的那个组件没装上。daemon.rs 起进程失败时的包装一定是
+ * `could not start … serve: …`，这是任何别的失败都不会长成的样子，所以这一条可以
+ * 拿来判「缺组件」，而不只是「某个命令没找到」。
+ */
+const DAEMON_SPAWN = /could not start[^\n]{0,200}serve/i;
+
+/**
+ * 组件缺失的可核对特征：上面那条专用包装，加上 Windows / 命令解释器在找不到程序
+ * 时会说的原文。只认这些，不拿「找不到文件」瞎猜（那是另一种失败，出路也不一样）。
+ */
+const DAEMON_MISSING: RegExp = new RegExp(
+  `${DAEMON_SPAWN.source}|is not recognized as an internal or external command|不是内部或外部命令|command not found`,
+  "i",
+);
+
+/**
  * Ordered dictionary: the first rule that matches wins. Patterns lean on the
  * wording Rust, the daemon and the OS actually produce, plus a few Chinese
  * fragments in case a lower layer already localised the message.
@@ -182,6 +200,12 @@ const DICTIONARY: readonly ErrorRule[] = [
     test: /desktop bridge unavailable|bridge unavailable|__TAURI_INTERNALS__|not running inside tauri/i,
     what: ERRORS.bridgeWhat,
     how: ERRORS.bridgeHow,
+  },
+  // #103 — 组件缺失要排在「找不到文件」前面：它的原文里也带着 ENOENT。
+  {
+    test: DAEMON_MISSING,
+    what: DAEMON.what,
+    how: DAEMON.how,
   },
   {
     test: /permission denied|access is denied|operation not permitted|\bEACCES\b|\bEPERM\b|os error 1\b|os error 13\b|拒绝访问|没有权限|权限不足/i,
@@ -294,6 +318,12 @@ export function explainError(input: unknown): HumanError {
     const record = input as Record<string, unknown>;
     const what = typeof record.what === "string" ? record.what.trim() : "";
     if (what) {
+      // #103 — TaskRun.error 的 what/how 是兜底那两句（「这件事没有做完。」），
+      // 真正的原因只在 detail 里。若 detail 是我们自己起进程时给的专用包装，就用
+      // 「缺组件」同一句话替掉兜底说明，让出错界面和向导说的是同一件事。
+      // 只认 DAEMON_SPAWN（daemon.rs 独有），不拿宽泛的 command not found 去
+      // 覆盖任务自己的说明：那可能只是任务里某条命令没找到。
+      if (DAEMON_SPAWN.test(detail)) return { what: DAEMON.what, how: DAEMON.how, detail };
       const how = typeof record.how === "string" ? record.how.trim() : "";
       return { what, how: how || ERRORS.genericHow, detail };
     }

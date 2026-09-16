@@ -15,6 +15,7 @@
 // `context.needs` 说明这件事本来需要什么，用来挑合适的那个出口：要文件就给「重新
 // 选文件」，要文件夹就给「打开文件夹」，纯文字的就不硬塞一个选文件的按钮。
 import { RECOVERY } from "./copy-recovery.ts";
+import { DAEMON_RECOVERY } from "./copy-daemon.ts";
 
 export type RecoveryKind =
   | "retry"
@@ -61,6 +62,15 @@ export interface RecoveryCopy {
 /** 界面开在浏览器预览里，没连上桌面程序（App.tsx 就是这么报的）。 */
 const BRIDGE =
   /desktop bridge unavailable|bridge unavailable|__TAURI_INTERNALS__|not running inside tauri/i;
+
+/**
+ * #103 — 真正干活的那个组件没装上。底层起进程失败时给的原文（daemon.rs 的包装一定
+ * 是 `could not start … serve: …`），加 Windows 原生的「不是内部或外部命令」和
+ * command not found。只认这些可核对的特征，不拿「找不到文件」瞎猜：那是文件的问题，
+ * 出路是重新选文件，和这里不一样。
+ */
+const DAEMON_MISSING =
+  /could not start[^\n]{0,200}serve|is not recognized as an internal or external command|不是内部或外部命令|command not found/i;
 
 /** 文件被人挪走 / 删掉。 */
 const NOT_FOUND =
@@ -151,6 +161,10 @@ export function actionsFor(error: RecoveryError, context?: RecoveryContext): Rec
   if (BRIDGE.test(text)) {
     // 浏览器预览里点了一张卡：出路是先打开桌面程序，别的动作都谈不上。
     actions = [action("retry", RECOVERY.retryBridge)];
+  } else if (DAEMON_MISSING.test(text)) {
+    // 不是文件的问题：这台电脑缺一个必须的组件，她自己装不了。把可核对的事实
+    // 交给技术同事，而不是让她对着「找不到文件」一遍遍重选文件。
+    actions = [action("copy-detail", DAEMON_RECOVERY.installMissing)];
   } else if (UNSURE.test(text)) {
     // 它停下来问了一句，问题不在文件上。回一句话，而不是重跑。
     actions = [action("explain-in-words", RECOVERY.answerIt)];

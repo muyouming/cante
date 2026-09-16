@@ -72,6 +72,7 @@ pub fn run() {
             commands::catalog,
             commands::sheet_capability,
             commands::tool_capabilities,
+            commands::daemon_capability,
             commands::read_result_sheet,
             commands::set_cwd,
             commands::shutdown,

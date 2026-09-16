@@ -175,6 +175,162 @@ pub fn tool_capabilities() -> ToolCapabilities {
     }
 }
 
+// ---------------------------------------------------------------------------
+// 守护进程探测（#103）
+//
+// 上游 `cante` / `ante` 只有 macOS 与 Linux 构建，Windows 上没有原生守护进程；
+// 而界面用 `CANTE_BIN`（否则 PATH 里的 `cante`）去拉起它。结果是 Windows 用户装完
+// 安装包后界面能开、任务一个也跑不了，界面却什么都不说。这个探测就是让界面先问
+// 一句「这台电脑上到底有没有那个组件」，然后把答案如实说出来。
+// ---------------------------------------------------------------------------
+
+/// 守护进程的可执行文件名，和 `daemon.rs` 缺省用的名字一致。
+const DAEMON_BIN_NAME: &str = "cante";
+/// Windows 上的写法。探测时两个名字都认，所以在任何平台上都能单测这条。
+const DAEMON_BIN_NAME_EXE: &str = "cante.exe";
+
+/// 找不到守护进程时给用户看的一句话。前端会把它直接放到「检查电脑」那一屏。
+const DAEMON_UNAVAILABLE_WHY: &str = "这台电脑上还没有装好 Cante 需要的那个组件。";
+
+/// 真正干活的组件在不在、在哪里、不在时怎么跟用户说。序列化后直接给前端；
+/// `why` 和 `searched` 都是给用户（或她的技术同事）看的中文事实。
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct DaemonCapability {
+    pub available: bool,
+    pub path: Option<String>,
+    pub why: Option<String>,
+    /// 探测时实际看过哪些位置；可用时为空，不可用时用来给「复制详情」凑事实。
+    pub searched: Vec<String>,
+}
+
+/// 这台电脑上能不能找到真正干活的组件。
+///
+/// 解析顺序和 `daemon.rs` 拉起进程时走的同一条路：
+///
+/// 1. `CANTE_BIN` —— 一旦给了就是它，**不再往下找**（运行时不回退，这里也不回退，
+///    否则会报成可用而骗了用户）。它是一段命令（可能带参数，见 CONTRACT.md），所以
+///    先切出第一个词再看它是不是真实存在的程序；
+/// 2. 程序旁边（安装目录）；
+/// 3. `$HOME/.cante/bin/`；
+/// 4. `PATH` 里的每个目录。
+///
+/// 环境、常见目录、PATH 全部由参数传入，所以 `cargo test` 能逐条复盘；文件名同时
+/// 认 `cante` 与 `cante.exe`，Windows 的找法在别的平台上也能验证。
+pub fn resolve_daemon_bin(
+    env_bin: Option<&str>,
+    exe_dir: Option<&Path>,
+    home: Option<&Path>,
+    path_var: Option<&str>,
+) -> DaemonCapability {
+    if let Some(spec) = env_bin {
+        let spec = spec.trim();
+        if !spec.is_empty() {
+            let (program, _args) = crate::daemon::split_binary(spec);
+            return match locate_program(&program, path_var) {
+                Some(found) => daemon_available(&found),
+                None => daemon_unavailable(vec![spec.to_string()]),
+            };
+        }
+    }
+
+    let mut searched: Vec<String> = Vec::new();
+
+    if let Some(dir) = exe_dir {
+        searched.push(join_daemon(dir));
+        if let Some(found) = existing_daemon(dir) {
+            return daemon_available(&found);
+        }
+    }
+
+    if let Some(home) = home {
+        let dir = home.join(".cante").join("bin");
+        searched.push(join_daemon(&dir));
+        if let Some(found) = existing_daemon(&dir) {
+            return daemon_available(&found);
+        }
+    }
+
+    if let Some(raw_path) = path_var {
+        searched.push("系统里登记的每个文件夹".to_string());
+        for dir in std::env::split_paths(raw_path) {
+            if let Some(found) = existing_daemon(&dir) {
+                return daemon_available(&found);
+            }
+        }
+    }
+
+    daemon_unavailable(searched)
+}
+
+/// 按名字定位一个程序：带目录分隔的按它自己看，裸名字才去 PATH 里找。
+fn locate_program(program: &str, path_var: Option<&str>) -> Option<String> {
+    if program.contains('/') || program.contains('\\') {
+        return existing(PathBuf::from(program));
+    }
+    if let Some(found) = existing(PathBuf::from(program)) {
+        return Some(found);
+    }
+    if let Some(raw_path) = path_var {
+        for dir in std::env::split_paths(raw_path) {
+            if let Some(found) = existing_named(&dir, program) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+/// 在目录下找守护进程，`cante` 和 `cante.exe` 都认（Windows 上只有后者）。
+fn existing_daemon(dir: &Path) -> Option<String> {
+    existing(dir.join(DAEMON_BIN_NAME)).or_else(|| existing(dir.join(DAEMON_BIN_NAME_EXE)))
+}
+
+/// 在目录下找指定名字的程序；没有扩展名时补一个 `.exe` 再试一次（Windows）。
+fn existing_named(dir: &Path, name: &str) -> Option<String> {
+    if let Some(found) = existing(dir.join(name)) {
+        return Some(found);
+    }
+    if !name.ends_with(".exe") {
+        if let Some(found) = existing(dir.join(format!("{name}.exe"))) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn join_daemon(dir: &Path) -> String {
+    dir.join(DAEMON_BIN_NAME).to_string_lossy().into_owned()
+}
+
+fn daemon_available(path: &str) -> DaemonCapability {
+    DaemonCapability {
+        available: true,
+        path: Some(path.to_string()),
+        why: None,
+        searched: Vec::new(),
+    }
+}
+
+fn daemon_unavailable(searched: Vec<String>) -> DaemonCapability {
+    DaemonCapability {
+        available: false,
+        path: None,
+        why: Some(DAEMON_UNAVAILABLE_WHY.to_string()),
+        searched,
+    }
+}
+
+/// 这台电脑有没有真正干活的组件？向导的「检查电脑」和出错界面都靠它说实话。
+#[tauri::command]
+pub fn daemon_capability() -> DaemonCapability {
+    let env_bin = std::env::var("CANTE_BIN").ok();
+    let exe_dir =
+        std::env::current_exe().ok().and_then(|path| path.parent().map(Path::to_path_buf));
+    let home = home_dir();
+    let path_var = std::env::var("PATH").ok();
+    resolve_daemon_bin(env_bin.as_deref(), exe_dir.as_deref(), home.as_deref(), path_var.as_deref())
+}
+
 /// 读回一个结果表的内容，走的是应用自带的 `cante-sheets read`。
 ///
 /// `tool` 是前端从 `sheet_capability` / `tool_capabilities` 拿到的工具位置（和
@@ -607,5 +763,127 @@ mod tests {
             .expect_err("工具跑不起来必须报错");
         assert!(!error.is_empty());
         assert!(!error.contains("路径"), "黑名单词不能进用户文案：{error}");
+    }
+
+    // -----------------------------------------------------------------------
+    // 守护进程探测（#103）。
+    //
+    // 四类必须分别有答案：CANTE_BIN 给了且存在 / 给了但不存在 / 没给但 PATH 里
+    // 有 / 都没有；而且「都找不到」时要能用中文说清缺的是什么、找过哪里。
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn daemon_env_bin_found_is_available() {
+        let dir = TempDir::new("daemon-env");
+        let expected = place_named(&dir.0, DAEMON_BIN_NAME);
+        let cap = resolve_daemon_bin(Some(&expected), None, None, None);
+        assert!(cap.available);
+        assert_eq!(cap.path.as_deref(), Some(expected.as_str()));
+        assert!(cap.why.is_none());
+        assert!(cap.searched.is_empty(), "找到了就不用再说找过哪里");
+    }
+
+    #[test]
+    fn daemon_env_bin_with_arguments_is_resolved() {
+        // CANTE_BIN 是一段命令，不是单纯的路径：Windows 上会写成 `wsl.exe -e …`。
+        let dir = TempDir::new("daemon-args");
+        let program = place_named(&dir.0, DAEMON_BIN_NAME_EXE);
+        let spec = format!("\"{program}\" -e /home/wang/ante serve");
+        let cap = resolve_daemon_bin(Some(&spec), None, None, None);
+        assert!(cap.available);
+        assert_eq!(cap.path.as_deref(), Some(program.as_str()));
+    }
+
+    #[test]
+    fn daemon_env_bin_missing_is_unavailable() {
+        let cap = resolve_daemon_bin(Some("/definitely/not/here/cante"), None, None, None);
+        assert!(!cap.available);
+        assert!(cap.path.is_none());
+        let why = cap.why.expect("why");
+        assert!(why.contains("组件"), "要说缺的是组件：{why}");
+        assert!(why.contains("电脑"), "该是给人看的中文：{why}");
+        assert!(!why.contains("cante"), "不该把程序名端给用户：{why}");
+        assert_eq!(cap.searched, vec!["/definitely/not/here/cante".to_string()]);
+    }
+
+    #[test]
+    fn daemon_env_bin_does_not_fall_back_to_path() {
+        // 运行时不回退（CANTE_BIN 一旦给了就是它），探测也不能报成可用。
+        let dir = TempDir::new("daemon-no-fallback");
+        place_named(&dir.0, DAEMON_BIN_NAME);
+        let path_var = dir.0.to_string_lossy().into_owned();
+        let cap =
+            resolve_daemon_bin(Some("/definitely/not/here/cante"), None, None, Some(&path_var));
+        assert!(!cap.available);
+    }
+
+    #[test]
+    fn daemon_found_next_to_the_executable() {
+        let dir = TempDir::new("daemon-exe");
+        let expected = place_named(&dir.0, DAEMON_BIN_NAME);
+        let cap = resolve_daemon_bin(None, Some(&dir.0), None, None);
+        assert!(cap.available);
+        assert_eq!(cap.path.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn daemon_windows_name_is_found_too() {
+        // Windows 上只有 cante.exe；这段在任何平台上都跑得起来。
+        let dir = TempDir::new("daemon-exe-win");
+        let expected = place_named(&dir.0, DAEMON_BIN_NAME_EXE);
+        let cap = resolve_daemon_bin(None, Some(&dir.0), None, None);
+        assert!(cap.available);
+        assert_eq!(cap.path.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn daemon_found_on_path() {
+        let dir = TempDir::new("daemon-path");
+        let expected = place_named(&dir.0, DAEMON_BIN_NAME);
+        let path_var = dir.0.to_string_lossy().into_owned();
+        let cap = resolve_daemon_bin(None, None, None, Some(&path_var));
+        assert!(cap.available);
+        assert_eq!(cap.path.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn daemon_found_in_the_home_directory() {
+        let dir = TempDir::new("daemon-home");
+        let expected =
+            place_named(&dir.0.join("personal").join(".cante").join("bin"), DAEMON_BIN_NAME);
+        let cap = resolve_daemon_bin(None, None, Some(&dir.0.join("personal")), None);
+        assert!(cap.available);
+        assert_eq!(cap.path.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn daemon_nothing_found_says_so_in_chinese_and_lists_where() {
+        let dir = TempDir::new("daemon-none");
+        let path_var = dir.0.to_string_lossy().into_owned();
+        let cap = resolve_daemon_bin(None, Some(&dir.0), Some(&dir.0), Some(&path_var));
+        assert!(!cap.available);
+        assert!(cap.path.is_none());
+        let why = cap.why.expect("why");
+        assert!(why.contains("组件"), "why should name the component: {why}");
+        assert!(why.contains("电脑"), "why should be Chinese: {why}");
+        assert!(!why.contains("cante"), "不该把程序名端给用户：{why}");
+        // 找过哪里是可核对的事实：程序旁边、个人文件夹、系统登记的文件夹。
+        assert!(cap.searched.iter().any(|item| item.contains(".cante")), "{:?}", cap.searched);
+        assert!(
+            cap.searched.iter().any(|item| item.contains("系统")),
+            "{}\n{why}",
+            format!("{:?}", cap.searched)
+        );
+    }
+
+    #[test]
+    fn daemon_capability_command_shape_is_consistent() {
+        // 命令壳读的是真实进程环境，所以这里只钉住内部一致性，不钉具体值。
+        let cap = daemon_capability();
+        assert_eq!(cap.available, cap.path.is_some());
+        assert_eq!(cap.why.is_none(), cap.available);
+        if cap.available {
+            assert!(cap.searched.is_empty());
+        }
     }
 }
