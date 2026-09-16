@@ -150,3 +150,59 @@ spec, a daemon that exits mid-session, an empty model picker, the macOS Xcode
 licence and `.dmg` steps, unsigned bundles, and what the fixture does and does
 not simulate — lives in the guide:
 [Desktop GUI → Troubleshooting](https://docs.antigma.ai/usage/gui#troubleshooting).
+
+## Windows UI smoke test (real WebView2, Edge WebDriver)
+
+`scripts/dom-smoke.sh` renders the shell in Chrome on macOS — the fastest way to
+catch "the frontend painted nothing". It is not the runtime the product ships
+into. `e2e-windows/` closes that gap: it builds the app, starts `tauri-driver`
+and drives the **real window** (WebView2) with Microsoft's Edge WebDriver.
+
+It runs on Windows only, because only Windows and Linux have a native WebDriver
+for the webview; macOS has none. So it is a step in the Windows job of
+`.github/workflows/gui.yml`, deliberately **not** part of `scripts/e2e.sh`: that
+script is also the local macOS gate and has to keep running on a Mac.
+
+Run it locally on Windows (Node 18+ is used to drive WebDriver):
+
+```sh
+cd gui
+bun install
+cargo install tauri-driver --locked
+bash e2e-windows/install-msedgedriver.sh     # the driver matching your WebView2
+bunx tauri build --debug --no-bundle
+bun run e2e:windows
+```
+
+One Windows trap, because it cost a red CI run: WebView2 runtime 150+ ignores the
+`WEBVIEW2_*` environment variables when the host process is **elevated**, and
+`msedgedriver` passes the remote debugging port through exactly that variable.
+An elevated shell therefore gets `session not created: DevToolsActivePort file
+doesn't exist` after a 60-second wait. A normal developer shell is not elevated
+and needs nothing extra; the CI runner *is*, so that step re-launches the script
+at medium integrity with [gsudo](https://github.com/gerardog/gsudo) — the recipe
+the wry maintainers publish for GitHub Actions in
+[tauri-apps/wry#1782](https://github.com/tauri-apps/wry/issues/1782).
+
+What it asserts — the same first-run strings `dom-smoke.sh` pins, so the two
+gates cannot drift apart: the app name, the 历史 and 隐私 entries, the three
+wizard steps (欢迎 / 检查电脑 / 开始使用) and the no-touch promise
+「原文件我不会乱动」. Then, on a machine provisioned through
+`CANTE_ADMIN_CONFIG` (the documented enterprise path in
+`src-tauri/src/admin_config.rs`), it presses a real task card, types one
+sentence, presses 生成计划 and asserts the confirmation sheet («它打算这样做»).
+It stops there on purpose: the next step in the product opens a **native** file
+dialog, which WebDriver cannot drive, and faking it would test a different app.
+
+Where the results are: the rendered text of every screen is printed into the CI
+log, and `e2e-windows/artifacts/` gets `<screen>.txt`, `<screen>.html` and
+`<screen>.png`. CI uploads that directory as the `windows-ui-smoke` artifact on
+every run (7 days), so a red build arrives with a screenshot and the page text —
+enough to tell "it never rendered" from "the wording changed".
+
+msedgedriver must match the machine's WebView2 runtime, and GitHub's
+`windows-latest` image upgrades both with the image, so
+`e2e-windows/install-msedgedriver.sh` resolves the version at run time (the
+WebView2 runtime's registry `pv`, then Edge's, then the exact build or
+`LATEST_RELEASE_<major>`) and prints what it picked. Nothing here pins a
+version: a mismatch does not error, it makes the WebDriver session hang.
