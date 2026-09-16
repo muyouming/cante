@@ -120,8 +120,14 @@ jobs:
         run: |
           winget install --id gerardog.gsudo --exact --accept-source-agreements --accept-package-agreements --disable-interactivity
           icacls "$env:GITHUB_WORKSPACE" /grant "Everyone:(OI)(CI)F" | Out-Null
-          $gsudo = (Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet" -Recurse -Filter gsudo.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          # gsudo ships as an MSI, so it is not in this shell's PATH yet; look in
+          # the places the installer and winget put it.
+          $gsudo = (Get-Command gsudo -ErrorAction SilentlyContinue).Source
+          if (-not $gsudo) {
+            $gsudo = (Get-ChildItem "$env:ProgramFiles\gsudo", "$env:LOCALAPPDATA\Microsoft\WinGet" -Recurse -Filter gsudo.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
           if (-not $gsudo) { throw "gsudo was not found after winget install" }
+          Write-Host "==> gsudo: $gsudo"
           # Absolute paths: the script finds the binary, the driver and its own
           # artifact folder from its own location, so the cwd can be anything.
           & $gsudo --integrity Medium node "$env:GITHUB_WORKSPACE\gui\e2e-windows\smoke.mjs"
