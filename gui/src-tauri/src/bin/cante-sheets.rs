@@ -5,6 +5,8 @@
 //!
 //! * 成功退出码 0；用法错误或失败退出码 2。
 //! * 错误只写到 stderr；stdout 只放数据（CSV 不带 BOM），这样助手能直接拿去用。
+//! * `write` **只新建**文件，目标已经在了就报中文错误并退出 2，绝不覆盖原文件
+//!   （issue #95）。一次只写一张表。
 //!
 //! ```text
 //! cante-sheets sheets <file>
@@ -65,7 +67,7 @@ fn run(args: &[String]) -> Result<(), String> {
             let text = std::fs::read_to_string(input)
                 .map_err(|error| format!("读不了这个文件：{input}（{error}）"))?;
             let rows = sheets::csv_to_rows(&text);
-            let name = sheet.as_deref().unwrap_or("Sheet1");
+            let name = sheet.as_deref().unwrap_or(sheets::DEFAULT_SHEET_NAME);
             sheets::write_xlsx(Path::new(output), &rows, name)
                 .map_err(|error| error.to_string())?;
             Ok(())
@@ -98,7 +100,10 @@ fn usage() -> String {
         "  cante-sheets sheets <文件>",
         "  cante-sheets read <文件> [--sheet <表名>]",
         "  cante-sheets write <结果.xlsx> <数据.csv> [--sheet <表名>]",
-        "  cante-sheets --version",
+        "",
+        "注意：write 只在 <结果.xlsx> 还不存在时新建它；已经有同名文件就报错退出（2），",
+        "不会覆盖。请换一个新文件名再试。",
+        "cante-sheets --version",
     ]
     .join("\n")
 }

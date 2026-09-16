@@ -13,9 +13,13 @@
 //! 所有错误消息都是中文，读得懂，例如：
 //! `文件不存在：/tmp/x.xlsx`、`这个格式我读不了：x.pdf`、
 //! `这个文件像是坏了，读不开：/tmp/x.xlsx`。
+//!
+//! 写结果有一条硬规矩（issue #95）：[`write_xlsx`] 只**新建**文件，**绝不**覆盖
+//! 或改写已经存在的文件。目标已经在了就返回 [`SheetError::AlreadyExists`]（中文，
+//! 给出路），原文件一个字节都不动；一次只写一张表，所以新文件里也只有这一张表。
 
 use std::fmt;
-use std::io::BufReader;
+use std::io::{BufReader, Write as _};
 use std::path::Path;
 
 use calamine::{open_workbook_auto, Data, ExcelDateTime, Reader as _, Sheets};
@@ -29,8 +33,8 @@ const SUPPORTED_EXTENSIONS: &[&str] = &["xls", "xla", "xlsx", "xlsm", "xlam", "x
 /// OOXML/BIFF，读不了——因此单独给一条"怎么办"的话，而不是笼统地说读不了。
 const WPS_EXTENSIONS: &[&str] = &["et", "ett", "wps", "dps"];
 
-/// 没给表名时写进 xlsx 的默认表名。
-const DEFAULT_SHEET_NAME: &str = "Sheet1";
+/// 没给表名时写进 xlsx 的默认表名。命令行壳也用这个常量，免得两边各写一份。
+pub const DEFAULT_SHEET_NAME: &str = "Sheet1";
 
 /// 工作簿里有哪些表。保留这个结构体，是为了让调用方有一个明确的"表清单"类型。
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,6 +54,12 @@ pub enum SheetError {
     WpsFormat(String),
     /// 文件在，但打不开（坏了、加密了、表名对不上……）。
     Broken(String),
+    /// 目标文件已经存在。写结果只允许**新建**，绝不动已有的文件。
+    AlreadyExists(String),
+    /// 表名用不了（空的、太长、含 Excel 不允许的符号）。
+    BadSheetName(String),
+    /// 写的时候出的问题（目标是个文件夹、位置不可写……）。
+    WriteFailed(String),
 }
 
 impl fmt::Display for SheetError {
@@ -62,6 +72,19 @@ impl fmt::Display for SheetError {
                 "这是 WPS 表格自己的格式（不是 Excel 格式），我读不了：{path}。在 WPS 里打开它，点「另存为」选 Excel 文件（.xlsx），再把新文件交给我就行。"
             ),
             SheetError::Broken(what) => write!(f, "这个文件像是坏了，读不开：{what}"),
+            SheetError::AlreadyExists(path) => write!(
+                f,
+                "这个文件已经在了，我不敢覆盖它：{path}。换一个文件名再试，或者先把旧文件改名。"
+            ),
+            SheetError::BadSheetName(name) => {
+                let shown =
+                    if name.trim().is_empty() { "空的".to_string() } else { name.trim().to_string() };
+                write!(
+                    f,
+                    "这个表名用不了：「{shown}」。表名不能是空的、不能超过 31 个字，也不能带 \\ / ? * [ ] : 这些符号。换一个表名再试。"
+                )
+            }
+            SheetError::WriteFailed(what) => write!(f, "写不进去：{what}"),
         }
     }
 }
@@ -207,20 +230,39 @@ fn format_datetime(value: &ExcelDateTime) -> String {
 
 /// 把一行行文本写成一张 .xlsx 表。第一行按表头处理（只是原样写进去）。
 ///
+/// 契约（issue #95）：**只新建，绝不覆盖**。目标已经在了就返回
+/// [`SheetError::AlreadyExists`]（中文并给出路），原文件一个字节都不动。这条规则
+/// 不靠“先看看在不在”这种有缝的检查，而是用 `create_new` 原子地“只在不存在时
+/// 创建”：即便有人抢先建了同名文件，也只会写失败，不会盖掉别人的东西。
+///
+/// 一次只写一张表，新文件里也只有这一张表——不存在“往已有文件里追加一张表”或
+/// “悄悄把别的表删掉”这种模糊地带。
+///
 /// 看起来是普通数字的格子会写成数字（这样 Excel 里还能继续算），但带前导 0 的
 /// 文本（`00123`）写成文本，免得被 Excel 吃掉开头的 0。
 pub fn write_xlsx(path: &Path, rows: &[Vec<String>], sheet_name: &str) -> Result<(), SheetError> {
-    let trimmed = sheet_name.trim();
-    let name = if trimmed.is_empty() { DEFAULT_SHEET_NAME } else { trimmed };
+    let name = validate_sheet_name(sheet_name)?;
 
+    // 目标是个文件夹：这不是“要不要覆盖”的问题，是名字不对，说清楚。
+    if path.is_dir() {
+        return Err(SheetError::WriteFailed(format!(
+            "{}（这是一个文件夹，不是文件名，请换一个文件名再试）",
+            path.display()
+        )));
+    }
+    // 目标已经在了：立刻停手，连内容都不碰。真正的保险在下面的 `create_new`。
+    if path.exists() {
+        return Err(SheetError::AlreadyExists(path.display().to_string()));
+    }
+
+    // 先在内存里把整本建好，这样内容有问题时不会在盘上留下半个文件。
     // 日期格式只建一次：`yyyy-mm-dd` 与我们读出来的写法一致，往返稳定。
     let date_format = Format::new().set_num_format("yyyy-mm-dd");
     let mut workbook = Workbook::new();
     {
         let worksheet = workbook.add_worksheet();
-        worksheet.set_name(name).map_err(|error| {
-            SheetError::Broken(format!("{}（表名「{}」用不了：{}）", path.display(), name, error))
-        })?;
+        // 表名自己已经校验过；库要是还不同意，说明我们漏了，也要说人话。
+        worksheet.set_name(name).map_err(|_| SheetError::BadSheetName(name.to_string()))?;
 
         for (row_index, cells) in rows.iter().enumerate() {
             let row = row_index as u32;
@@ -231,30 +273,63 @@ pub fn write_xlsx(path: &Path, rows: &[Vec<String>], sheet_name: &str) -> Result
                 }
                 if let Some((year, month, day)) = iso_date_literal(cell) {
                     let value = XlsxDateTime::from_ymd(year as u16, month as u8, day as u8).map_err(|error| {
-                        SheetError::Broken(format!("{}（日期写不进去：{}）", path.display(), error))
+                        SheetError::WriteFailed(format!("{}（日期写不进去：{}）", path.display(), error))
                     })?;
                     worksheet
                         .write_datetime_with_format(row, column, &value, &date_format)
                         .map_err(|error| {
-                            SheetError::Broken(format!("{}（写不进去：{}）", path.display(), error))
+                            SheetError::WriteFailed(format!("{}（写不进去：{}）", path.display(), error))
                         })?;
                 } else if let Some(number) = number_literal(cell) {
                     worksheet.write_number(row, column, number).map_err(|error| {
-                        SheetError::Broken(format!("{}（写不进去：{}）", path.display(), error))
+                        SheetError::WriteFailed(format!("{}（写不进去：{}）", path.display(), error))
                     })?;
                 } else {
                     worksheet.write_string(row, column, cell).map_err(|error| {
-                        SheetError::Broken(format!("{}（写不进去：{}）", path.display(), error))
+                        SheetError::WriteFailed(format!("{}（写不进去：{}）", path.display(), error))
                     })?;
                 }
             }
         }
     }
-
-    workbook.save(path).map_err(|error| {
-        SheetError::Broken(format!("{}（写不进去：{}）", path.display(), error))
+    let bytes = workbook.save_to_buffer().map_err(|error| {
+        SheetError::WriteFailed(format!("{}（写不进去：{}）", path.display(), error))
     })?;
+
+    // `create_new(true)`：只有文件**不存在**时才创建；已经存在（哪怕是一瞬间前
+    // 刚被别人建出来）就报 AlreadyExists，绝不截断、绝不覆盖。这就是“结果永不
+    // 覆盖原文件”落到系统调用上的样子。
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::AlreadyExists => {
+                SheetError::AlreadyExists(path.display().to_string())
+            }
+            _ => SheetError::WriteFailed(format!("{}（写不进去：{}）", path.display(), error)),
+        })?;
+    if let Err(error) = file.write_all(&bytes) {
+        // 刚建出来的新文件没写全：删掉，不留一个打不开的空壳。
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(SheetError::WriteFailed(format!("{}（写不进去：{}）", path.display(), error)));
+    }
     Ok(())
+}
+
+/// Excel 对表名的限制：不能是空的、最多 31 个字、不能含 `* ? : [ ] \ /`，也不能
+/// 以单引号开头或结尾。这些规则与写文件的库完全一致；自己先校验一遍，是为了把
+/// 英文报错换成人看得懂的中文，而不是把库的内部说法端给她。
+fn validate_sheet_name(raw: &str) -> Result<&str, SheetError> {
+    let name = raw.trim();
+    let too_long = name.chars().count() > 31;
+    let bad_characters = name.contains(['*', '?', ':', '[', ']', '\\', '/']);
+    let apostrophe = name.starts_with('\'') || name.ends_with('\'');
+    if name.is_empty() || too_long || bad_characters || apostrophe {
+        return Err(SheetError::BadSheetName(name.to_string()));
+    }
+    Ok(name)
 }
 
 /// 如果这个字符串是"普通数字"，返回它的数值；否则返回 `None`（按文本写）。
@@ -498,6 +573,94 @@ mod tests {
         assert_eq!(read_back[1][2], "800.5");
         // 空单元格是空字符串。
         assert_eq!(read_back[2][1], "");
+    }
+
+    #[test]
+    fn write_refuses_to_touch_an_existing_file() {
+        let dir = TempDir::new("no-overwrite");
+        let path = dir.join("已经在了.xlsx");
+        let original = rows(&[&["姓名"], &["张三"]]);
+        write_xlsx(&path, &original, "第一张").expect("write once");
+        let before = fs::read(&path).expect("read bytes");
+
+        let error = write_xlsx(&path, &rows(&[&["李四"]]), "第二张").expect_err("必须拒绝");
+        assert!(matches!(error, SheetError::AlreadyExists(_)), "{error:?}");
+        let message = error.to_string();
+        assert!(message.contains("我不敢覆盖它"), "{message}");
+        assert!(message.contains("换一个文件名"), "要给出路：{message}");
+        assert!(message.contains(path.to_str().unwrap()), "要说清是哪个文件：{message}");
+        // 用户文案里不能出现黑名单词（例如“路径”）。
+        assert!(!message.contains("路径"), "黑名单词不能进用户文案：{message}");
+
+        // 原文件一个字节都没变，表也还是原来那张。
+        assert_eq!(fs::read(&path).expect("read bytes again"), before);
+        assert_eq!(describe(&path).expect("describe"), vec!["第一张".to_string()]);
+        assert_eq!(read_sheet(&path, None).expect("read"), original);
+    }
+
+    #[test]
+    fn write_refuses_even_when_the_existing_file_has_many_sheets() {
+        let dir = TempDir::new("multi-refuse");
+        let path = dir.join("多张表.xlsx");
+        let mut workbook = Workbook::new();
+        for name in ["销售一", "销售二", "备注"] {
+            let sheet = workbook.add_worksheet();
+            sheet.set_name(name).expect("name");
+            sheet.write_string(0, 0, name).expect("write");
+        }
+        workbook.save(&path).expect("save");
+        let before = fs::read(&path).expect("read bytes");
+
+        let error = write_xlsx(&path, &rows(&[&["合计"]]), "合计").expect_err("必须拒绝");
+        assert!(matches!(error, SheetError::AlreadyExists(_)), "{error:?}");
+
+        // 三张表一张都没少，字节也没动：不给“悄悄只剩一张表”留任何空间。
+        assert_eq!(describe(&path).expect("describe"), vec!["销售一", "销售二", "备注"]);
+        assert_eq!(fs::read(&path).expect("bytes"), before);
+    }
+
+    #[test]
+    fn write_to_a_new_path_makes_exactly_one_sheet() {
+        let dir = TempDir::new("one-sheet");
+        let path = dir.join("新结果.xlsx");
+        write_xlsx(&path, &rows(&[&["合计"], &["1200"]]), "合计").expect("write");
+        // 只写一张表：新文件里不会多出别的东西，也不会留下第二张空表。
+        assert_eq!(describe(&path).expect("describe"), vec!["合计".to_string()]);
+    }
+
+    #[test]
+    fn illegal_sheet_names_are_refused_in_chinese() {
+        let dir = TempDir::new("bad-name");
+        let names: Vec<String> = vec![
+            String::new(),
+            "   ".to_string(),
+            "a/b".to_string(),
+            "a:\\b".to_string(),
+            "a*b".to_string(),
+            "a?b".to_string(),
+            "a[b]".to_string(),
+            "'开头".to_string(),
+            "结尾'".to_string(),
+            "超".repeat(32),
+        ];
+        for (index, name) in names.iter().enumerate() {
+            let path = dir.join(&format!("坏表名-{index}.xlsx"));
+            let error = write_xlsx(&path, &rows(&[&["一"]]), name).expect_err("必须拒绝");
+            assert!(matches!(error, SheetError::BadSheetName(_)), "{name:?} -> {error:?}");
+            let message = error.to_string();
+            assert!(message.contains("表名用不了"), "{name:?} -> {message}");
+            assert!(!message.contains("路径"), "黑名单词不能进用户文案：{message}");
+            // 不要把库里的英文说法端出去。
+            assert!(!message.contains("worksheet.set_name"), "{name:?} -> {message}");
+            // 拒绝了就不能留下半个文件。
+            assert!(!path.exists(), "{name:?} 不该留下文件");
+        }
+
+        // 边界：正好 31 个字是合法的，两边空格会被去掉。
+        let ok = dir.join("正好31.xlsx");
+        let name = "一".repeat(31);
+        write_xlsx(&ok, &rows(&[&["一"]]), &format!("  {name}  ")).expect("31 个字合法");
+        assert_eq!(describe(&ok).expect("describe"), vec![name]);
     }
 
     #[test]
