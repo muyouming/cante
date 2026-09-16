@@ -12,6 +12,7 @@ import { For, Show, createMemo, createSignal, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
+import { visibleTasks } from "./admin-config.ts";
 import { availabilityHint, groupTasks, searchTasks } from "./catalog.ts";
 import { LIBRARY } from "./copy-library.ts";
 import type { TaskDef } from "./tasks/index.ts";
@@ -96,8 +97,9 @@ export default function TaskLibrary(props: TaskLibraryProps): JSX.Element {
   });
 
   const searching = () => query().trim().length > 0;
-  const hits = createMemo(() => searchTasks(query()));
-  const sections = createMemo(() => groupTasks());
+  // #58 — 技术同事关掉的任务在这里也不出现，和首页保持一致。
+  const hits = createMemo(() => searchTasks(query(), visibleTasks()));
+  const sections = createMemo(() => groupTasks(visibleTasks()));
 
   return (
     <div

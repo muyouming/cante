@@ -1,5 +1,6 @@
 // Bootstrap for the Cante desktop shell. Workstream A owns everything below the
 // `TODO(A)` markers; this file must keep `run()` as the entry point.
+pub mod admin_config;
 pub mod commands;
 pub mod daemon;
 pub mod files;
@@ -53,6 +54,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::health,
+            commands::admin_config,
             commands::events_since,
             commands::start_session,
             commands::update_session,
