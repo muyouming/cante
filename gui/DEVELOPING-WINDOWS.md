@@ -92,3 +92,56 @@ Apple Silicon 只能虚拟化**同架构**的客户机，所以跑的是 **Windo
 4. **机器信息**（Windows 版本、内存、是虚拟机还是真机——虚拟机上的性能问题不等于真机问题）。
 
 我会把它落成 issue，按"能不能看懂 / 会不会弄坏她的东西 / 是不是白等"三条产品律排优先级。
+
+## 用密钥登录那台测试机（免密码）
+
+一次性配好，之后 `ssh win11` 就能直接进（我们本机的辅助脚本也走它）。
+
+```bash
+# 1) 生成一把**专用**密钥（不要复用主密钥：它只用来连这台测试机，能单独吊销）
+ssh-keygen -t ed25519 -N "" -C "mac -> win11 test box" -f ~/.ssh/id_ed25519_win11
+
+# 2) 把公钥放到 Windows 上（注意下面的坑）
+scp ~/.ssh/id_ed25519_win11.pub win11@<IP>:C:/Users/<用户>/win11.pub
+
+# 3) 在 Windows 上（用密码登录的一次会话即可）
+#    —— 因为 win11 是**管理员**，Windows OpenSSH 只看中央文件，用户目录下的
+#       authorized_keys 会被忽略！
+$p = "C:\ProgramData\ssh\administrators_authorized_keys"
+$key = (Get-Content "$env:USERPROFILE\win11.pub" -Raw).Trim()
+Add-Content -Path $p -Value $key
+#    ACL 必须收紧，否则 sshd 直接忽略这个文件
+icacls $p /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
+
+# 4) 本机 ~/.ssh/config 写一条（用 IdentitiesOnly 避免试错别的密钥）
+```
+
+```
+Host win11
+    HostName <IP>
+    User win11
+    IdentityFile ~/.ssh/id_ed25519_win11
+    IdentitiesOnly yes
+    ServerAliveInterval 30
+```
+
+**验证必须用 BatchMode**（它不允许回退到密码，所以"能连上"就证明密钥真的生效）：
+
+```bash
+ssh -o BatchMode=yes win11 "whoami"
+```
+
+### 两个真实的坑
+
+- **管理员账号的公钥位置**：`win11` 属于 Administrators，公钥必须进
+  `C:\ProgramData\ssh\administrators_authorized_keys`（并且 ACL 只留
+  `SYSTEM` 与 `Administrators`）；放在 `C:\Users\win11\.ssh\authorized_keys` 里**不会生效**，而且不会报错——你会以为密钥配错了。
+- **cmd 不认分号**：Windows OpenSSH 默认 shell 是 `cmd.exe`，`whoami; hostname`
+  会报 `Invalid argument/option - ';'`。要用 `&&`，或者直接用 PowerShell。
+
+### 吊销与加固
+
+- 吊销：删掉本机的 `~/.ssh/id_ed25519_win11*`，并从上面那个中央文件里删掉对应那一行；
+- **密码登录默认仍然开着**：如果这台机器上还留着初始密码，建议改掉或关掉密码登录
+  （`sshd_config` 里 `PasswordAuthentication no` 后重启 `sshd` 服务）——但先确认密钥能用，
+  否则会把自己关在门外。
