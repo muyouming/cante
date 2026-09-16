@@ -111,7 +111,7 @@ export default function ApprovalSheet(props: ApprovalSheetProps): JSX.Element {
             <ul class="mt-2 flex flex-col gap-2">
               <For each={tools()}>
                 {(tool) => (
-                  <li class="rounded border border-amber-900 bg-[#120e06] px-3 py-2 text-[15px] text-amber-200/80">
+                  <li class="rounded border border-amber-900 bg-[#120e06] px-3 py-2 text-[16px] text-amber-200/80">
                     <span class="font-mono">{tool.name}</span>
                     <span class="ml-2 font-mono break-all">
                       {described()[tools().indexOf(tool)]?.detail ?? ""}

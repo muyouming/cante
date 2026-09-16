@@ -35,8 +35,8 @@ function Switch(props: {
   return (
     <div class="flex items-center justify-between gap-3 rounded-md border border-slate-800 bg-[#0e141b] px-3 py-2">
       <div class="flex min-w-0 flex-col">
-        <span class="text-sm text-slate-200">{props.label}</span>
-        <span class="text-[11px] leading-4 text-slate-500">{props.hint}</span>
+        <span class="text-[16px] text-slate-200">{props.label}</span>
+        <span class="text-[16px] leading-6 text-slate-500">{props.hint}</span>
       </div>
       <button
         type="button"
@@ -44,7 +44,7 @@ function Switch(props: {
         aria-checked={props.checked}
         aria-label={props.label}
         disabled={props.disabled}
-        class={`shrink-0 rounded-full border px-3 py-1 text-xs font-bold ${
+        class={`shrink-0 min-h-[44px] rounded-full border px-3 text-[16px] font-bold ${
           props.checked
             ? "border-emerald-600 bg-emerald-900/40 text-emerald-200"
             : "border-slate-700 bg-slate-900 text-slate-400"
@@ -68,14 +68,14 @@ export default function PrivacyPanel(props: PrivacyPanelProps): JSX.Element {
       class="flex flex-col gap-3 rounded-lg border border-slate-800 bg-[#0b0f14] p-4"
       aria-label="你的内容去哪了"
     >
-      <span class="text-[11px] font-bold tracking-widest text-slate-500">你的内容去哪了</span>
+      <span class="text-[16px] font-bold tracking-widest text-slate-500">你的内容去哪了</span>
 
       <div class="flex flex-col gap-2">
         <For each={privacyAnswers(state())}>
           {(item) => (
             <div class="flex flex-col gap-0.5">
-              <span class="text-xs font-bold text-slate-300">{item.question}</span>
-              <span class="text-xs leading-5 text-slate-400">{item.answer}</span>
+              <span class="text-[16px] font-bold text-slate-300">{item.question}</span>
+              <span class="text-[16px] leading-6 text-slate-400">{item.answer}</span>
             </div>
           )}
         </For>
@@ -114,7 +114,7 @@ export function PrivacySummary(props: PrivacyPanelProps): JSX.Element {
   };
   return (
     <div
-      class="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-slate-800 bg-[#0e141b] px-3 py-2 text-[11px] text-slate-400"
+      class="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-slate-800 bg-[#0e141b] px-3 py-2 text-[16px] text-slate-400"
       role="status"
       aria-label="数据去向"
     >

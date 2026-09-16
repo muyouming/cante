@@ -156,7 +156,7 @@ export default function WechatImport(props: WechatImportProps): JSX.Element {
                 type="button"
                 role="radio"
                 aria-checked={selectedId() === item.id}
-                class={`flex flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left ${
+                class={`flex min-h-[44px] flex-col items-start gap-0.5 rounded-md border px-3 py-2 text-left ${
                   selectedId() === item.id
                     ? "border-sky-600 bg-sky-950/40"
                     : "border-slate-800 bg-[#0e141b] hover:border-slate-600"
