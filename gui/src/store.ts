@@ -70,6 +70,37 @@ export interface CatalogProvider {
   models: CatalogModel[];
 }
 
+/** How much detail the transcript renders for each row. */
+export type ViewDensity = "normal" | "verbose" | "summary";
+
+/** The session's extension surface, reduced to what the panel renders. */
+export interface Capabilities {
+  mcpServers: Array<{ name: string; tools: number }>;
+  skills: Array<{ name: string; description: string }>;
+  subagents: Array<{ name: string; description: string }>;
+}
+
+/** One `!command` run, mirrored from `Evt::ShellOutput`. */
+export interface TerminalEntry {
+  id: string;
+  command: string;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+}
+
+/** The off-critical-path "thinking phrase" / next-prompt hint. */
+export interface AmbientState {
+  phrase: string | null;
+  suggestion: string | null;
+}
+
+/** The goal loop as the bar needs it: the condition plus the daemon's note. */
+export interface GoalState {
+  condition: string | null;
+  note: string | null;
+}
+
 export interface SessionOverrides {
   model?: string;
   provider?: string;
@@ -141,13 +172,45 @@ export interface Store {
   requestContextReport(): Promise<void>;
   loadCatalog(): Promise<void>;
   clearTranscript(): void;
+  /** normal -> verbose -> summary -> normal. */
+  viewDensity: Accessor<ViewDensity>;
+  cycleDensity(): void;
+  /** Skills / subagents / MCP servers from `Evt::ExtensionRefreshed`. */
+  capabilities: Accessor<Capabilities>;
+  ambient: Accessor<AmbientState>;
+  /** Send user text mid-turn (`Op::Steer`). */
+  steer(text: string): Promise<void>;
+  /** Run a shell command without starting a turn (`Op::ShellInput`). */
+  runShell(command: string): Promise<void>;
+  terminal: Accessor<TerminalEntry[]>;
+  clearTerminal(): void;
+  /** Goal-loop condition and the daemon's last `🎯` Info note. */
+  goal: Accessor<GoalState>;
+  setGoal(condition: string): Promise<void>;
+  clearGoal(): Promise<void>;
+  requestGoalStatus(): Promise<void>;
+  /** Best-effort spinner phrase for the in-progress draft. */
+  requestAmbientPhrase(draft: string): Promise<void>;
 }
+
+/**
+ * The frozen bridge gained `steer` / `shell_input` / `ambient_*` after
+ * `tauri.ts` was last generated. Keep `invoke`'s typed map for the original
+ * commands and widen only for the new ops, so a rename in the map still fails
+ * `tsc` while these forward to the snake_case wire names.
+ */
+type OpInvoke = (name: string, args?: Record<string, unknown>) => Promise<unknown>;
+const invokeOp = invoke as unknown as OpInvoke;
 
 const MAX_ROWS = 400;
 const MAX_ROW_TEXT = 8_000;
 const MAX_TOOL_DETAIL = 4_000;
 const MAX_LOGS = 200;
 const MAX_HISTORY = 50;
+const MAX_TERMINAL = 50;
+const MAX_TERMINAL_TEXT = 8_000;
+/** The daemon prefixes goal confirmations/status with the target emoji. */
+const GOAL_EMOJI = "🎯";
 const MAX_SEEN = 8_192;
 const RECONCILE_MS = 2_000;
 const PING_MS = 4_000;
@@ -203,6 +266,53 @@ function normalizeApproval(value: unknown): PendingApproval | null {
     message: typeof record.message === "string" ? record.message : "",
     tools,
   };
+}
+
+/**
+ * `Evt::ExtensionRefreshed` -> the panel's shape. Skills carry a description;
+ * MCP servers collapse to a name plus how many tools were discovered (an
+ * array on the wire, empty for a server that failed to connect).
+ */
+function normalizeCapabilities(payload: unknown): Capabilities {
+  const record = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
+
+  const named = (raw: unknown): { name: string; description: string } | null => {
+    if (typeof raw === "string") return raw ? { name: raw, description: "" } : null;
+    if (!raw || typeof raw !== "object") return null;
+    const item = raw as Record<string, unknown>;
+    const name = typeof item.name === "string" ? item.name : "";
+    if (!name) return null;
+    return { name, description: typeof item.description === "string" ? item.description : "" };
+  };
+
+  const skills: Capabilities["skills"] = [];
+  for (const raw of Array.isArray(record.skills) ? record.skills : []) {
+    const entry = named(raw);
+    if (entry) skills.push(entry);
+  }
+
+  const subagents: Capabilities["subagents"] = [];
+  for (const raw of Array.isArray(record.subagents) ? record.subagents : []) {
+    const entry = named(raw);
+    if (entry) subagents.push(entry);
+  }
+
+  const mcpServers: Capabilities["mcpServers"] = [];
+  for (const raw of Array.isArray(record.mcp_servers) ? record.mcp_servers : []) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const name = typeof item.name === "string" ? item.name : "";
+    if (!name) continue;
+    const tools = item.tools;
+    const count = Array.isArray(tools)
+      ? tools.length
+      : typeof tools === "number" && Number.isFinite(tools)
+        ? tools
+        : 0;
+    mcpServers.push({ name, tools: count });
+  }
+
+  return { mcpServers, skills, subagents };
 }
 
 function pad(value: number): string {
@@ -299,6 +409,11 @@ export function createStore(): Store {
   const [paletteOpen, setPaletteOpen] = createSignal(false);
   const [paletteDismissed, setPaletteDismissed] = createSignal(false);
   const [paletteCursor, setPaletteCursor] = createSignal(0);
+  const [viewDensity, setViewDensity] = createSignal<ViewDensity>("normal");
+  const [capabilities, setCapabilities] = createSignal<Capabilities>({ mcpServers: [], skills: [], subagents: [] });
+  const [ambient, setAmbient] = createSignal<AmbientState>({ phrase: null, suggestion: null });
+  const [goal, setGoalState] = createSignal<GoalState>({ condition: null, note: null });
+  const [terminal, setTerminal] = createSignal<TerminalEntry[]>([]);
 
   // Plain accessors rather than `createMemo`s: `bun test` resolves Solid's
   // server build, where a memo is computed once and never re-runs. These must
@@ -329,8 +444,21 @@ export function createStore(): Store {
   let historyCursor: number | null = null;
   let historyDraft = "";
   let rowSeq = 0;
+  let terminalSeq = 0;
   let lastUserText = "";
+  let lastUserPrompt = "";
+  let lastAgentText = "";
   const toolRows = new Map<string, string>();
+
+  // ---- ambient requests ---------------------------------------------------
+  // `req_id`s are monotonic per kind; a reply older than the newest request is
+  // dropped. The suggestion also carries the turn it was requested in, so a
+  // reply that lands after the next turn started is discarded.
+  let phraseReqId = 0;
+  let suggestionReqId = 0;
+  let turnSeq = 0;
+  let suggestionPending = false;
+  let suggestionTurn: number | null = null;
 
   // ---- bridge lifecycle ---------------------------------------------------
 
@@ -535,6 +663,11 @@ export function createStore(): Store {
         return;
       }
       case "TurnStart":
+        turnSeq += 1;
+        // A suggestion for the previous turn is stale now; free the slot so
+        // the next TurnEnd can ask again (the old reply is dropped below).
+        suggestionPending = false;
+        suggestionTurn = null;
         setDaemonStatus("thinking");
         return;
       case "Thinking":
@@ -582,6 +715,7 @@ export function createStore(): Store {
         if (text && text !== lastUserText) {
           setRows(pushRow({ id: `u${++rowSeq}`, kind: "user", label: "you", text: clampText(text, MAX_ROW_TEXT), detail: "", tone: "accent", streaming: false, time: at }));
         }
+        if (text) lastUserPrompt = text;
         lastUserText = "";
         return;
       }
@@ -589,6 +723,8 @@ export function createStore(): Store {
       case "AgentMessage": {
         const delta = name === "MessageDelta";
         const text = textOf(event, name);
+        if (delta) lastAgentText = clampText(lastAgentText + text, MAX_ROW_TEXT);
+        else if (text) lastAgentText = text;
         const list = rows();
         const last = list[list.length - 1];
         if (last && last.kind === "agent" && last.streaming && delta) {
@@ -671,6 +807,7 @@ export function createStore(): Store {
             ? textOf(event, "Info")
             : String(payload?.header ?? payload?.detail ?? "");
         if (!text) return;
+        if (text.startsWith(GOAL_EMOJI)) setGoalState((state) => ({ ...state, note: text }));
         setRows(pushRow({ id: `i${++rowSeq}`, kind: "info", label: "info", text: clampText(text, MAX_ROW_TEXT), detail: "", tone: "muted", streaming: false, time: at }));
         return;
       }
@@ -680,6 +817,55 @@ export function createStore(): Store {
       case "CompactEnd": {
         const summary = eventPayload<{ summary?: string | null }>(event, "CompactEnd")?.summary ?? null;
         setRows(pushRow({ id: `i${++rowSeq}`, kind: "info", label: "compact", text: summary ? "history compacted" : "compaction failed; history unchanged", detail: summary ? clampText(summary, 240) : "", tone: "muted", streaming: false, time: at }));
+        return;
+      }
+      case "ExtensionRefreshed": {
+        setCapabilities(normalizeCapabilities(eventPayload(event, "ExtensionRefreshed")));
+        return;
+      }
+      case "ShellOutput": {
+        const payload = eventPayload<{ command?: unknown; stdout?: unknown; stderr?: unknown; exit_code?: unknown }>(event, "ShellOutput");
+        const exitCode = typeof payload?.exit_code === "number" && Number.isFinite(payload.exit_code) ? payload.exit_code : null;
+        const entry: TerminalEntry = {
+          id: `sh${++terminalSeq}`,
+          command: typeof payload?.command === "string" ? payload.command : "",
+          stdout: clampText(typeof payload?.stdout === "string" ? payload.stdout : "", MAX_TERMINAL_TEXT),
+          stderr: clampText(typeof payload?.stderr === "string" ? payload.stderr : "", MAX_TERMINAL_TEXT),
+          exitCode,
+        };
+        setTerminal((list) => {
+          const next = [...list, entry];
+          return next.length > MAX_TERMINAL ? next.slice(next.length - MAX_TERMINAL) : next;
+        });
+        return;
+      }
+      case "Ambient": {
+        const payload = eventPayload<{ kind?: unknown; req_id?: unknown; text?: unknown }>(event, "Ambient");
+        const kind = typeof payload?.kind === "string" ? payload.kind : "";
+        const reqId = safeCount(payload?.req_id, 0);
+        const text = typeof payload?.text === "string" ? payload.text : "";
+        if (kind === "ThinkingPhrase") {
+          if (reqId < phraseReqId) return;
+          phraseReqId = Math.max(phraseReqId, reqId);
+          setAmbient((state) => ({ ...state, phrase: text }));
+          return;
+        }
+        if (kind === "PromptSuggestion") {
+          // A reply that outlived its turn is stale even when the id is current.
+          if (suggestionTurn === null || suggestionTurn !== turnSeq) {
+            suggestionPending = false;
+            return;
+          }
+          if (reqId < suggestionReqId) {
+            suggestionPending = false;
+            return;
+          }
+          suggestionReqId = Math.max(suggestionReqId, reqId);
+          suggestionPending = false;
+          suggestionTurn = null;
+          setAmbient((state) => ({ ...state, suggestion: text }));
+          return;
+        }
         return;
       }
       case "ContextReport": {
@@ -744,6 +930,7 @@ export function createStore(): Store {
           setRows(pushRow({ id: `r${++rowSeq}`, kind: "turn", label: "failed", text: clampText(reason.headline, MAX_ROW_TEXT), detail: clampText(reason.details.join(" · "), MAX_TOOL_DETAIL), tone: "error", streaming: false, time: at }));
           setNotice(reason.headline);
         }
+        maybeRequestSuggestion();
         return;
       }
       case "SessionEnd":
@@ -771,6 +958,81 @@ export function createStore(): Store {
     }
   }
 
+  /** Off-critical-path ops (ambient predictions) must never raise a notice. */
+  async function bestEffort(fn: () => Promise<unknown>): Promise<boolean> {
+    try {
+      await fn();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function steer(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    await attempt(() => invokeOp("steer", { text: trimmed }));
+  }
+
+  async function runShell(command: string): Promise<void> {
+    const trimmed = command.trim();
+    if (!trimmed) return;
+    await attempt(() => invokeOp("shell_input", { command: trimmed }));
+  }
+
+  function clearTerminal(): void {
+    setTerminal([]);
+  }
+
+  async function requestAmbientPhrase(draft: string): Promise<void> {
+    phraseReqId += 1;
+    const requestId = phraseReqId;
+    await bestEffort(() => invokeOp("ambient_phrase", { draft, request_id: requestId }));
+  }
+
+  /**
+   * After a turn ends, suggest what to ask next from the exchange just
+   * completed. At most one request is in flight; the reply is tied to the
+   * turn, so one that arrives after a newer turn started is discarded.
+   */
+  function maybeRequestSuggestion(): void {
+    if (suggestionPending) return;
+    if (!lastUserPrompt || !lastAgentText) return;
+    suggestionPending = true;
+    suggestionReqId += 1;
+    suggestionTurn = turnSeq;
+    const requestId = suggestionReqId;
+    const user = lastUserPrompt;
+    const agent = lastAgentText;
+    void bestEffort(() =>
+      invokeOp("ambient_suggestion", { recent_user: user, recent_agent: agent, request_id: requestId }),
+    ).then((ok) => {
+      // A failed send leaves nothing outstanding; the next TurnEnd may retry.
+      if (!ok) suggestionPending = false;
+    });
+  }
+
+  async function setGoal(condition: string): Promise<void> {
+    const trimmed = condition.trim();
+    const ok = await attempt(() => invoke("goal", { command: "Set", condition: trimmed }));
+    if (ok) setGoalState({ condition: trimmed, note: null });
+  }
+
+  async function clearGoal(): Promise<void> {
+    const ok = await attempt(() => invoke("goal", { command: "Clear" }));
+    if (ok) setGoalState({ condition: null, note: null });
+  }
+
+  async function requestGoalStatus(): Promise<void> {
+    await attempt(() => invoke("goal", { command: "Status" }));
+  }
+
+  function cycleDensity(): void {
+    const order: readonly ViewDensity[] = ["normal", "verbose", "summary"];
+    const index = order.indexOf(viewDensity());
+    setViewDensity(order[(index + 1) % order.length]!);
+  }
+
   async function startSession(overrides: SessionOverrides = {}): Promise<void> {
     lastUserText = "";
     const ok = await attempt(() => invoke("start_session", { ...overrides }));
@@ -782,6 +1044,7 @@ export function createStore(): Store {
     if (!trimmed) return;
     if (mode === "prompt") {
       lastUserText = trimmed;
+      lastUserPrompt = trimmed;
       setRows(pushRow({
         id: `u${++rowSeq}`,
         kind: "user",
@@ -935,10 +1198,11 @@ export function createStore(): Store {
         await interrupt();
         return;
       case "goal":
-        await attempt(() => invoke("goal", args ? { command: "Set", condition: args } : { command: "Status" }));
+        if (args) await setGoal(args);
+        else await requestGoalStatus();
         return;
       case "goal-clear":
-        await attempt(() => invoke("goal", { command: "Clear" }));
+        await clearGoal();
         return;
       default:
         return;
@@ -1120,6 +1384,19 @@ export function createStore(): Store {
     requestContextReport,
     loadCatalog,
     clearTranscript,
+    viewDensity,
+    cycleDensity,
+    capabilities,
+    ambient,
+    steer,
+    runShell,
+    terminal,
+    clearTerminal,
+    goal,
+    setGoal,
+    clearGoal,
+    requestGoalStatus,
+    requestAmbientPhrase,
   };
 }
 

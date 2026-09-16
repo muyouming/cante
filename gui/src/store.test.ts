@@ -820,3 +820,220 @@ describe("adversarial: randomised stream", () => {
     dispose();
   }, 30_000);
 });
+
+// ---------------------------------------------------------------------------
+// Round 3 store surface: terminal, capabilities, ambient, goal, density.
+// ---------------------------------------------------------------------------
+
+describe("density and terminal", () => {
+  test("cycleDensity walks normal -> verbose -> summary -> normal", async () => {
+    const { store, dispose } = await setup();
+    expect(store.viewDensity()).toBe("normal");
+    store.cycleDensity();
+    expect(store.viewDensity()).toBe("verbose");
+    store.cycleDensity();
+    expect(store.viewDensity()).toBe("summary");
+    store.cycleDensity();
+    expect(store.viewDensity()).toBe("normal");
+    dispose();
+  });
+
+  test("steer rejects empty text without invoking", async () => {
+    const { store, dispose } = await setup();
+    await store.steer("   ");
+    await store.steer("\n\t");
+    expect(opCalls("steer")).toHaveLength(0);
+    await store.steer("  focus on the parser ");
+    expect(opCalls("steer")).toEqual([{ text: "focus on the parser" }]);
+    dispose();
+  });
+
+  test("runShell sends shell_input and ShellOutput fills terminal newest-last", async () => {
+    const { store, dispose } = await setup();
+    await store.runShell("  git status ");
+    expect(opCalls("shell_input")).toEqual([{ command: "git status" }]);
+    emit("event", event("ShellOutput", { command: "git status", stdout: "clean", stderr: "", exit_code: 0 }));
+    expect(store.terminal()).toHaveLength(1);
+    const entry = store.terminal()[0]!;
+    expect(entry.command).toBe("git status");
+    expect(entry.stdout).toBe("clean");
+    expect(entry.stderr).toBe("");
+    expect(entry.exitCode).toBe(0);
+    expect(entry.id).toBeTruthy();
+    dispose();
+  });
+
+  test("a ShellOutput without an exit code keeps exitCode null", async () => {
+    const { store, dispose } = await setup();
+    emit("event", event("ShellOutput", { command: "sleep 1", stdout: "", stderr: "killed", exit_code: null }));
+    expect(store.terminal()[0]!.exitCode).toBeNull();
+    expect(store.terminal()[0]!.stderr).toBe("killed");
+    dispose();
+  });
+
+  test("the terminal keeps only the newest 50 entries and clears on demand", async () => {
+    const { store, dispose } = await setup();
+    for (let i = 0; i < 60; i++) {
+      emit("event", event("ShellOutput", { command: `cmd ${i}`, stdout: `out ${i}`, stderr: "", exit_code: i }));
+    }
+    const entries = store.terminal();
+    expect(entries).toHaveLength(50);
+    expect(entries[0]!.command).toBe("cmd 10");
+    expect(entries[49]!.command).toBe("cmd 59");
+    store.clearTerminal();
+    expect(store.terminal()).toHaveLength(0);
+    dispose();
+  });
+});
+
+describe("capabilities", () => {
+  test("ExtensionRefreshed fills the panel without a click, with several MCP servers", async () => {
+    const { store, dispose } = await setup();
+    expect(store.capabilities().skills).toHaveLength(0);
+    emit("event", event("ExtensionRefreshed", {
+      session_id: "ses_TEST",
+      skills: [{ name: "commit", description: "Create a git commit" }],
+      subagents: [{ name: "explore", description: "Explore the codebase" }],
+      mcp_servers: [
+        { name: "filesystem", command: "npx", args: [], tools: [{ name: "read" }, { name: "write" }] },
+        { name: "github", command: "npx", args: [], tools: [] },
+        { name: "broken", command: "npx", args: [] },
+      ],
+    }));
+    expect(store.capabilities().skills).toEqual([{ name: "commit", description: "Create a git commit" }]);
+    expect(store.capabilities().subagents).toEqual([{ name: "explore", description: "Explore the codebase" }]);
+    expect(store.capabilities().mcpServers).toEqual([
+      { name: "filesystem", tools: 2 },
+      { name: "github", tools: 0 },
+      { name: "broken", tools: 0 },
+    ]);
+    dispose();
+  });
+
+  test("the session-start ExtensionRefreshed lands during hydration too", async () => {
+    const refresh = event("ExtensionRefreshed", {
+      session_id: "ses_TEST",
+      skills: [{ name: "simplify", description: "review the diff" }],
+      subagents: [],
+      mcp_servers: [{ name: "fs", tools: [{ name: "a" }] }],
+    });
+    const { store, dispose } = await setup([refresh]);
+    expect(store.capabilities().skills[0]!.name).toBe("simplify");
+    expect(store.capabilities().mcpServers).toEqual([{ name: "fs", tools: 1 }]);
+    dispose();
+  });
+});
+
+describe("ambient", () => {
+  test("phrases drop stale req_ids and accept the newest", async () => {
+    const { store, dispose } = await setup();
+    await store.requestAmbientPhrase("refactor the parser");
+    expect(opCalls("ambient_phrase")).toEqual([{ draft: "refactor the parser", request_id: 1 }]);
+    emit("event", event("Ambient", { kind: "ThinkingPhrase", req_id: 1, text: "pondering" }));
+    expect(store.ambient().phrase).toBe("pondering");
+    // An older reply must not overwrite the current phrase.
+    emit("event", event("Ambient", { kind: "ThinkingPhrase", req_id: 0, text: "stale" }));
+    expect(store.ambient().phrase).toBe("pondering");
+    // A newer request supersedes the old one; its stale reply is dropped.
+    await store.requestAmbientPhrase("write the tests");
+    expect(opCalls("ambient_phrase")[1]).toEqual({ draft: "write the tests", request_id: 2 });
+    emit("event", event("Ambient", { kind: "ThinkingPhrase", req_id: 1, text: "old" }));
+    expect(store.ambient().phrase).toBe("pondering");
+    emit("event", event("Ambient", { kind: "ThinkingPhrase", req_id: 2, text: "testing" }));
+    expect(store.ambient().phrase).toBe("testing");
+    dispose();
+  });
+
+  test("TurnEnd requests one suggestion from the last exchange", async () => {
+    const { store, dispose } = await setup();
+    await store.submit("fix the parser bug");
+    emit("event", event("AgentMessage", "Fixed — the cause was a stale cache."));
+    emit("event", event("TurnEnd", { status: "Completed", steps: 1 }));
+    expect(opCalls("ambient_suggestion")).toEqual([
+      {
+        recent_user: "fix the parser bug",
+        recent_agent: "Fixed — the cause was a stale cache.",
+        request_id: 1,
+      },
+    ]);
+    // A second TurnEnd while the first is outstanding does not fan out.
+    emit("event", event("TurnEnd", { status: "Completed", steps: 1 }));
+    expect(opCalls("ambient_suggestion")).toHaveLength(1);
+    emit("event", event("Ambient", { kind: "PromptSuggestion", req_id: 1, text: "run the tests" }));
+    expect(store.ambient().suggestion).toBe("run the tests");
+    dispose();
+  });
+
+  test("no suggestion is requested without a completed exchange", async () => {
+    const { store, dispose } = await setup();
+    emit("event", event("TurnEnd", { status: "Completed", steps: 0 }));
+    emit("event", event("UserInput", "only a prompt"));
+    emit("event", event("TurnEnd", { status: "Completed", steps: 0 }));
+    expect(opCalls("ambient_suggestion")).toHaveLength(0);
+    dispose();
+  });
+
+  test("a suggestion reply that outlives its turn is dropped", async () => {
+    const { store, dispose } = await setup();
+    await store.submit("first");
+    emit("event", event("AgentMessage", "answer"));
+    emit("event", event("TurnEnd", { status: "Completed", steps: 1 }));
+    emit("event", event("TurnStart", { turn_id: "t2" }));
+    emit("event", event("Ambient", { kind: "PromptSuggestion", req_id: 1, text: "too late" }));
+    expect(store.ambient().suggestion).toBeNull();
+    dispose();
+  });
+
+  test("a newer turn frees the slot so the next TurnEnd can ask again", async () => {
+    const { store, dispose } = await setup();
+    await store.submit("first");
+    emit("event", event("AgentMessage", "answer"));
+    emit("event", event("TurnEnd", { status: "Completed", steps: 1 }));
+    expect(opCalls("ambient_suggestion")).toHaveLength(1);
+    emit("event", event("TurnStart", { turn_id: "t2" }));
+    emit("event", event("AgentMessage", "second answer"));
+    emit("event", event("TurnEnd", { status: "Completed", steps: 1 }));
+    expect(opCalls("ambient_suggestion")).toHaveLength(2);
+    expect(opCalls("ambient_suggestion")[1]).toEqual({
+      recent_user: "first",
+      recent_agent: "second answer",
+      request_id: 2,
+    });
+    dispose();
+  });
+});
+
+describe("goal", () => {
+  test("setGoal / clearGoal / requestGoalStatus send the goal ops", async () => {
+    const { store, dispose } = await setup();
+    await store.setGoal(" ship the parser ");
+    expect(opCalls("goal")).toEqual([{ command: "Set", condition: "ship the parser" }]);
+    expect(store.goal().condition).toBe("ship the parser");
+    await store.requestGoalStatus();
+    expect(opCalls("goal")[1]).toEqual({ command: "Status" });
+    await store.clearGoal();
+    expect(opCalls("goal")[2]).toEqual({ command: "Clear" });
+    expect(store.goal().condition).toBeNull();
+    dispose();
+  });
+
+  test("goal Info text lands in note", async () => {
+    const { store, dispose } = await setup();
+    emit("event", event("Info", "🎯 Goal set: ship the parser"));
+    expect(store.goal().note).toBe("🎯 Goal set: ship the parser");
+    // An unrelated Info row is not a goal note.
+    emit("event", event("Info", "warming up"));
+    expect(store.goal().note).toBe("🎯 Goal set: ship the parser");
+    dispose();
+  });
+
+  test("the goal slash commands update the tracked condition", async () => {
+    const { store, dispose } = await setup();
+    await store.submit("/goal ship it");
+    expect(store.goal().condition).toBe("ship it");
+    await store.submit("/goal-clear");
+    expect(store.goal().condition).toBeNull();
+    expect(opCalls("goal")).toEqual([{ command: "Set", condition: "ship it" }, { command: "Clear" }]);
+    dispose();
+  });
+});
