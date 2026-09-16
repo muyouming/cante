@@ -13,6 +13,8 @@ import type { JSX } from "solid-js";
 
 import { TRUST, evidenceLine } from "./copy.ts";
 import {
+  formatAdviceNote,
+  formatStartBlockNote,
   pdfCapability,
   pdfFallbackNote,
   sheetCapability,
@@ -21,7 +23,8 @@ import {
   visionAvailable,
   visionFallbackNote,
 } from "./capabilities.ts";
-import { hasExcelFile, hasImageFile, hasPdfFile } from "./copy-capability.ts";
+import { FORMAT_COPY, hasExcelFile, hasImageFile, hasPdfFile } from "./copy-capability.ts";
+import { inspectSelection } from "./format-check.ts";
 import { evidenceFor, failureFor } from "./evidence.ts";
 import { fileName, folderName, hasActiveRisk, planRisks } from "./run.ts";
 import { risksForTask } from "./tasks/index.ts";
@@ -64,6 +67,20 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   // #64 — what this computer's own history says, or nothing at all.
   const track = () => evidenceFor(props.store.runs(), run()?.taskId ?? "");
   const failure = () => failureFor(props.store.runs(), run()?.taskId ?? "");
+  // #88 — 选中的文件里有没有我根本读不了的格式（WPS / 苹果自己的）。
+  // 这件事必须在动手前说清：原来她要等跑了一会儿才知道。
+  const verdict = () => inspectSelection(files());
+  const verdictNote = () => formatAdviceNote(verdict());
+  // 一个都读不了时，开始按钮旁边要写清为什么现在别点。
+  const startBlockNote = () => formatStartBlockNote(verdict());
+  const nothingReadable = (): boolean => {
+    const now = verdict();
+    return now.kind === "convert-first" || now.kind === "mixed-nothing-readable";
+  };
+  const blockedFiles = (): string[] => {
+    const now = verdict();
+    return now.kind === "convert-first" || now.kind === "some-unreadable" ? now.blocked : [];
+  };
 
   function focusCancel(element: HTMLButtonElement): void {
     cancelButton = element;
@@ -197,6 +214,43 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
               </p>
             </Show>
 
+            {/* #88 — 读不了的格式先说清：全部读不了时醒目但不吓人，部分读不了时中性。 */}
+            <Show when={verdictNote()}>
+              {(note) => (
+                <div
+                  class="mt-3 rounded-xl border px-4 py-3"
+                  classList={{
+                    "border-amber-600 bg-amber-950/40": nothingReadable(),
+                    "border-slate-600 bg-slate-800/50": !nothingReadable(),
+                  }}
+                >
+                  <p
+                    class="text-[20px] font-semibold"
+                    classList={{ "text-amber-100": nothingReadable(), "text-slate-100": !nothingReadable() }}
+                  >
+                    {FORMAT_COPY.heading}
+                  </p>
+                  <p
+                    class="mt-1 text-[16px] leading-relaxed"
+                    classList={{ "text-amber-100/90": nothingReadable(), "text-slate-200": !nothingReadable() }}
+                  >
+                    {note()}
+                  </p>
+                  <Show when={blockedFiles().length > 0}>
+                    <ul class="mt-2 space-y-1">
+                      <For each={blockedFiles()}>
+                        {(path) => (
+                          <li class="truncate rounded-lg bg-slate-900/60 px-3 py-2 text-[16px] text-slate-200" title={fileName(path)}>
+                            {fileName(path)}
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                  </Show>
+                </div>
+              )}
+            </Show>
+
             <h3 class="mt-6 text-[20px] font-semibold text-slate-200">会影响什么</h3>
             <div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <For each={risks()}>
@@ -257,6 +311,12 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
           </div>
 
           <footer class="flex flex-wrap items-center justify-end gap-3 border-t border-slate-800 bg-slate-900 px-6 py-4">
+            {/* #88 — 开始按钮被禁用时，理由得写在她点之前，而不是点完才知道。 */}
+            <Show when={startBlockNote()}>
+              {(note) => (
+                <p class="mr-auto max-w-md text-[16px] leading-relaxed text-amber-200">{note()}</p>
+              )}
+            </Show>
             <button
               type="button"
               ref={focusCancel}
@@ -274,8 +334,9 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
             </button>
             <button
               type="button"
+              disabled={nothingReadable()}
               onClick={() => void props.store.confirmRun(allowOverwrite())}
-              class="min-h-[52px] rounded-xl bg-sky-500 px-8 text-base font-bold text-slate-950 hover:bg-sky-400"
+              class="min-h-[52px] rounded-xl bg-sky-500 px-8 text-base font-bold text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
             >
               开始
             </button>
