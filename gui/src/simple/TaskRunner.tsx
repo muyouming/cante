@@ -389,7 +389,7 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
                 <For each={selection()}>
                   {(path) => (
                     <li class="flex items-center justify-between gap-3 px-3 py-2">
-                      <span class="min-w-0 flex-1 truncate text-[16px] text-slate-200" title={path}>
+                      <span class="min-w-0 flex-1 truncate text-[16px] text-slate-200" title={nameOf(path)}>
                         {nameOf(path)}
                       </span>
                       <Show when={props.task.needs === "files"}>

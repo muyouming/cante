@@ -200,7 +200,7 @@ const INLINE_COPY_BUDGET: Readonly<Record<string, number>> = {
   // WechatImport / PrivacyPanel 的按钮、标题、状态词。数字是 2026-09 扫描
   // 出来的现状（按“一段中文算一处”统计）。
   "ConfirmSheet.tsx": 21,
-  "History.tsx": 22,
+  // History.tsx 的 22 处已经全部搬进 copy-history.ts（#57 那一轮），从台账里退场。
   "PrivacyPanel.tsx": 13,
   "ResultCard.tsx": 19,
   "TaskRunner.tsx": 52,

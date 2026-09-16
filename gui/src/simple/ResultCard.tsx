@@ -253,7 +253,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
               {(file) => (
                 <li class="flex flex-col gap-3 bg-slate-800/40 px-4 py-4 sm:flex-row sm:items-center">
                   <div class="min-w-0 flex-1">
-                    <p class="truncate text-base font-semibold text-slate-100" title={file.path}>
+                    <p class="truncate text-base font-semibold text-slate-100" title={fileName(file.path)}>
                       {fileName(file.path)}
                     </p>
                     <p class="truncate text-[16px] text-slate-500" title={folderName(file.path)}>
