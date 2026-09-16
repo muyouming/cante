@@ -41,7 +41,10 @@ const FIXTURE_TS = join(GUI_ROOT, "fixtures", "fake-cante.ts");
 const SOAK_TS = join(GUI_ROOT, "fixtures", "flood.ts");
 const CONTRACT_MD = join(GUI_ROOT, "CONTRACT.md");
 
-const read = (path: string) => readFileSync(path, "utf8");
+// 读文件时把 CRLF 折成 LF：仓库里已规定文本文件用 LF（.gitattributes），但贡献者的
+// 编辑器、或某些检出配置仍可能带来 `\r`——而下面这些解析是按行做的（`split("\n")`、
+// 围栏块正则），带 `\r` 就会对不上。真发生过：Windows CI 上"找不到围栏块"。
+const read = (path: string) => readFileSync(path, "utf8").replace(/\r\n?/g, "\n");
 
 /** Remove Rust line and block comments so a brace inside prose cannot be parsed. */
 function stripRustComments(source: string): string {
@@ -169,7 +172,7 @@ function fixtureEvents(source: string): string[] {
 
 /** The contents of a ```<label> fenced block in CONTRACT.md. */
 function fenced(contract: string, label: string): string {
-  const match = new RegExp("```" + label + "\\n([\\s\\S]*?)```").exec(contract);
+  const match = new RegExp("```" + label + "\\r?\\n([\\s\\S]*?)```").exec(contract);
   if (!match) throw new Error(`CONTRACT.md: missing a \`\`\`${label} fenced block`);
   return match[1]!;
 }
