@@ -19,7 +19,7 @@ use std::io::BufReader;
 use std::path::Path;
 
 use calamine::{open_workbook_auto, Data, ExcelDateTime, Reader as _, Sheets};
-use rust_xlsxwriter::Workbook;
+use rust_xlsxwriter::{ExcelDateTime as XlsxDateTime, Format, Workbook};
 
 /// 能读的扩展名（小写）；不在这个名单里的格式直接说"读不了"，而不是硬试。
 const SUPPORTED_EXTENSIONS: &[&str] = &["xls", "xla", "xlsx", "xlsm", "xlam", "xlsb", "ods"];
@@ -213,6 +213,8 @@ pub fn write_xlsx(path: &Path, rows: &[Vec<String>], sheet_name: &str) -> Result
     let trimmed = sheet_name.trim();
     let name = if trimmed.is_empty() { DEFAULT_SHEET_NAME } else { trimmed };
 
+    // 日期格式只建一次：`yyyy-mm-dd` 与我们读出来的写法一致，往返稳定。
+    let date_format = Format::new().set_num_format("yyyy-mm-dd");
     let mut workbook = Workbook::new();
     {
         let worksheet = workbook.add_worksheet();
@@ -227,7 +229,16 @@ pub fn write_xlsx(path: &Path, rows: &[Vec<String>], sheet_name: &str) -> Result
                 if cell.is_empty() {
                     continue;
                 }
-                if let Some(number) = number_literal(cell) {
+                if let Some((year, month, day)) = iso_date_literal(cell) {
+                    let value = XlsxDateTime::from_ymd(year as u16, month as u8, day as u8).map_err(|error| {
+                        SheetError::Broken(format!("{}（日期写不进去：{}）", path.display(), error))
+                    })?;
+                    worksheet
+                        .write_datetime_with_format(row, column, &value, &date_format)
+                        .map_err(|error| {
+                            SheetError::Broken(format!("{}（写不进去：{}）", path.display(), error))
+                        })?;
+                } else if let Some(number) = number_literal(cell) {
                     worksheet.write_number(row, column, number).map_err(|error| {
                         SheetError::Broken(format!("{}（写不进去：{}）", path.display(), error))
                     })?;
@@ -254,18 +265,82 @@ fn number_literal(cell: &str) -> Option<f64> {
     if cell.is_empty() {
         return None;
     }
-    if let Ok(value) = cell.parse::<i64>() {
-        if value.to_string() == cell && value >= -(1_i64 << 53) && value <= (1_i64 << 53) {
-            return Some(value as f64);
-        }
+    // 只接受"干干净净的十进制数"：可选负号 + 整数部分 + 可选小数部分。
+    // 明确**不**当成数字的写法，以及为什么不：
+    //   `00123`   前导 0 —— 那是编号/工号，写成数字会把 0 吃掉（她最恨这个）
+    //   ` 1200`   带空格 —— 空格是她表里真实的内容，不许替她"修好"
+    //   `1,200`   千分位 —— 含义随语言环境变（也可能是编号），宁可保持原样
+    //   `1e3`     科学计数 —— 报告里几乎不会这么写，含义可疑
+    //   `12%`     百分号 —— 要变成 0.12 再加百分比格式，属于"替她改数据"
+    // 但 `2040.00` / `0.50` / `-300.00` **必须**是数字：财务表里金额就是这么写的，
+    // 写成文本的话她在 Excel 里一求和会得到 0 —— 而她只会求和。
+    let unsigned = cell.strip_prefix('-').unwrap_or(cell);
+    let (int_part, frac_part) = match unsigned.split_once('.') {
+        Some((int_part, frac_part)) => (int_part, Some(frac_part)),
+        None => (unsigned, None),
+    };
+    if int_part.is_empty() || !int_part.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
-    if let Ok(value) = cell.parse::<f64>() {
-        if value.is_finite() && format!("{value}") == cell {
-            return Some(value);
+    if int_part.len() > 1 && int_part.starts_with('0') {
+        return None;
+    }
+    if let Some(frac_part) = frac_part {
+        if frac_part.is_empty() || !frac_part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
         }
     }
-    None
+    let value: f64 = cell.parse().ok()?;
+    if !value.is_finite() || value.abs() > 9_007_199_254_740_992.0 {
+        return None;
+    }
+    Some(value)
+}
+
+/// 这个月有几天（含闰年）。自己算而不是借库：读库与写库各有一个同名日期类型，
+/// 这里不该为了一行校验去挑一个背上来。
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 => {
+            let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+            if leap { 29 } else { 28 }
+        }
+        _ => 0,
+    }
+}
+
+/// 只认 `YYYY-MM-DD` 这一种写法，并且**必须是合法日期**（2 月 30 日不算）。
+///
+/// 为什么只认这一种：它无歧义（不像 `2026/7/1` 或 `07/01/2026` 那样随语言环境变），
+/// 而且正是我们自己读表时统一输出的形式。所以"读出来再写回去"能把日期**还原成
+/// 真日期**，她在 Excel 里排序、算天数都照常；其它写法一律保持文本，不替她猜。
+fn iso_date_literal(cell: &str) -> Option<(i32, u32, u32)> {
+    let bytes = cell.as_bytes();
+    if bytes.len() != 10 {
+        return None;
+    }
+    let shaped = bytes
+        .iter()
+        .enumerate()
+        .all(|(index, byte)| {
+            if index == 4 || index == 7 {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_digit()
+            }
+        });
+    if !shaped {
+        return None;
+    }
+    let year = cell[0..4].parse::<i32>().ok()?;
+    let month = cell[5..7].parse::<u32>().ok()?;
+    let day = cell[8..10].parse::<u32>().ok()?;
+    if day < 1 || day > days_in_month(year, month) {
+        return None;
+    }
+    Some((year, month, day))
 }
 
 // ---------------------------------------------------------------------------
@@ -542,6 +617,37 @@ mod tests {
             other => panic!("expected NotFound, got {other:?}"),
         }
         assert!(describe(&path).unwrap_err().to_string().contains("文件不存在"));
+    }
+
+    #[test]
+    #[test]
+    fn money_written_with_two_decimals_stays_a_number() {
+        // 财务表里的金额通常写成 `2040.00`。它必须是**数字**，否则她在 Excel 里
+        // 一求和会得到 0 —— 而求和是她唯一熟练的操作。
+        assert_eq!(number_literal("2040.00"), Some(2040.0));
+        assert_eq!(number_literal("-300.00"), Some(-300.0));
+        assert_eq!(number_literal("0.50"), Some(0.5));
+        assert_eq!(number_literal("1200"), Some(1200.0));
+        assert_eq!(number_literal("1200.5"), Some(1200.5));
+
+        // 这些必须保持文本，理由写在 number_literal 的注释里。
+        for text in ["00123", " 1200", "1200 ", "1,200", "1e3", "12%", "2026-07-01", "", "-", ".5", "1.", "五"] {
+            assert_eq!(number_literal(text), None, "{text:?} 不该被当成数字");
+        }
+    }
+
+    #[test]
+    fn iso_dates_come_back_as_real_dates() {
+        // 只认 ISO 写法，而且必须是合法日期。
+        assert_eq!(iso_date_literal("2026-07-01"), Some((2026, 7, 1)));
+        assert_eq!(iso_date_literal("2024-02-29"), Some((2024, 2, 29)));
+        assert_eq!(iso_date_literal("2026-02-30"), None, "2 月 30 日不是合法日期");
+        assert_eq!(iso_date_literal("2026-13-01"), None);
+        for text in ["2026/07/01", "07/01/2026", "2026-7-1", "20260701", "2026-07-01 09:00", ""] {
+            assert_eq!(iso_date_literal(text), None, "{text:?} 不该被当成日期");
+        }
+        // 汉字不能让它 panic（切片必须落在字符边界上）。
+        assert_eq!(iso_date_literal("二〇二六年七月"), None);
     }
 
     #[test]

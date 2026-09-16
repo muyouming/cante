@@ -20,6 +20,7 @@ import { WECHAT_TASKS } from "./wechat.ts";
 import { SHEET_TASKS } from "./sheet.ts";
 import { BY_MONTH_TASKS } from "./bymonth.ts";
 import { SUMMARY_TASKS } from "./summary.ts";
+import { CHECK_TASKS } from "./check.ts";
 
 export type TaskGroup = "表格" | "文件" | "微信" | "文书" | "资料";
 
@@ -108,6 +109,7 @@ export const TASKS: TaskDef[] = [
   ...BY_MONTH_TASKS,
   ...DOCUMENT_TASKS,
   ...SUMMARY_TASKS,
+  ...CHECK_TASKS,
   ...WECHAT_TASKS,
 ];
 
