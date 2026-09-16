@@ -133,8 +133,10 @@ jobs:
           & $gsudo --integrity Medium node "$env:GITHUB_WORKSPACE\gui\e2e-windows\smoke.mjs"
           exit $LASTEXITCODE
 
-      # On failure this is the diagnosis: a screenshot, the rendered text and the
-      # page HTML, next to the tauri-driver log in the step output.
+      # The diagnosis when something goes wrong: a screenshot, the rendered text
+      # and the page HTML, next to the tauri-driver log in the step output.
+      # Uploaded on every run on purpose — the screenshots are also how a human
+      # sees what the real WebView2 actually painted, on a green run too.
       - name: Upload the UI smoke evidence
         if: always()
         uses: actions/upload-artifact@v7
