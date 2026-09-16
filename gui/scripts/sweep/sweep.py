@@ -47,6 +47,12 @@ import generate  # noqa: E402  （同目录的 fixture 生成器）
 # 设成 600 会把成功误判成失败（真机上就这么误判过一次）。可用 --timeout 覆盖，
 # 也可用环境变量 SWEEP_TIMEOUT 一次性改掉。
 DEFAULT_TIMEOUT = int(os.environ.get("SWEEP_TIMEOUT", "1800"))
+# "卡住"判据：这么久**一个事件都没有**才算卡住。为什么不用墙钟判成败：一张正常的卡
+# 只要 30–60 秒，但慢模型会到 850 秒；用墙钟会把"慢但在推进"误判成失败。而模型在流式
+# 输出（ThinkingDelta 每秒好几条），所以**长时间零事件**才是真的出事（循环、网关断线
+# 后不恢复）。默认 300 秒：留够网关"重连 60 秒 × 4 次"的自救时间，因为每次重连尝试都会
+# 发一条事件、会重置这个计时。
+DEFAULT_STALL_TIMEOUT = int(os.environ.get("SWEEP_STALL_TIMEOUT", "300"))
 DEFAULT_MODEL = "ocg/deepseek-flash"
 DEFAULT_PROVIDER = "openai-compatible"
 
@@ -717,6 +723,8 @@ class Runner:
             "pauses": 0,
             "messages": [],
             "timeout": False,
+            "stalled": False,
+            "silent_seconds": 0.0,
         }
         event_log = open(os.path.join(run_dir, "sweep-events.jsonl"), "a", encoding="utf-8")
 
@@ -754,13 +762,20 @@ class Runner:
             sent_at = time.monotonic()
             send({"op": {"UserInput": prompt}, "id": op_id()})
             deadline = sent_at + self.options.timeout
+            last_sign = sent_at
             pending_approvals: set[str] = set()
 
             while time.monotonic() < deadline:
                 try:
                     tag, line = events.get(timeout=0.5)
                 except queue.Empty:
+                    # 没有任何动静：只有超过 stall 上限才算卡住（慢但在推进的不算）。
+                    if time.monotonic() - last_sign > self.options.stall_timeout:
+                        record["stalled"] = True
+                        record["silent_seconds"] = time.monotonic() - last_sign
+                        break
                     continue
+                last_sign = time.monotonic()
                 if tag == "err":
                     if line.strip():
                         record["stderr"].append(line)
@@ -887,6 +902,20 @@ class Runner:
             detail = (changed + moved)[:3]
             return "failed", f"原件被动过（改内容或改名）：{', '.join(detail)}"
 
+        # "卡住"先判：它和"总时长到顶"是两回事，而且卡住前也可能已经产出了文件。
+        if record.get("stalled"):
+            if read_ok:
+                names = [os.path.basename(item["path"]) for item in read_ok]
+                notes = [item["note"] for item in read_ok[:3]]
+                return (
+                    "stalled_output",
+                    f"{human_time(record.get('silent_seconds', 0))} 里一个动静都没有（卡住了），"
+                    f"但已产出可读文件：{'、'.join(names)}；{'; '.join(notes)}",
+                )
+            return (
+                "failed",
+                f"{human_time(record.get('silent_seconds', 0))} 里一个动静都没有（卡住了），已停下",
+            )
         if record["timeout"]:
             if read_ok:
                 names = [os.path.basename(item["path"]) for item in read_ok]
@@ -1034,6 +1063,12 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="真机任务普查")
     parser.add_argument("cards", nargs="*", help="只跑这些卡（默认全部）")
     parser.add_argument("--skip", default="", help="这次不跑的卡，逗号分隔（沿用上次攒下的结果）")
+    parser.add_argument(
+        "--stall-timeout",
+        type=int,
+        default=DEFAULT_STALL_TIMEOUT,
+        help="多少秒没有任何事件算卡住（默认 300；慢模型不用调这个词，调 --timeout）",
+    )
     parser.add_argument(
         "--timeout",
         type=int,
