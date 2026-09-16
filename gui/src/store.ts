@@ -269,6 +269,11 @@ export interface Store {
   cancelRun(): void;
   /** Hide the finished/failed card and go back to the task list. */
   dismissRun(): void;
+  /**
+   * r7 — answer the question a finished run stopped on, continuing the same job.
+   * Only does anything when the run has stopped (done / failed / cancelled).
+   */
+  replyToRun(text: string): Promise<void>;
   /** #43 — put a run back without the assistant's help. */
   undoRun(id: string): Promise<void>;
   /** Re-read the on-disk run log (also runs at launch). */
@@ -1785,6 +1790,35 @@ export function createStore(): Store {
   }
 
   /**
+   * r7 — reply to the question a stopped run ended on.
+   *
+   * The task prompts deliberately tell the assistant to stop and ask when it is
+   * unsure (列名不一致就先问我一句 — the #63 promise), so a run can end asking
+   * instead of handing over a result. The answer box on the result card calls
+   * this: the *same* run goes back to `running`, the previous error/result are
+   * cleared, and the progress cursor is kept — the cursor only ever moves
+   * forward, and answering a question continues the job rather than restarting
+   * it.
+   *
+   * A fresh snapshot is taken before the reply goes out. Without it the
+   * continuation's diff would compare against an empty before-state and report
+   * the user's existing files as if this turn had created them; the undo record
+   * built from that diff would then be able to touch her originals. Snapshotting
+   * first keeps both the result and the one-click undo honest for this turn.
+   */
+  async function replyToRun(text: string): Promise<void> {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    const run = currentRun();
+    if (!run) return;
+    if (run.state !== "done" && run.state !== "failed" && run.state !== "cancelled") return;
+    const next: TaskRun = { ...run, state: "running", error: null, result: null };
+    setCurrentRun(next);
+    await beginSnapshot(next);
+    await sendRunInstruction(trimmed);
+  }
+
+  /**
    * End of a run. The metadata-only before/after diff is taken here, not from
    * the assistant's own report, so the numbers can be trusted even when the
    * assistant is confused.
@@ -1822,7 +1856,12 @@ export function createStore(): Store {
       await refreshRuns();
     } finally {
       runFinishing = false;
-      pendingSnapshot = null;
+      // Normally the run is over and the snapshot is done with. But a reply can
+      // land while this close-out is still polishing the record; the answer
+      // path has already taken its own fresh snapshot for the continuation, and
+      // clearing it here would leave that turn diffing against an empty
+      // before-state.
+      if (currentRun()?.state !== "running") pendingSnapshot = null;
     }
   }
 
@@ -1926,6 +1965,7 @@ export function createStore(): Store {
     dryRun,
     cancelRun,
     dismissRun,
+    replyToRun,
     undoRun,
     refreshRuns,
   };
