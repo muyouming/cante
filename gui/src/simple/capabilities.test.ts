@@ -43,6 +43,21 @@ describe("sheetPromptLine", () => {
     // 结果必须写成 .xlsx，不能因为缺别的工具就换格式。
     expect(line).toContain("不要因为缺少别的工具就改成别的格式");
   });
+
+  test("可用时写清 #95 契约：结果必须新文件名、不覆盖、一次一张表", () => {
+    const line = sheetPromptLine({ available: true, path: "/opt/cante-sheets" }) ?? "";
+    // 结果文件必须是还不存在的新名字。
+    expect(line).toContain("还不存在");
+    expect(line).toContain("新文件名");
+    // 已存在就拒绝，不覆盖，并给出路（换一个新名字）。
+    expect(line).toContain("不会覆盖");
+    expect(line).toContain("换一个新名字");
+    // 一次只写一张表：不追加、不改已有文件。
+    expect(line).toContain("只写出一张表");
+    expect(line).toContain("不会往已有文件里追加表");
+    // 表名规则也要说清。
+    expect(line).toContain("不能超过 31 个字");
+  });
 });
 
 describe("sheetFallbackNote", () => {
