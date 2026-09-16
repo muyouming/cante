@@ -3,8 +3,8 @@
 // These are the cards a finance or admin user reaches for every month, so the
 // plans are written to be boringly predictable and the prompts avoid anything
 // that would make the assistant improvise with someone's numbers.
-import type { TaskDef } from "./index.ts";
-import { buildPrompt } from "./index.ts";
+import type { TaskDef } from "./types.ts";
+import { buildPrompt } from "./prompt.ts";
 
 const SHEET_TYPES = ["xlsx", "xls", "csv"];
 

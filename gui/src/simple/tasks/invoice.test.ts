@@ -10,7 +10,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { INVOICE_TASKS } from "./invoice.ts";
-import type { TaskDef } from "./index.ts";
+import type { TaskDef } from "./types.ts";
 
 /** 王姐不该在卡片上读到的词。 */
 const JARGON = [

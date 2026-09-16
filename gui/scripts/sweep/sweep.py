@@ -43,7 +43,10 @@ FIXTURE_GEN = os.path.join(GUI_ROOT, "fixtures", "sweep", "generate.py")
 sys.path.insert(0, os.path.dirname(FIXTURE_GEN))
 import generate  # noqa: E402  （同目录的 fixture 生成器）
 
-DEFAULT_TIMEOUT = 600  # 单卡上限，秒
+# 单卡上限（秒）。**必须给慢模型留足**：实测同一张卡在慢模型上要 850 秒，
+# 设成 600 会把成功误判成失败（真机上就这么误判过一次）。可用 --timeout 覆盖，
+# 也可用环境变量 SWEEP_TIMEOUT 一次性改掉。
+DEFAULT_TIMEOUT = int(os.environ.get("SWEEP_TIMEOUT", "1800"))
 DEFAULT_MODEL = "ocg/deepseek-flash"
 DEFAULT_PROVIDER = "openai-compatible"
 
@@ -1031,7 +1034,12 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description="真机任务普查")
     parser.add_argument("cards", nargs="*", help="只跑这些卡（默认全部）")
     parser.add_argument("--skip", default="", help="这次不跑的卡，逗号分隔（沿用上次攒下的结果）")
-    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help="单卡上限，秒")
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT,
+        help="单卡上限，秒（默认 1800，慢模型别调小；也可用 SWEEP_TIMEOUT 覆盖）",
+    )
     parser.add_argument("--work", default=os.path.join(HERE, "work"), help="工作目录")
     parser.add_argument("--report", default=os.path.join(HERE, "report.md"), help="报告写到哪")
     parser.add_argument("--no-fixtures", action="store_true", help="不重新生成 fixture")

@@ -4,8 +4,8 @@
 // document. The tone is part of the product — a leave note to a manager and a
 // holiday notice to a whole company are not written the same way — so every
 // prompt asks for the tone before writing and offers a way to change it.
-import type { TaskDef } from "./index.ts";
-import { buildPrompt } from "./index.ts";
+import type { TaskDef } from "./types.ts";
+import { buildPrompt } from "./prompt.ts";
 
 /** The shared closing for the writing jobs: save a real file, not a chat reply. */
 const WRITE_HOW = [

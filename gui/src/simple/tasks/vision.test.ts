@@ -10,7 +10,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { VISION_TASKS } from "./vision.ts";
-import type { TaskDef } from "./index.ts";
+import type { TaskDef } from "./types.ts";
 
 /** 王姐不该在卡片上读到的词。 */
 const JARGON = [

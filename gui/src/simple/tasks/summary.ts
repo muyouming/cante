@@ -2,8 +2,8 @@
 //
 // 总结最容易出的问题是「看着都对，但你不知道它从哪来」。所以这条卡片的重点
 // 不是写得漂亮，而是每一条要点后面都必须标出出处，让用户能翻回原文核对。
-import type { TaskDef } from "./index.ts";
-import { buildPrompt } from "./index.ts";
+import type { TaskDef } from "./types.ts";
+import { buildPrompt } from "./prompt.ts";
 
 const DOC_TYPES = ["docx", "doc", "pdf", "txt", "md", "rtf"];
 

@@ -13,6 +13,7 @@ import type { JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
 import { visibleTasks } from "./admin-config.ts";
+import { visionAvailable } from "./capabilities.ts";
 import { availabilityHint, groupTasks, searchTasks } from "./catalog.ts";
 import { LIBRARY } from "./copy-library.ts";
 import type { TaskDef } from "./tasks/index.ts";
@@ -28,11 +29,17 @@ export interface TaskLibraryProps {
 }
 
 /** 一张结果卡片。主区域是一个大按钮；风险可以展开，所以单独放在按钮外面。 */
-function ResultCard(props: { task: TaskDef; onPick(task: TaskDef): void }): JSX.Element {
+function ResultCard(props: {
+  task: TaskDef;
+  /** 当前模型能不能看图：看不了才把「要读图片」的卡标成做不到。 */
+  canSeeImages: boolean;
+  onPick(task: TaskDef): void;
+}): JSX.Element {
   const [expanded, setExpanded] = createSignal(false);
   const risks = () => props.task.risks ?? [];
   const visibleRisks = () => (expanded() ? risks() : risks().slice(0, 1));
-  const hint = () => availabilityHint(props.task);
+  // 能不能看图取决于当前模型：看不了才标「做不到」，别把能做的事实说成做不到。
+  const hint = () => availabilityHint(props.task, props.canSeeImages);
   const needsText = () => LIBRARY.needs[props.task.needs];
 
   return (
@@ -88,6 +95,8 @@ function ResultCard(props: { task: TaskDef; onPick(task: TaskDef): void }): JSX.
 }
 
 export default function TaskLibrary(props: TaskLibraryProps): JSX.Element {
+  // 视觉能力只查一次：它来自会话里的模型信息，不会在一次打开浮层期间变化。
+  const canSeeImages = (): boolean => visionAvailable(props.store.session());
   const [query, setQuery] = createSignal("");
   let searchInput: HTMLInputElement | undefined;
 
@@ -154,7 +163,7 @@ export default function TaskLibrary(props: TaskLibraryProps): JSX.Element {
                     <h3 class="text-[20px] font-semibold text-slate-200">{section.group}</h3>
                     <div class="mt-3 flex flex-col gap-3">
                       <For each={section.tasks}>
-                        {(task) => <ResultCard task={task} onPick={(picked) => props.onPick(picked)} />}
+                        {(task) => <ResultCard task={task} canSeeImages={canSeeImages()} onPick={(picked) => props.onPick(picked)} />}
                       </For>
                     </div>
                   </section>
@@ -195,7 +204,7 @@ export default function TaskLibrary(props: TaskLibraryProps): JSX.Element {
               </h3>
               <div class="mt-3 flex flex-col gap-3">
                 <For each={hits()}>
-                  {(task) => <ResultCard task={task} onPick={(picked) => props.onPick(picked)} />}
+                  {(task) => <ResultCard task={task} canSeeImages={canSeeImages()} onPick={(picked) => props.onPick(picked)} />}
                 </For>
               </div>
             </Show>

@@ -7,8 +7,8 @@
 // 写法沿用 excel.ts 的样板：plan 是固定文字（确认页每次都一样），risks 是能被用户
 // 对着自己文件核对的具体情况，prompt 走公共信封。发票字段一律照原文搬，拿不到的
 // 留空，绝不用别的发票补；扫描件/乱码先停下来说明，不把噪声当结果。
-import type { TaskDef } from "./index.ts";
-import { buildPrompt } from "./index.ts";
+import type { TaskDef } from "./types.ts";
+import { buildPrompt } from "./prompt.ts";
 
 const SHEET_TYPES = ["xlsx", "xls", "csv"];
 

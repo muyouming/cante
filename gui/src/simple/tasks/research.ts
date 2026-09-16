@@ -14,8 +14,8 @@
 //
 // 写法沿用 excel.ts 的样板：plan 是固定文字（确认页每次都一样），risks 是
 // 能对着结果核对的实际情况，prompt 走公共信封。
-import type { TaskDef } from "./index.ts";
-import { buildPrompt } from "./index.ts";
+import type { TaskDef } from "./types.ts";
+import { buildPrompt } from "./prompt.ts";
 
 const brief: TaskDef = {
   id: "research.brief",
@@ -30,6 +30,7 @@ const brief: TaskDef = {
     "另存为一个新文件，告诉你在哪里；查不到的就写查不到",
   ],
   risks: [
+    "这台电脑要是不能把结果转成 Word（.docx），我会给你一份能直接复制粘贴的文字稿，并在说明里讲清是哪种格式——不会假装已经转好了。",
     "查到的每一条都会告诉你出处，但重要数字请以官方文件为准。",
     "网上同名的文件很多，不同省市、不同年份的规定可能完全不一样；我会尽量找官方发布的、和你说的年份对得上的那一份，但请你自己再核对一遍。",
     "搜索结果的摘要可能已经过期，也可能被网站改过；钱数、比例、期限这类内容请你以官方原文为准，不要只看我抄的这一句。",

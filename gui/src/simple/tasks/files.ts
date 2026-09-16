@@ -3,8 +3,8 @@
 // Nothing here ever deletes. Renaming copies (the original stays), tidying only
 // moves within the chosen folder, and the duplicate finder only writes a list —
 // the undo layer is the safety net, but the prompt should not need it.
-import type { TaskDef } from "./index.ts";
-import { buildPrompt } from "./index.ts";
+import type { TaskDef } from "./types.ts";
+import { buildPrompt } from "./prompt.ts";
 
 /** #49 (first) — a whole pile of files gets readable names. */
 const rename: TaskDef = {

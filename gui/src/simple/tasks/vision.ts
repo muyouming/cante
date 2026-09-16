@@ -12,8 +12,8 @@
 //
 // 写法沿用 invoice.ts 的样板：plan 是固定文字（确认页每次都一样），risks 是能被
 // 用户对着自己照片核对的具体情况，prompt 走公共信封。
-import type { TaskDef } from "./index.ts";
-import { buildPrompt } from "./index.ts";
+import type { TaskDef } from "./types.ts";
+import { buildPrompt } from "./prompt.ts";
 
 /** 会被当成图片的扩展名（照片和截图）。 */
 const IMAGE_TYPES = ["jpg", "jpeg", "png", "heic", "heif", "webp", "bmp", "tif", "tiff"];

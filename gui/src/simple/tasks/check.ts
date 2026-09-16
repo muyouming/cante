@@ -7,8 +7,8 @@
 //
 // 跟 excel.ts / sheet.ts 的样板一致：plan 是固定文字（确认页每次都一样），risks
 // 是能对着自己文件核对的具体情况，prompt 走公共信封。
-import type { TaskDef } from "./index.ts";
-import { buildPrompt } from "./index.ts";
+import type { TaskDef } from "./types.ts";
+import { buildPrompt } from "./prompt.ts";
 
 const SHEET_TYPES = ["xlsx", "xls", "csv"];
 
