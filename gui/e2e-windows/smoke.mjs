@@ -315,29 +315,37 @@ async function collectEvidence(driver, tag) {
 }
 
 /** Everything we want to know about the real Windows webview but do not want
- *  to fail a build over: fonts, scale, and the runtime the app is using. */
+ *  to fail a build over: fonts, scale, and the runtime the app is using.
+ *  Printed, never asserted on — a font metric is not a regression until a human
+ *  has looked at it, and the screenshot is in the artifacts for that. */
 async function recordEnvironment(driver) {
   const facts = await driver.executeScript(() => {
-    const probe = document.createElement("span");
-    probe.style.fontSize = "16px";
-    probe.textContent = "汉字Ab";
-    document.body.appendChild(probe);
-    const box = probe.getBoundingClientRect();
-    const body = getComputedStyle(document.body);
-    const out = {
+    const measure = (text) => {
+      const probe = document.createElement("span");
+      probe.style.cssText = "font-size:16px;position:absolute;white-space:pre";
+      probe.textContent = text;
+      document.body.appendChild(probe);
+      const box = probe.getBoundingClientRect();
+      probe.remove();
+      return `${Math.round(box.width * 10) / 10}×${Math.round(box.height * 10) / 10}`;
+    };
+    return {
       userAgent: navigator.userAgent,
       devicePixelRatio: window.devicePixelRatio,
       viewport: `${window.innerWidth}×${window.innerHeight}`,
-      bodyFont: body.fontFamily,
-      sample: `${Math.round(box.width)}×${Math.round(box.height)}`,
+      bodyFont: getComputedStyle(document.body).fontFamily,
+      latin: measure("AA"),
+      han: measure("汉字"),
+      mixed: measure("汉字Ab"),
+      // Is the Windows CJK fallback font there at all?
+      yahei: document.fonts.check("16px 'Microsoft YaHei'"),
     };
-    probe.remove();
-    return out;
   });
   note(`WebView2 / UA：${facts.userAgent}`);
   note(`窗口视口：${facts.viewport}，devicePixelRatio ${facts.devicePixelRatio}`);
   note(`body 字体栈：${facts.bodyFont}`);
-  note(`16px「汉字Ab」的盒子：${facts.sample}`);
+  note(`16px 的盒子：拉丁 AA=${facts.latin}，中文 汉字=${facts.han}，混排 汉字Ab=${facts.mixed}`);
+  note(`系统 CJK 字体 Microsoft YaHei 可用：${facts.yahei}`);
   return facts;
 }
 
