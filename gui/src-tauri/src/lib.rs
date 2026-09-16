@@ -80,6 +80,7 @@ pub fn run() {
             files::reveal_path,
             files::begin_run,
             files::snapshot_paths,
+            files::file_facts,
             files::save_run,
             files::run_log,
             files::undo_run,

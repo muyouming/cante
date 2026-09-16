@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cante_gui_lib::files::{
-    backup_files, diff_snapshots, is_ignored_dir, read_runs, roots_of, scan_roots, undo_files,
-    upsert_run, BeforeState, FileMeta,
+    backup_files, diff_snapshots, fact_for, facts_of, is_ignored_dir, read_runs, roots_of,
+    scan_roots, undo_files, upsert_run, BeforeState, FileMeta,
 };
 use serde_json::json;
 
@@ -317,4 +317,95 @@ fn paths_are_reported_with_forward_slashes() {
         "every path uses `/`: {paths:?}"
     );
     assert!(paths.iter().any(|path| path.ends_with("nested/deep.txt")), "{paths:?}");
+}
+
+// ---------------------------------------------------------------------------
+// Result verification (#trust): facts, not errors
+//
+// The result card says "I checked" only if this layer can answer 在不在 / 多大 /
+// 能不能打开 honestly. So the core promise is: nothing here errors and nothing
+// here panics — a missing path, a folder, and a file we may not read each come
+// back as a *fact*.
+// ---------------------------------------------------------------------------
+
+fn fact_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+#[test]
+fn a_real_file_reports_its_size_and_readability() {
+    let temp = TempDir::new("facts");
+    let file = temp.path().join("结果.txt");
+    write(&file, "hello");
+
+    let facts = facts_of(std::slice::from_ref(&file));
+    assert_eq!(facts.len(), 1);
+    assert_eq!(facts[0].path, fact_path(&file));
+    assert!(facts[0].exists);
+    assert_eq!(facts[0].size, Some(5));
+    assert!(facts[0].readable);
+    assert!(facts[0].modified_ms.is_some(), "mtime should be known for a fresh file");
+}
+
+#[test]
+fn a_missing_path_is_a_fact_not_an_error() {
+    let temp = TempDir::new("facts-missing");
+    let gone = temp.path().join("这一点也没有.txt");
+    let fact = fact_for(&gone);
+    assert!(!fact.exists);
+    assert_eq!(fact.size, None);
+    assert_eq!(fact.modified_ms, None);
+    assert!(!fact.readable);
+    assert_eq!(fact.path, fact_path(&gone));
+}
+
+#[test]
+fn a_folder_exists_but_is_not_an_openable_result_file() {
+    let temp = TempDir::new("facts-dir");
+    let folder = temp.path().join("result-folder");
+    fs::create_dir_all(&folder).unwrap();
+
+    let fact = fact_for(&folder);
+    assert!(fact.exists, "a folder exists");
+    assert_eq!(fact.size, None, "a folder has no result-file size");
+    assert!(!fact.readable, "a folder is not an openable result file");
+}
+
+#[test]
+fn an_empty_list_yields_no_facts() {
+    assert!(facts_of(&[]).is_empty());
+}
+
+#[test]
+fn facts_keep_the_order_they_were_asked_in_and_never_drop_a_path() {
+    let temp = TempDir::new("facts-order");
+    let one = temp.path().join("一.txt");
+    let two = temp.path().join("二.txt");
+    write(&one, "1");
+    let facts = facts_of(&[two.clone(), one.clone()]);
+    assert_eq!(facts.len(), 2);
+    assert_eq!(facts[0].path, fact_path(&two));
+    assert_eq!(facts[1].path, fact_path(&one));
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_file_is_reported_as_unreadable_not_as_missing() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = TempDir::new("facts-perm");
+    let file = temp.path().join("locked.txt");
+    write(&file, "secret");
+    fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+
+    // Running as root (some CI containers) ignores the mode entirely. Assert
+    // the *honest* answer either way: whatever `File::open` says is the fact.
+    let denied = fs::File::open(&file).is_err();
+    let fact = fact_for(&file);
+    assert!(fact.exists, "the file is still there");
+    assert_eq!(fact.readable, !denied, "readable must mirror what open() says");
+    assert_eq!(fact.size, Some(6), "size is readable from metadata even when open fails");
+
+    // Restore so the TempDir cleanup can remove it.
+    let _ = fs::set_permissions(&file, fs::Permissions::from_mode(0o600));
 }
