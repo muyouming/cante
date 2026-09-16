@@ -8,6 +8,9 @@
 
 import { describe, expect, mock, test } from "bun:test";
 
+import { FORMAT_COPY } from "./copy-capability.ts";
+import { inspectSelection } from "./format-check.ts";
+
 // 让探测必失败：模拟"这台电脑没有桌面程序 / 命令报错"。
 mock.module("../tauri.ts", () => ({
   invoke: async () => {
@@ -20,6 +23,8 @@ mock.module("../tauri.ts", () => ({
 }));
 
 const {
+  formatAdviceNote,
+  formatStartBlockNote,
   initCapabilities,
   initSheetCapability,
   pdfCapability,
@@ -127,5 +132,58 @@ describe("initCapabilities", () => {
 
   test("initSheetCapability 仍是同一个入口（旧名字保留）", () => {
     expect(initSheetCapability).toBe(initCapabilities);
+  });
+});
+
+// #88 — 读不了的格式（WPS / 苹果自己的），要跑之前就说清。
+
+describe("sheetPromptLine 里的 WPS / 苹果格式规矩（#88）", () => {
+  test("告诉助手这些格式读不了，而且要说清 + 跳过 + 把能读的做完", () => {
+    const line = sheetPromptLine({ available: true, path: "/opt/cante-sheets" }) ?? "";
+    // 六种格式一个不少。
+    for (const extension of [".et", ".ett", ".wps", ".dps", ".pages", ".numbers"]) {
+      expect(line).toContain(extension);
+    }
+    expect(line).toContain("WPS");
+    // 不许硬试、不许把整件事停下。
+    expect(line).toContain("不要反复重试");
+    // 要跳过后继续做能读的，并写清跳过了哪几份。
+    expect(line).toContain("跳过");
+    expect(line).toContain("其余能读的文件做完");
+    expect(line).toContain("跳过了哪几份");
+    // 给用户的出路是另存为 Excel / Word。
+    expect(line).toContain("另存为");
+  });
+});
+
+describe("formatAdviceNote / formatStartBlockNote（#88）", () => {
+  test("ok 时两句都不说（没得说就不打扰她）", () => {
+    expect(formatAdviceNote({ kind: "ok" })).toBeNull();
+    expect(formatStartBlockNote({ kind: "ok" })).toBeNull();
+  });
+
+  test("convert-first：给那句另存为，并禁用开始（按钮旁边解释为什么）", () => {
+    const verdict = inspectSelection(["C:/桌面/销售表.et"]);
+    expect(formatAdviceNote(verdict)).toBe(FORMAT_COPY.wpsConvertAdvice);
+    expect(formatStartBlockNote(verdict)).toBe(FORMAT_COPY.startBlocked);
+  });
+
+  test("some-unreadable：说要跳过，但**不禁用**开始（其余的照做）", () => {
+    const verdict = inspectSelection(["C:/桌面/销售表.et", "C:/桌面/三月.xlsx"]);
+    expect(formatAdviceNote(verdict)).toBe(FORMAT_COPY.skipSomeAdvice);
+    expect(formatStartBlockNote(verdict)).toBeNull();
+  });
+
+  test("mixed-nothing-readable：也给禁用理由（一个都读不了）", () => {
+    const verdict = inspectSelection(["C:/桌面/销售表.et", "C:/桌面/简报.pages"]);
+    expect(formatAdviceNote(verdict)).toBe(FORMAT_COPY.mixedConvertAdvice);
+    expect(formatStartBlockNote(verdict)).toBe(FORMAT_COPY.startBlocked);
+  });
+
+  test("和「缺工具」是两件事，句子不重复", () => {
+    const missingTool = sheetFallbackNote({ available: false }) ?? "";
+    expect(FORMAT_COPY.wpsConvertAdvice).not.toBe(missingTool);
+    // 缺工具那句说的是另存成 CSV，格式这句说的是在 WPS 里另存为 xlsx。
+    expect(FORMAT_COPY.wpsConvertAdvice).not.toContain("装一次表格工具");
   });
 });
