@@ -189,7 +189,13 @@ describe("confirmation gate", () => {
     const begin = opCalls("begin_run")[0] as { id: string; paths: string[] };
     expect(begin.paths).toEqual(["/work/a.xlsx"]);
     expect(typeof begin.id).toBe("string");
-    expect(opCalls("send_input")).toEqual([{ text: "把这些表合起来", mode: "prompt" }]);
+    // 发出去的必须是**卡片提示词 + 她那一句话**：卡片里的安全规矩（原文件只读、
+    // 结果另存）全在提示词里，而这条线曾经断过——只发她那一句话，规矩到不了助手。
+    const sent = opCalls("send_input")[0] as { text: string; mode: string };
+    expect(sent.mode).toBe("prompt");
+    expect(sent.text).toContain("把这些表合起来");
+    expect(sent.text).toContain("原来的文件一张都不要改");
+    expect(sent.text.length).toBeGreaterThan(200);
   });
 
   test("the red overwrite checkbox is the only way consent is appended", async () => {

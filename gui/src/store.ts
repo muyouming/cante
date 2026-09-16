@@ -37,6 +37,9 @@ import {
   type TaskRun,
   type TaskRunUndo,
 } from "./simple/run.ts";
+// 卡片提示词（`instructionFor`）：卡片里写好的步骤与安全规矩必须真的发出去，
+// 见 `composedInstruction`。曾经因为漏了这条导入路径，卡片的规矩从未到达助手。
+import { instructionFor } from "./simple/tasks/index.ts";
 import {
   dueSchedules,
   newScheduleId,
@@ -970,6 +973,22 @@ export function createStore(): Store {
     }
   }
 
+  /**
+   * 真正发出去的指令 = **卡片里写好的提示词** + 用户那一句话。
+   *
+   * 这是一条曾经断掉的线：卡片（`tasks/*.ts`）里写满了"以第一张表的列名为准""原表
+   * 一张都不要动""结果另存新文件"这类规矩，`instructionFor()` 会把它们拼成完整指令，
+   * 但生产路径只发了用户那句话——也就是说**卡片的规矩从来没到过助手那里**，界面上
+   * 承诺的安全动作全靠运气。（真机上发现：我的验收脚本用的是 `task.prompt()`，所以
+   * 一直看着像对的。）
+   *
+   * 找不到卡片（历史记录里的旧任务、或者"直接说一件事"的自由任务）就退回原话。
+   */
+  function composedInstruction(run: TaskRun): string {
+    const composed = instructionFor(run.taskId, run.files, run.instruction);
+    return composed && composed.trim().length > 0 ? composed : run.instruction;
+  }
+
   async function sendRunInstruction(text: string): Promise<void> {
     // A run can start before the host has finished opening its session (the
     // health probe and the first task run on different clocks). Open one with
@@ -1050,7 +1069,8 @@ export function createStore(): Store {
     setCurrentRun(next);
     markProgressRunning();
     await beginSnapshot(next);
-    await sendRunInstruction(allowOverwrite ? run.instruction + OVERWRITE_CONSENT : run.instruction);
+    const instruction = composedInstruction(run);
+    await sendRunInstruction(allowOverwrite ? instruction + OVERWRITE_CONSENT : instruction);
   }
 
   async function dryRun(): Promise<void> {
@@ -1060,7 +1080,7 @@ export function createStore(): Store {
     setCurrentRun(next);
     markProgressRunning();
     await beginSnapshot(next);
-    await sendRunInstruction(dryRunInstruction(run.instruction));
+    await sendRunInstruction(dryRunInstruction(composedInstruction(run)));
   }
 
   function cancelRun(): void {

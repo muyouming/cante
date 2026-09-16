@@ -624,6 +624,37 @@ describe("replyToRun", () => {
     await Bun.sleep(20);
   }
 
+  test("确认时发出的是卡片提示词，不只是用户那句话（这条线曾经断过）", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这两张表合成一张");
+    await store.confirmRun();
+
+    const sent = opCalls("send_input") as Array<{ text: string; mode: string }>;
+    const text = sent.at(-1)?.text ?? "";
+
+    // 她说过的那句话必须还在。
+    expect(text).toContain("把这两张表合成一张");
+    // 卡片的规矩也必须在——这就是曾经的断点：卡片提示词从来没被发出去。
+    expect(text).toContain("原来的文件一张都不要改");
+    // 卡片提示词是有结构的（要做的事 / 文件 / 怎么做），不可能只有一句话那么短。
+    expect(text.length).toBeGreaterThan(200);
+    dispose();
+  });
+
+  test("试跑发出去的也是卡片提示词", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/a.xlsx"], "把这两张表合成一张");
+    await store.dryRun();
+
+    const sent = opCalls("send_input") as Array<{ text: string }>;
+    const text = sent.at(-1)?.text ?? "";
+    expect(text).toContain("原来的文件一张都不要改");
+    // 试跑的约束是**拼在卡片提示词之后**的，两段都要在。
+    expect(text).toContain("这次只试跑");
+    expect(text.indexOf("原来的文件一张都不要改")).toBeLessThan(text.indexOf("这次只试跑"));
+    dispose();
+  });
+
   test("does nothing when there is no run", async () => {
     const { store, dispose } = await setup();
     await store.replyToRun("金额（元）就是金额");
