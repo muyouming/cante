@@ -146,7 +146,12 @@ fn diff_reports_created_modified_and_deleted() {
 
     let (before, _) = scan_roots(std::slice::from_ref(&folder), 1_000);
     write(&folder.join("new.txt"), "hello");
-    write(&edit, "after!");
+    // Change the length *and* the line count, not just the bytes: a machine
+    // whose clock ticks coarsely (CI runners) can stamp two writes with the
+    // same mtime, and a same-length edit would then look untouched. The
+    // comparison itself checks size, mtime and lines, so this exercises it
+    // without depending on timer resolution.
+    write(&edit, "after!\nsecond line\n");
     fs::remove_file(&gone).unwrap();
     let (after, _) = scan_roots(std::slice::from_ref(&folder), 1_000);
 
