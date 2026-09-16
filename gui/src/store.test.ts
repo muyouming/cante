@@ -139,6 +139,11 @@ describe("hydration and connection", () => {
   test("auto-opens a session when the host has none", async () => {
     const { store, dispose } = await setup([], null);
     expect(opCalls("start_session")).toHaveLength(1);
+    // #60: the session opens with cante's `Auto` policy, so a non-technical user
+    // is not asked a permission question per tool call. Her gate is the
+    // confirmation sheet before the run, and the approval sheet if cante still
+    // stops — never a silent hang.
+    expect(opCalls("start_session")[0]).toEqual({ permission_mode: "Auto" });
     expect(store.workspace()).toBe("/tmp/workspace");
     dispose();
   });

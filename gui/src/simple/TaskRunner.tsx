@@ -17,6 +17,7 @@ import { isBridgeAvailable } from "../tauri.ts";
 import { PROGRESS_COPY } from "./copy.ts";
 import { formatElapsed, type RunProgressView } from "./progress.ts";
 import type { TaskDef, TaskError, TaskRun } from "./tasks/index.ts";
+import ApprovalSheet from "./ApprovalSheet.tsx";
 import ConfirmSheet from "./ConfirmSheet.tsx";
 import ResultCard from "./ResultCard.tsx";
 import ErrorView from "./ErrorView.tsx";
@@ -483,6 +484,12 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
             <ConfirmSheet store={props.store} />
           </section>
         </Show>
+
+        {/* ---- Paused for approval (#60) ---- */}
+        {/* The daemon stops when it wants a tool it is unsure about. Without this
+            screen the window simply looks frozen, which a non-technical user reads
+            as "it broke". */}
+        <ApprovalSheet store={props.store} />
 
         {/* ---- Running (#62) ---- */}
         {/* She is watching a job she handed over, not reading a chat log. So
