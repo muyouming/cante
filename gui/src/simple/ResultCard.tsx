@@ -12,15 +12,20 @@ import { For, Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { FOLLOWUP, TRUST } from "./copy.ts";
+// 两轮各自的文案模块都要（核对 + 复制成微信能贴的文字）。
 import { VERIFY } from "./copy-verify.ts";
+import { SHARE, shareReadFailed } from "./copy-share.ts";
 import { SCHEDULE } from "./copy-schedule.ts";
 import { checkNoteFromRows, lastAgentText } from "./evidence.ts";
 import { endedWithQuestion } from "./followup.ts";
-import { fileName, folderName, onlineHint, onlineLabel } from "./run.ts";
+import { fileName, folderName, onlineHint, onlineLabel, type RunResultFile } from "./run.ts";
+import { CHAT_MAX_WIDTH, chatTextSummary, isTablePath, tableToChatText, type TableRow } from "./share.ts";
+import { sheetCapability } from "./capabilities.ts";
 import { describe as describeSchedule, describeCadence, type Cadence, type Schedule } from "./schedule.ts";
 import type { TaskRun } from "./tasks/index.ts";
 import { verifyResultFiles, type Verification } from "./verify.ts";
 import type { Store } from "../store.ts";
+import { errorText, invoke } from "../tauri.ts";
 
 export interface ResultCardProps {
   store: Store;
@@ -33,6 +38,38 @@ const STATE_TITLE: Record<string, string> = {
   failed: "这件事没有做完",
   cancelled: "已经停下",
 };
+
+/**
+ * 把一段文字放进剪贴板。先走系统剪贴板；在不让用的环境里退回选中复制。
+ *
+ * 复制不是发送：这里只把文字放到她的剪贴板，她自己决定发不发。
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* 退回下面的选中复制 */
+  }
+  try {
+    if (typeof document === "undefined") return false;
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.top = "-1000px";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = typeof document.execCommand === "function" && document.execCommand("copy");
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 export default function ResultCard(props: ResultCardProps): JSX.Element {
   const [showDetail, setShowDetail] = createSignal(false);
@@ -112,6 +149,50 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
       current.files,
       current.instruction,
     );
+  }
+
+  // 把表格类结果复制成微信里能贴的文字。
+  //
+  // 走的是产品真实路径：工具位置从前端探测到的表格能力里拿，内容由后端用
+  // `cante-sheets read` 读回来（见 commands.rs 的 read_result_sheet）。读不出来
+  // 时给一句能操作的说明，不静默失败，也不假装复制成功。
+  const [share, setShare] = createSignal<{ path: string; summary: string; note: string } | null>(
+    null,
+  );
+  const [sharing, setSharing] = createSignal("");
+
+  async function copyForChat(file: RunResultFile): Promise<void> {
+    const cap = sheetCapability();
+    if (!cap.available || !cap.path) {
+      setShare({ path: file.path, summary: "", note: SHARE.toolUnavailable });
+      return;
+    }
+    if (sharing() !== "") return;
+    setSharing(file.path);
+    setShare(null);
+    try {
+      const read = invoke as unknown as (
+        name: string,
+        args?: Record<string, unknown>,
+      ) => Promise<{ rows?: TableRow[] }>;
+      const response = await read("read_result_sheet", { tool: cap.path, path: file.path });
+      const rows = response?.rows ?? [];
+      const text = tableToChatText(rows, { maxWidth: CHAT_MAX_WIDTH });
+      if (text.trim() === "") {
+        setShare({ path: file.path, summary: "", note: SHARE.empty });
+        return;
+      }
+      const copied = await copyText(text);
+      setShare({
+        path: file.path,
+        summary: chatTextSummary(fileName(file.path), rows, text),
+        note: copied ? SHARE.copied : SHARE.copyFailed,
+      });
+    } catch (error) {
+      setShare({ path: file.path, summary: "", note: shareReadFailed(errorText(error)) });
+    } finally {
+      setSharing("");
+    }
   }
 
   // #55 — 以后自动做。默认「每周一 09:00」，一眼能看懂；开启后随时能停。
@@ -363,7 +444,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
           <ul class="divide-y divide-slate-800 overflow-hidden rounded-2xl border border-slate-700">
             <For each={files()}>
               {(file) => (
-                <li class="flex flex-col gap-3 bg-slate-800/40 px-4 py-4 sm:flex-row sm:items-center">
+                <li class="flex flex-col flex-wrap gap-3 bg-slate-800/40 px-4 py-4 sm:flex-row sm:items-center">
                   <div class="min-w-0 flex-1">
                     <p class="truncate text-base font-semibold text-slate-100" title={fileName(file.path)}>
                       {fileName(file.path)}
@@ -373,7 +454,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
                     </p>
                     <p class="mt-1 text-[16px] text-slate-300">{file.summary}</p>
                   </div>
-                  <div class="flex shrink-0 gap-3">
+                  <div class="flex shrink-0 flex-wrap gap-3">
                     <button
                       type="button"
                       onClick={() => void props.store.openPath(file.path)}
@@ -389,6 +470,31 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
                       打开所在文件夹
                     </button>
                   </div>
+                  {/* 表格类结果可以变成微信里能贴的文字。只是复制，不是发送。 */}
+                  <Show when={isTablePath(file.path)}>
+                    <div class="flex w-full flex-col gap-2 sm:basis-full">
+                      <button
+                        type="button"
+                        disabled={sharing() === file.path}
+                        onClick={() => void copyForChat(file)}
+                        class="min-h-[48px] w-full rounded-xl border-2 border-sky-600 px-5 text-base font-bold text-sky-100 hover:bg-sky-950/40 disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
+                      >
+                        {SHARE.copyButton}
+                      </button>
+                      <p class="text-[16px] leading-relaxed text-slate-400">{SHARE.hint}</p>
+                      <Show when={share()?.path === file.path}>
+                        <div
+                          class="rounded-xl border border-slate-700 bg-slate-900/50 px-3 py-2"
+                          role="status"
+                        >
+                          <Show when={share()?.summary}>
+                            <p class="text-[16px] leading-relaxed text-slate-200">{share()?.summary}</p>
+                          </Show>
+                          <p class="mt-1 text-[16px] leading-relaxed text-slate-300">{share()?.note}</p>
+                        </div>
+                      </Show>
+                    </div>
+                  </Show>
                 </li>
               )}
             </For>
