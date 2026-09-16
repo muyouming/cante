@@ -3,8 +3,12 @@
 A desktop client for [Cante](../../README.md): a Tauri 2 shell (Rust) around a
 Vite + SolidJS + TypeScript frontend, styled with Tailwind v4. The Rust side
 spawns `cante serve` and forwards its `Op`/`Evt` JSON Lines stream to the
-frontend, which renders the session rail, streaming transcript, tool cards,
-approval prompts and command palette.
+frontend.
+
+The product surface is **simple mode** (`src/simple/`): task cards, four steps
+(pick → say → confirm → result), plain Chinese, no jargon. There is no second
+"professional" interface — it was removed on purpose, and `ROADMAP.md` records
+why. Marketing copy, priorities and the persona live there too.
 
 ## Prerequisites
 
@@ -64,9 +68,9 @@ bash scripts/dev.sh
 ```
 
 It sets `CANTE_BIN` to the fixture, seeds `FAKE_CANTE_SEED=1` (a finished
-exchange plus one pending approval, so the window opens on a populated
-transcript) and runs `bun run dev`. Set `FAKE_CANTE_SEED=0` for an empty
-transcript. The app starts its own session, so no external POST is needed.
+exchange plus one pending approval, so the window opens on a populated run)
+and runs `bun run dev`. Set `FAKE_CANTE_SEED=0` for an empty one. The app
+starts its own session, so no external POST is needed.
 
 ## Package
 
@@ -124,8 +128,9 @@ pixels (see `dom-smoke.sh` for a text-level substitute).
 
 `scripts/dom-smoke.sh` is the developer/agent aid for the one thing a terminal
 cannot assert on: the window. It builds the web assets, serves them, has Chrome
-dump the rendered DOM, and checks that the header, chips, composer, status bar
-and the browser-preview fallback are all present. It is not part of the CI gate
+dump the rendered DOM, and checks the simple shell is really there: the app
+name, the 历史 and 隐私 entries, the three wizard steps, and the no-touch
+promise ("原文件我不会乱动"). It is not part of the CI gate
 (CI has no Chrome) and takes about a second.
 
 ## Protocol contract
