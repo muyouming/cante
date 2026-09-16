@@ -369,3 +369,203 @@ describe("真机验过的两族任务（r10）", () => {
     expect(copyModule).toContain("我不会替你发消息");
   });
 });
+
+// ---------------------------------------------------------------------------
+// r12 — 粘贴入口（#89）与接龙/报名两张卡（#86）。
+//
+// 调研里最贵的两处恰好都不在「聪明」上，而在入口和统计上：
+//
+//   * 她要做的动作只有「在微信里选中、Ctrl+C」。以前每张微信卡都要求先选一个
+//     文件，而「先把内容存成一个文件」对她可能比整件事还难。协议本来就只承载
+//     文本，所以内容必须能整段贴进来。
+//   * 群里接龙的字要变成能用的跟进表：按人合并重复提交、算清份数人数、标出来源；
+//     看不懂的条目一条都不许丢，匹配靠猜的地方必须说出来。
+//
+// 两张新卡按仓库的约定单独成组（WECHAT_PASTE_TASKS），由集成者接进目录，所以
+// 下面直接从 wechat.ts 导入，不走 taskById。
+//
+// 为什么 import 写在文件末尾：本文件是「追加」维护的，上面的每一行都属于别的
+// 轮次，把新增的导入放在这里，改动一眼就能看出来。
+// ---------------------------------------------------------------------------
+
+import { DRAFT_SEND_NOTICE, WECHAT_SAFETY_NOTICE } from "../privacy.ts";
+import {
+  WECHAT_ALL_TASKS,
+  WECHAT_PASTE_TASKS,
+  WECHAT_TASKS,
+  initialTaskId,
+  offerableTasks,
+  wechatMissingTask,
+  wechatRollcallTask,
+} from "./wechat.ts";
+
+describe("接龙与报名两张新卡（r12）", () => {
+  test("两张卡都在微信族，形状写全：四步计划、三到四条风险、四条结果提示", () => {
+    expect(WECHAT_PASTE_TASKS.map((task) => task.id)).toEqual(["wechat.rollcall", "wechat.missing"]);
+    for (const task of WECHAT_PASTE_TASKS) {
+      expect(task.group).toBe("微信");
+      expect(task.id).toMatch(/^[a-z]+(?:-[a-z]+)*\.[a-z]+(?:-[a-z]+)*$/);
+      expect(task.title.length).toBeGreaterThan(3);
+      expect(task.example.length).toBeGreaterThan(5);
+      expect(task.plan.length).toBe(4);
+      expect((task.risks ?? []).length).toBeGreaterThanOrEqual(3);
+      expect((task.risks ?? []).length).toBeLessThanOrEqual(4);
+      expect(task.summaryHints.length).toBe(4);
+      // 最后一步永远是结果怎么放、别人的东西不动。
+      expect(task.plan.join("")).toMatch(/另存/);
+      expect(task.plan.join("")).toMatch(/不动|不要动/);
+    }
+  });
+
+  test("新卡不和老卡撞号，老卡也一张没少", () => {
+    expect(WECHAT_TASKS.map((task) => task.id)).toEqual([
+      "wechat.table",
+      "wechat.draft",
+      "wechat.batch",
+    ]);
+    const ids = WECHAT_ALL_TASKS.map((task) => task.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const task of WECHAT_PASTE_TASKS) expect(WECHAT_TASKS).not.toContain(task);
+  });
+
+  test("两张卡都说清了结果放哪，而且全程只读、不替她发消息", () => {
+    for (const task of WECHAT_PASTE_TASKS) {
+      const prompt = task.prompt(["/示例/接龙记录.txt"], "按我说的做");
+      expect(prompt).toContain("先说明你打算怎么做，再动手");
+      expect(prompt).toContain(WECHAT_SAFETY_NOTICE);
+      expect(prompt).toContain("不要发送任何消息");
+      expect(prompt).toContain("不要登录微信");
+      expect(prompt).toContain("不要修改或删除原文件");
+      expect(prompt).toContain(DRAFT_SEND_NOTICE);
+      // 结果去处写死两遍：选了文件就放它旁边，没选就放桌面（真机上助手自己造过 out）。
+      expect(prompt).toContain("结果文件放在你选的");
+      expect(prompt).toContain("旁边（同一个文件夹）");
+      expect(prompt).toContain("文件名都以「结果_」开头");
+      expect(prompt).toContain("就放在桌面");
+      expect(prompt).toContain("原来的文件不要改、不要删、不要覆盖");
+      // 同一件事跑第二次不能把上一次的结果盖掉。
+      expect(prompt).toContain("绝不覆盖已有文件");
+      // 表格格式也写死：她要的是双击就能打开的表格。
+      expect(prompt).toContain("表格存成 Excel 能直接打开的格式");
+    }
+  });
+
+  test("一个文件都没选也能干活：内容整段贴在话里（粘贴入口的路）", () => {
+    for (const task of WECHAT_PASTE_TASKS) {
+      const prompt = task.prompt([], "1. 张三 两份\n2. 李四+1");
+      expect(prompt).toContain("没有选文件");
+      expect(prompt).toContain("1. 张三 两份");
+      expect(prompt).toContain("整段贴在【用户的原话】里");
+      expect(prompt).toContain("就放在桌面");
+    }
+  });
+
+  test("五张微信卡都认识「内容整段贴进来」这一路（不然贴进来会被当成随口一句）", () => {
+    for (const task of WECHAT_ALL_TASKS) {
+      const prompt = task.prompt([], "帮我看看");
+      expect(prompt).toContain("整段贴在【用户的原话】里");
+      // 没选文件的结果去处：贴进来的那一份只能放桌面。
+      expect(prompt).toContain("桌面");
+    }
+  });
+
+  test("接龙卡按人合并：同一人合成一行、份数相加、标出每一份来自第几条", () => {
+    const prompt = wechatRollcallTask.prompt([], "按我说的做");
+    expect(prompt).toContain("同一个人报了多次的合成一行");
+    expect(prompt).toContain("份数相加");
+    expect(prompt).toContain("来自第几条");
+    expect(prompt).toContain("姓名、份数（合计）、来自第几条、原话");
+    // 总人数、总份数要算出来，并且说清是怎么数出来的。
+    expect(prompt).toContain("总人数与总份数");
+    expect(prompt).toContain("怎么数出来的");
+    // 份数写不清的不许猜。
+    expect(prompt).toContain("不要自己猜人数");
+    const risks = wechatRollcallTask.risks!.join("");
+    expect(risks).toContain("+1");
+    expect(risks).toContain("带家属");
+    expect(risks).toContain("合并");
+  });
+
+  test("看不懂的行必须原样留在最后：不许丢，也不许自己猜一个名字", () => {
+    const rollcall = wechatRollcallTask.prompt(["/示例/接龙记录.txt"], "");
+    expect(rollcall).toContain("没看懂的原话");
+    expect(rollcall).toContain("原样抄在");
+    expect(rollcall).toMatch(/不许丢|不要丢掉/);
+    const missing = wechatMissingTask.prompt(["/示例/花名册.xlsx"], "");
+    expect(missing).toContain("原样抄在结果最后");
+    expect(missing).toContain("不要丢掉");
+    expect(wechatRollcallTask.risks!.join("")).toContain("猜");
+  });
+
+  test("找没交的人：比对规则必须先写出来，靠猜的地方要说清", () => {
+    const prompt = wechatMissingTask.prompt(["/示例/花名册.xlsx"], "");
+    expect(prompt).toContain("先用一句大白话把你要用的规则写出来");
+    expect(prompt).toContain("去掉首尾空格");
+    expect(prompt).toContain("全角半角");
+    expect(prompt).toContain("名字后面的手机号");
+    // 差集要两边都给：谁还没交，以及名单之外冒出来的人。
+    expect(prompt).toContain("名单上有、接龙里没出现的");
+    expect(prompt).toContain("接龙里出现、名单上没有的");
+    // 像又不像的不许自己合并，也不许自己拆开。
+    expect(prompt).toContain("拿不准的名字");
+    expect(prompt).toContain("不要自己合并");
+    const risks = wechatMissingTask.risks!.join("");
+    expect(risks).toContain("差一个字");
+    expect(risks).toContain("全角半角");
+    expect(risks).toContain("误判成没交");
+  });
+
+  test("两张新卡给用户看的文字里没有技术词", () => {
+    for (const task of WECHAT_PASTE_TASKS) {
+      for (const { where, text } of everyString(task)) {
+        for (const word of JARGON) {
+          expect(`${where}: ${text}`).not.toContain(word);
+        }
+      }
+    }
+  });
+
+  test("粘贴入口只摆目录里真的有的卡（P0 的教训：卡不在目录里，规矩就发不出去）", () => {
+    const legacyOnly = offerableTasks(WECHAT_ALL_TASKS, WECHAT_TASKS.map((task) => task.id));
+    expect(legacyOnly.map((task) => task.id)).toEqual(WECHAT_TASKS.map((task) => task.id));
+    const wired = offerableTasks(WECHAT_ALL_TASKS, WECHAT_ALL_TASKS.map((task) => task.id));
+    expect(wired.map((task) => task.id)).toEqual(WECHAT_ALL_TASKS.map((task) => task.id));
+    // 目录里换一张别的卡，也只会摆那一张。
+    expect(offerableTasks(WECHAT_ALL_TASKS, ["excel.merge"]).map((task) => task.id)).toEqual([]);
+  });
+
+  test("从首页点进来时预选的是那一张卡；那张卡摆不出来就落到第一张", () => {
+    const ids = WECHAT_ALL_TASKS.map((task) => task.id);
+    expect(initialTaskId(WECHAT_ALL_TASKS, "wechat.rollcall")).toBe("wechat.rollcall");
+    // 目录里还没有这张卡时（集成者接线前），不要选中一张摆不出来的。
+    expect(initialTaskId(WECHAT_ALL_TASKS, "excel.merge")).toBe(ids[0]);
+    expect(initialTaskId(WECHAT_ALL_TASKS)).toBe(ids[0]);
+    expect(initialTaskId([], "wechat.rollcall")).toBe("");
+  });
+
+  test("微信这一屏：有能贴内容的大框，留着选文件的入口，也没有替她发消息的按钮", async () => {
+    const screen = await Bun.file(`${import.meta.dir}/../WechatImport.tsx`).text();
+    // 粘贴入口本身。
+    expect(screen).toContain("WECHAT_PASTE");
+    expect(screen).toContain("min-h-[240px]");
+    // 卡片清单来自目录，而不是直接摆全部。
+    expect(screen).toContain("offerableTasks");
+    // 从首页点进来的那一张卡要能预选。
+    expect(screen).toContain("initialTaskId");
+    // 点「开始整理」只把活摆到确认页；这一屏必须把确认页摆出来，
+    // 否则她点完就一直停在「正在处理」，什么也不会开始。
+    expect(screen).toContain("ConfirmSheet");
+    // 文件入口还在。
+    expect(screen).toContain("pickFiles");
+    // 那句字号最大的「我不会替你发消息。」还在，而且没有发消息的动作。
+    expect(screen).toContain("WECHAT_UI.noSend");
+    expect(screen).not.toContain("自动发送");
+  });
+
+  test("粘贴入口如实说了代价：只在这台电脑上用，太长就用文件", async () => {
+    const copyModule = await Bun.file(`${import.meta.dir}/../copy.ts`).text();
+    expect(copyModule).toContain("只在这台电脑上用");
+    expect(copyModule).toContain("只用来做你选的这件事");
+    expect(copyModule).toContain("存成文件再选进来更稳");
+  });
+});

@@ -87,7 +87,12 @@ export function pdfCapability(): ToolCapability {
  * 表格可用时给助手看的一段中文说明，否则 null。
  *
  * 这是指令信封的内容，允许出现 `cante-sheets`、`.xlsx`、命令写法——助手要照着
- * 它干活。落款特别强调：结果一律写成 .xlsx，不要因为缺别的工具就换格式。
+ * 它干活。两处重点是硬契约：
+ *   * 结果文件必须是**新文件名**。那个名字已经有文件时，cante-sheets 会拒绝、
+ *     不会覆盖，并说清是哪一个文件；这时不要反复重试同一个名字，要换一个。
+ *   * 一次 write 只写出一张表，新文件里也只有这一张表；它不会往已有文件里追加，
+ *     也不会动已有文件。（issue #95）
+ * 最后一句仍然强调：结果一律写成 .xlsx，不要因为缺别的工具就换格式。
  */
 export function sheetPromptLine(cap: ToolCapability): string | null {
   if (!cap.available) return null;
@@ -97,6 +102,9 @@ export function sheetPromptLine(cap: ToolCapability): string | null {
     "看一个文件里有哪些表：cante-sheets sheets 文件路径。",
     "读一张表并输出成 CSV：cante-sheets read 文件路径；要指定表名就加 --sheet 表名。",
     "写结果：先把内容存成 CSV，再运行 cante-sheets write 结果.xlsx 数据.csv；要指定表名就加 --sheet 表名。",
+    "写结果时，结果.xlsx 必须是一个**还不存在**的新文件名。如果那个名字已经有文件，cante-sheets 会拒绝、不会覆盖，并告诉你是哪一个文件。这时候不要反复重试同一个名字：换一个新名字（例如在名字后面加「-新」「-2」）再写；如果旧文件确实该改名，也要先请用户自己改。",
+    "一次 cante-sheets write 只写出一张表，写出的新文件里也只有这一张表；它不会往已有文件里追加表，也不会改动已有文件。要合成两张表就给两个不同名字的新文件，或者把内容并到同一张表里再写。",
+    "表名要用中文或普通文字：不能是空的，不能超过 31 个字，也不能带 \\ / ? * [ ] : 这些符号。",
     "结果文件要用它写成 .xlsx，不要因为缺少别的工具就改成别的格式。",
   ].join("\n");
 }

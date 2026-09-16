@@ -8,7 +8,8 @@
 //!
 //! 全部用纯 Rust 的 [`lopdf`] 实现：不依赖 pdfium，也不需要系统里的 PDF 库，装完
 //! 就能跑。`merge` / `split` 保持页面内容和顺序；`text` 是尽力而为，遇到扫描件
-//! （没有文字层）会明确报错，而不是拿一片空白当成功。
+//! （没有文字层）会明确报错，而不是拿一片空白当成功；遇到"有文字层但字体还原不出
+//! 字符"的 PDF（issue #94）会经 [`text_layer_risk`] 报出来，让命令行给退出码 3。
 //!
 //! 所有错误消息都是中文，读得懂，例如：
 //! `文件不存在：/tmp/x.pdf`、`这个格式我读不了：x.docx`、
@@ -18,7 +19,7 @@
 use std::fmt;
 use std::path::Path;
 
-use lopdf::{dictionary, Document, Object, ObjectId};
+use lopdf::{dictionary, Dictionary, Document, Encoding, Object, ObjectId};
 
 /// 能读的扩展名（小写）。不在这个名单里的格式直接说"读不了"，而不是硬试。
 const SUPPORTED_EXTENSIONS: &[&str] = &["pdf"];
@@ -151,35 +152,189 @@ pub fn page_count(path: &Path) -> Result<usize, PdfError> {
     Ok(load(path)?.get_pages().len())
 }
 
-/// 抽出文字。默认整份；给了页码就只抽那几页。
+/// 抽出来的文字可不可信。`None` 表示可信；`Some(中文原因)` 表示不可信，命令行会把
+/// 它转成 stderr 警告 + 退出码 3（见 `cante-pdf`）。
 ///
-/// 抽出来是空的（扫描件、照片），会返回 [`PdfError::NoText`]，不会拿空白当成功。
-/// 真实的 PDF 里有一类"抽不出来"的文件：用 CID 字体（`Type0`）却没有带
-/// `ToUnicode` 映射，常见于打印/导出流水线生成的中文 PDF。这种文件里文字
-/// 其实是在的，只是没有"字符编码 → 文字"的对照表，抽出来会是乱码。
+/// 真实的 PDF 里有一类"有文字、但抽不出来"的文件，抽出来是**乱码**而不是空：
+/// 扫描件是没有文字层（`extract_text` 会返回 [`PdfError::NoText`]），而这里说的是
+/// 另一回事——文字层在，但字体没能把"码位"还原成"字符"。常见两种：
 ///
-/// 真机验证过：拉丁文用小字体写的 PDF 抽取完好（`Employee list July 2026`），
-/// 而同一条流水线出的中文 PDF 只能抽出 `2026`、`D`、`g%` 这类噪声。把噪声当
-/// 结果交给助手，它就会拿着一堆乱码去总结——比抽不出来更糟。所以这里返回
-/// **一句中文说明**，让命令行把它转成明确警告与退出码 3。
-pub fn text_layer_risk(path: &Path) -> Option<String> {
+/// 1. CID 字体（`Type0`）没带 `ToUnicode` 对照表。打印/导出流水线出的中文 PDF
+///    大量是这样。真机验证：同一条 cupsfilter 流水线，拉丁文抽取完好，中文只能抽
+///    出 `2026`、`D`、`g%` 这类噪声。
+/// 2. Chrome / Skia 导出的 PDF 用 `Type3` 字体（字形是画出来的程序），字符对照表
+///    挂在 `/Encoding` 的 `/Differences` 上，字形名却是 `/g0`、`/g830` 这种合成名，
+///    对不上任何真实字符。issue #94 就是这个：**退出码 0，stdout 全是乱码**。
+///
+/// 乱码比"抽不出来"更危险：助手会拿一页乱码去总结，而用户会相信它（正是 issue
+/// #81 想防的事）。所以这里两层判断，任一层命中都判为不可信：
+///
+/// * **字体层**（确定性的）：看这份 PDF 用到的字体有没有"能还原字符"的对照关系，
+///   判断标准直接复用 lopdf 真正抽文字时用的同一个函数，避免"两套标准"。
+/// * **文字层**（兜底）：抽出来的内容里像正常文字的字符占比低于阈值。
+///
+/// 阈值标定与两层各自能挡住什么、挡不住什么，见 [`READABLE_RATIO_FLOOR`]。
+pub fn text_layer_risk(path: &Path, text: &str) -> Option<String> {
     let document = Document::load(path).ok()?;
-    let has_unmapped_cid = document.objects.values().any(|object| {
-        let Ok(dictionary) = object.as_dict() else {
-            return false;
-        };
-        let is_cid = dictionary
-            .get(b"Subtype".as_slice())
-            .ok()
-            .and_then(|value| value.as_name().ok())
-            .map(|subtype| subtype == b"Type0".as_slice())
-            .unwrap_or(false);
-        is_cid && !dictionary.has(b"ToUnicode")
-    });
+    if let Some(kind) = unmapped_font_kind_used_by(&document) {
+        return Some(format!(
+            "这个 PDF 用的{kind}没能把文字还原出来，抽出来的内容很可能是乱码（打印或导出的 PDF 常见）"
+        ));
+    }
+    text_quality_risk(text)
+}
 
-    has_unmapped_cid.then(|| {
-        "这个 PDF 用的是没有自带文字对照表的中文字体，抽出来的文字很可能是乱码（打印或导出的 PDF 常见）".to_string()
+/// 这份 PDF 用到的字体里，第一个"还原不出字符"的种类；都没有就返回 `None`。
+fn unmapped_font_kind_used_by(document: &Document) -> Option<&'static str> {
+    for page_id in document.get_pages().into_values() {
+        // 只看页面上真正用到的字体。没被引用的字体对象不影响抽出来的文字，
+        // 拿它告警就是误报。
+        let Ok(fonts) = document.get_page_fonts(page_id) else {
+            continue;
+        };
+        for font in fonts.values() {
+            if let Some(kind) = unmapped_font_kind(document, font) {
+                return Some(kind);
+            }
+        }
+    }
+    None
+}
+
+/// 单个字体能不能把码位还原成字符；不能就返回它是什么（写进中文告警里）。
+///
+/// 判断所用的编码，和 `Document::extract_text` 内部用的是同一个
+/// [`Dictionary::get_font_encoding`]，所以标准不会跑偏：lopdf 怎么解，我们就怎么判。
+fn unmapped_font_kind(document: &Document, font: &Dictionary) -> Option<&'static str> {
+    let subtype = font
+        .get(b"Subtype".as_slice())
+        .ok()
+        .and_then(|value| value.as_name().ok())
+        .unwrap_or(b"");
+    let is_cid = subtype == b"Type0";
+    let is_type3 = subtype == b"Type3";
+    let kind = if is_cid {
+        "中文字体"
+    } else if subtype == b"Type3" {
+        "特殊字体"
+    } else {
+        "字体"
+    };
+
+    match font.get_font_encoding(document) {
+        // 有能用的文字对照表：字符还原得出来。
+        Ok(Encoding::UnicodeMapEncoding(_)) => None,
+        // CID 字体的码位是字形编号，套单字节表（包括 Differences）只会得到乱码。
+        Ok(Encoding::OneByteEncoding(_)) if is_cid => Some(kind),
+        Ok(Encoding::Differences(_)) if is_cid => Some(kind),
+        // Type3 的乱码（issue #94）：字体自己带了 /ToUnicode 对照表，但对照表挂在
+        // /Encoding /Differences 上、字形名又是 /g0、/g830 这种合成名，lopdf 先看不
+        // 懂的 /Encoding、解析失败就退回了默认单字节表——明明手边就有能用的
+        // /ToUnicode，却被忽略了。Chrome / Skia 导出的中文 PDF 就是这一种。
+        //
+        // 为什么必须同时要求"有 /ToUnicode"：真机扫到不少 TeX 出的 Type3 字体
+        // （LLVM/Polly 的论文），Differences 同样解析不了，但它们没有 ToUnicode，
+        // 退回的单字节表跟原意几乎一样，抽出来的字读得懂。只看"Type3 + Differences
+        // 解析失败"会把它们误报，正是 brief 里说的"误报让用户不信任工具"。
+        Ok(Encoding::OneByteEncoding(_))
+            if is_type3
+                && declares_differences(document, font)
+                && has_character_map(document, font) =>
+        {
+            Some(kind)
+        }
+        // 其余情况都往"可信"那边靠（宁可漏报也不误报）：真机扫过 91 份文档，
+        // Type1 字体带 /fi、/fl 这种连字名的 Differences 很常见，lopdf 同样会
+        // 解析失败、退回单字节表，但退回去的表跟原编码几乎一样，抽出来的字照样
+        // 读得懂（LLVM/Polly 的论文、医院给的说明 PDF 都是这样）。把它们报出来
+        // 才是真的误报，会把用户和助手都吓住。
+        //
+        // 已知的偏严（如实记下，不为了"看起来干净"再放水）：只要这份 PDF 里
+        // **任何**一个 Type3 字体命中上面这条，就整份告警。真机上有一份 20 页的
+        // 聊天打印稿（fa69767d…….pdf）只在末尾用 Type3 画了两个字符，其余文字
+        // 都读得懂，也会被告警。宁可多提醒一次，也不放过整页中文乱码那类。
+        _ => None,
+    }
+}
+
+/// 字体是不是写了 `/Encoding` 里的 `/Differences` 对照表。
+fn declares_differences(document: &Document, font: &Dictionary) -> bool {
+    matches!(
+        font.get_deref(b"Encoding", document),
+        Ok(Object::Dictionary(encoding)) if encoding.has(b"Differences")
+    )
+}
+
+/// 字体是不是自带了一张独立的文字对照表（`/ToUnicode`）。
+fn has_character_map(document: &Document, font: &Dictionary) -> bool {
+    font.get_deref(b"ToUnicode", document).is_ok()
+}
+
+/// 可读字符占比的底线。低于它，整段文字就当不可信。
+///
+/// 标定用的是真机 `cante-pdf text` 的原始输出（见 issue #94 的复现样本）：
+///
+/// | 样本                                   | 可读占比 |
+/// | -------------------------------------- | -------- |
+/// | Chrome 正常中文（带 ToUnicode）        | 0.89     |
+/// | Chrome 正常中英数字混排                | 0.93     |
+/// | cupsfilter 正常拉丁文                  | 1.00     |
+/// | cupsfilter 中文乱码（无对照表）        | 1.00     |
+/// | Chrome Type3 中文乱码                  | 0.93     |
+///
+/// 结论写清楚：**这一层分不开"正常"和"乱码"**——乱码也是由可读的单字节字符拼出来
+/// 的，占比甚至比正常样本还高。所以拦不住 issue #94 的乱码，真正拦住它的是上面的
+/// 字体层；把这一点写在这里，是为了不让后来的人以为调一下阈值就能省掉字体层。
+///
+/// 它真正能兜住的是另一种常见的坏 PDF：文字对照表里塞了 U+FFFD 占位符，或者混进
+/// 控制字符、私用区码位（很多残缺的中文对照表长这样就）。那时占比会明显掉下来。
+///
+/// 阈值取 0.5，**宁可漏报也不误报**：正常文档里几乎不可能有一半字符不属于任何正常
+/// 文字；反过来只要还有一半正常字符，助手手里就还有东西可用，不值得打断用户。
+const READABLE_RATIO_FLOOR: f64 = 0.5;
+
+/// 文字层兜底：抽出来的内容里"像正常文字"的字符占比太低就判为不可信。
+fn text_quality_risk(text: &str) -> Option<String> {
+    // 空行、空格是正文的一部分，不该拉低占比，所以先剔掉。
+    let content: Vec<char> = text.chars().filter(|character| !character.is_whitespace()).collect();
+    if content.is_empty() {
+        // 整个抽出来是空的，由 `extract_text` 的 NoText 分支负责，不在这里重复报。
+        return None;
+    }
+    let readable = content.iter().filter(|character| is_readable_character(**character)).count();
+    let ratio = readable as f64 / content.len() as f64;
+    (ratio < READABLE_RATIO_FLOOR).then(|| {
+        "这份 PDF 抽出来的文字大半是认不出的符号，跟原文对不上（多半是字体没带出文字信息）。请不要照着它下结论"
+            .to_string()
     })
+}
+
+/// 一个字符像不像"正常文档里会出现的东西"。
+///
+/// 收录范围刻意保守：中文（常用区、扩展区、兼容区）、中日韩标点、全角字符、拉丁
+/// 字母与常用符号、数字、常见标点、货币符号、箭头、数学符号。**不认识的一律算不
+/// 可读**——包括私用区、控制字符、代理区、U+FFFD、emoji、生僻文字。范围越窄，越
+/// 不容易把正常文档误判成乱码。
+fn is_readable_character(character: char) -> bool {
+    if character.is_ascii_alphanumeric() || character.is_ascii_punctuation() {
+        return true;
+    }
+    matches!(
+        character,
+        '\u{00A0}'..='\u{024F}'      // 拉丁字母补充、常用符号（°、×、÷、§…）
+        | '\u{2010}'..='\u{206F}'    // 通用标点（引号、破折号、省略号…）
+        | '\u{20A0}'..='\u{20BF}'    // 货币符号（€、₩…）
+        | '\u{2190}'..='\u{21FF}'    // 箭头
+        | '\u{2200}'..='\u{22FF}'    // 数学符号（≤、≠…）
+        | '\u{2E80}'..='\u{2FDF}'    // 中日韩部首（康熙部首等，字体里常见）
+        | '\u{3000}'..='\u{303F}'    // 中文标点
+        | '\u{3400}'..='\u{4DBF}'    // 中文（扩展 A）
+        | '\u{4E00}'..='\u{9FFF}'    // 中文（常用）
+        | '\u{F900}'..='\u{FAFF}'    // 中文（兼容）
+        | '\u{FE10}'..='\u{FE4F}'    // 直排标点、兼容符号
+        | '\u{FF00}'..='\u{FFEF}'    // 全角字母、数字、标点
+        | '\u{20000}'..='\u{2FA1F}'  // 中文（扩展 B 及以后）
+    )
 }
 
 pub fn extract_text(path: &Path, selection: Option<&PageSelection>) -> Result<String, PdfError> {
@@ -435,24 +590,36 @@ mod tests {
         assert_eq!(page_count(&path).expect("count"), 3);
     }
 
-    /// 造一份"CID 字体但没带 ToUnicode"的 PDF：真机里中文 PDF 的典型形态。
-    fn build_pdf_with_cid_font(with_tounicode: bool) -> Document {
+    /// 一段能被 lopdf 解析的 ToUnicode 对照表：码 1 → 中，码 2 → 文。
+    const TO_UNICODE_CMAP: &[u8] = b"/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /Adobe-Identity-UCS def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+2 beginbfchar
+<0001> <4E2D>
+<0002> <6587>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+";
+
+    /// 拼一个单页 PDF；字体现场造（它可能要先生成 CMap / 字形流等对象）。
+    fn one_page_pdf(content: &[u8], build_font: impl FnOnce(&mut Document) -> Dictionary) -> Document {
         let mut document = Document::with_version("1.5");
         let pages_id = document.new_object_id();
-        let mut font = dictionary! {
-            "Type" => "Font",
-            "Subtype" => "Type0",
-            "BaseFont" => "STSong-Light",
-        };
-        if with_tounicode {
-            let cmap_id = document.add_object(Stream::new(dictionary! {}, b"/CIDInit".to_vec()));
-            font.set("ToUnicode", cmap_id);
-        }
+        let font = build_font(&mut document);
         let font_id = document.add_object(font);
         let resources_id = document.add_object(dictionary! {
             "Font" => dictionary! { "F1" => font_id },
         });
-        let content_id = document.add_object(Stream::new(dictionary! {}, b"BT ET".to_vec()));
+        let content_id = document.add_object(Stream::new(dictionary! {}, content.to_vec()));
         let page_id = document.add_object(dictionary! {
             "Type" => "Page",
             "Parent" => pages_id,
@@ -475,22 +642,164 @@ mod tests {
         document
     }
 
+    /// 造一份 CID（Type0）字体、显示 "中文" 两字的 PDF。`with_map` 决定带不带
+    /// 能用的 ToUnicode 对照表；真机里中文 PDF 的两种典型形态各占一半。
+    fn build_pdf_with_cid_font(with_map: bool) -> Document {
+        one_page_pdf(b"BT /F1 24 Tf 72 700 Td <00010002> Tj ET", |document| {
+            let mut font = dictionary! {
+                "Type" => "Font",
+                "Subtype" => "Type0",
+                "BaseFont" => "STSong-Light",
+            };
+            if with_map {
+                let cmap_id = document.add_object(Stream::new(dictionary! {}, TO_UNICODE_CMAP.to_vec()));
+                font.set("Encoding", "Identity-H");
+                font.set("ToUnicode", cmap_id);
+            } else {
+                // 真机最常见的形态：有 Identity-H，没有 ToUnicode。
+                font.set("Encoding", "Identity-H");
+            }
+            font
+        })
+    }
+
+    /// 造一份 Chrome / Skia 形态的 Type3 字体 PDF（issue #94 的真机样本）。
+    /// 字形是画出来的程序，对照表挂在 /Encoding /Differences 上，但字形名是合成的
+    /// /g0，对不上任何真实字符 —— 抽出来是乱码，而以前判不出来。
+    /// `with_to_unicode` 决定字体带不带独立的 `/ToUnicode`：Chrome 会带（这是真正
+    /// 的病根：lopdf 手边有能用的对照表却忽略它）；TeX 出的 Type3 不带。
+    fn build_pdf_with_type3_font(glyph_name: &[u8], with_to_unicode: bool) -> Document {
+        let glyph_name = glyph_name.to_vec();
+        one_page_pdf(b"BT /F1 24 Tf 72 700 Td (AB) Tj ET", |document| {
+            let char_proc_id =
+                document.add_object(Stream::new(dictionary! {}, b"10 0 0 0 10 10 d1".to_vec()));
+            // 字形名要当字典的键用，`dictionary!` 宏的键只能直接写字面量，
+            // 所以这里手动拼一个 CharProcs。
+            let mut char_procs = dictionary! {};
+            char_procs.set(glyph_name.clone(), char_proc_id);
+            let mut font = dictionary! {
+                "Type" => "Font",
+                "Subtype" => "Type3",
+                "FontBBox" => vec![0.into(), 0.into(), 1000.into(), 1000.into()],
+                "FontMatrix" => vec![
+                    0.001.into(), 0.into(), 0.into(), 0.001.into(), 0.into(), 0.into(),
+                ],
+                "CharProcs" => char_procs,
+                "Encoding" => dictionary! {
+                    "Type" => "Encoding",
+                    "Differences" => vec![0.into(), Object::Name(glyph_name)],
+                },
+                "FirstChar" => 0,
+                "LastChar" => 0,
+                "Widths" => vec![1000.into()],
+            };
+            if with_to_unicode {
+                let cmap_id =
+                    document.add_object(Stream::new(dictionary! {}, TO_UNICODE_CMAP.to_vec()));
+                font.set("ToUnicode", cmap_id);
+            }
+            font
+        })
+    }
+
     #[test]
     fn a_cid_font_without_a_text_map_is_reported_as_unreliable() {
         let dir = TempDir::new("risk");
         let risky = dir.join("中文打印件.pdf");
         save(build_pdf_with_cid_font(false), &risky);
-        let reason = text_layer_risk(&risky).expect("must warn");
+        // 文字本身是正常的中文，所以只能由字体那一层报出来。
+        let reason = text_layer_risk(&risky, "中文").expect("must warn");
         assert!(reason.contains("乱码") || reason.contains("对照表"), "reason: {reason}");
 
         let fine = dir.join("带映射.pdf");
         save(build_pdf_with_cid_font(true), &fine);
-        assert_eq!(text_layer_risk(&fine), None);
+        assert_eq!(text_layer_risk(&fine, "中文"), None);
 
         // 简单字体的 PDF（拉丁文那种）不告警：真机上抽取是好的。
         let simple = dir.join("latin.pdf");
         write_text_pdf(&simple, &["Employee list July 2026"]);
-        assert_eq!(text_layer_risk(&simple), None);
+        assert_eq!(text_layer_risk(&simple, "Employee list July 2026"), None);
+    }
+
+    /// issue #94 的正题：Chrome / Skia 的 Type3 字体（字形名是合成的 /g0）以前完全
+    /// 判不出来，`cante-pdf text` 因此吐出乱码还给退出码 0。现在必须告警。
+    #[test]
+    fn a_type3_font_with_synthetic_glyph_names_is_reported_as_unreliable() {
+        let dir = TempDir::new("type3");
+        let risky = dir.join("chrome导出.pdf");
+        save(build_pdf_with_type3_font(b"g0", true), &risky);
+        let reason = text_layer_risk(&risky, "AB").expect("must warn");
+        assert!(reason.contains("乱码") || reason.contains("对照表"), "reason: {reason}");
+    }
+
+    /// 反面一：Type3 字体如果老老实实用标准字形名（/A、/B），lopdf 能对上号，就不能
+    /// 告警。这一条防的是"一见 Type3 就报警"那种误报。
+    #[test]
+    fn a_type3_font_with_real_glyph_names_is_not_reported() {
+        let dir = TempDir::new("type3-ok");
+        let path = dir.join("正常Type3.pdf");
+        save(build_pdf_with_type3_font(b"A", true), &path);
+        assert_eq!(text_layer_risk(&path, "AB"), None);
+    }
+
+    /// 反面二（真机上踩到的）：TeX 出的 Type3 字体同样带解析不了的 Differences，
+    /// 但没有 /ToUnicode，退回的单字节表跟原意几乎一样，抽出来读得懂。这种不能告警
+    /// ——LLVM/Polly 的论文、医院给的说明 PDF 都是这样，误报会吓到用户。
+    #[test]
+    fn a_type3_font_without_a_character_map_is_not_reported() {
+        let dir = TempDir::new("type3-tex");
+        let path = dir.join("tex出的Type3.pdf");
+        save(build_pdf_with_type3_font(b"a33", false), &path);
+        assert_eq!(text_layer_risk(&path, "AB"), None);
+    }
+
+    /// 防误报的关键一条：正常能抽的 PDF（中文 CID + 拉丁文各一）都不能告警。
+    #[test]
+    fn normal_pdfs_are_not_reported() {
+        let dir = TempDir::new("no-false-positive");
+
+        let chinese = dir.join("正常中文.pdf");
+        save(build_pdf_with_cid_font(true), &chinese);
+        let chinese_text = extract_text(&chinese, None).expect("extract chinese");
+        assert!(chinese_text.contains("中文"), "should read the two words: {chinese_text:?}");
+        assert_eq!(text_layer_risk(&chinese, &chinese_text), None);
+
+        let latin = dir.join("正常拉丁.pdf");
+        write_text_pdf(&latin, &["Employee list July 2026", "Total 1234.56"]);
+        let latin_text = extract_text(&latin, None).expect("extract latin");
+        assert!(latin_text.contains("Employee list July 2026"), "latin text: {latin_text:?}");
+        assert_eq!(text_layer_risk(&latin, &latin_text), None);
+    }
+
+    /// 兜底那一层：字体没问题，但抽出来的内容大半是认不出的码位（U+FFFD、控制字符、
+    /// 私用区），也要拦住。
+    #[test]
+    fn text_below_the_readable_floor_is_reported() {
+        let dir = TempDir::new("quality");
+        let path = dir.join("字体正常.pdf");
+        write_text_pdf(&path, &["Normal document"]);
+
+        // 4 个正常字 + 6 个坏码位 = 0.40 < 0.50 → 告警。
+        let below = format!("正常文字{}", "\u{FFFD}".repeat(6));
+        let reason = text_layer_risk(&path, &below).expect("0.40 is below the floor");
+        assert!(reason.contains("认不出") || reason.contains("对不上"), "reason: {reason}");
+    }
+
+    /// 阈值边界：刚好 0.50 不告警（判据是"低于"），刚刚好掉到 0.50 以下才告警。
+    /// 控制字符和私用区也要算"认不出"。
+    #[test]
+    fn text_at_the_readable_floor_is_not_reported() {
+        let dir = TempDir::new("quality-boundary");
+        let path = dir.join("字体正常.pdf");
+        write_text_pdf(&path, &["Normal document"]);
+
+        // 4 个正常字 + 4 个坏码位 = 0.50 → 不告警。
+        let at_floor = format!("正常文字{}", "\u{FFFD}".repeat(4));
+        assert_eq!(text_layer_risk(&path, &at_floor), None);
+
+        // 私用区码位也算认不出：4 正常 + 5 私用 = 0.44 → 告警。
+        let private_use = format!("正常文字{}", "\u{E000}".repeat(5));
+        assert!(text_layer_risk(&path, &private_use).is_some());
     }
 
     #[test]

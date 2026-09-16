@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cante_gui_lib::sheets::{describe, read_sheet, write_xlsx};
+use cante_gui_lib::sheets::{describe, read_sheet, write_xlsx, SheetError};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -54,4 +54,31 @@ fn write_then_read_through_the_library_api() {
 
     let read_back = read_sheet(&path, Some("销售")).expect("read xlsx");
     assert_eq!(read_back, rows);
+}
+
+/// issue #95 的契约从 crate 外面看也一样：目标已经在了就拒绝，且原文件一个字节
+/// 都不变。这里用一本**三张表**的已有文件最狠：既有“覆盖”也有“悄悄只留一张表”
+/// 两种可能的事故。
+#[test]
+fn write_refuses_to_replace_an_existing_multi_sheet_file() {
+    let dir = TempDir::new("no-overwrite-it");
+    let path = dir.join("多张表.xlsx");
+
+    // 造一本三张表的文件（不经过我们的 write，免得用被测对象造靶子）。
+    let mut workbook = rust_xlsxwriter::Workbook::new();
+    for name in ["销售一", "销售二", "备注"] {
+        let sheet = workbook.add_worksheet();
+        sheet.set_name(name).expect("set name");
+        sheet.write_string(0, 0, name).expect("write cell");
+    }
+    workbook.save(&path).expect("save fixture");
+    let before = fs::read(&path).expect("read bytes");
+
+    let rows = vec![vec!["合计".to_string()], vec!["1200".to_string()]];
+    let error = write_xlsx(&path, &rows, "合计").expect_err("必须拒绝覆盖");
+    assert!(matches!(error, SheetError::AlreadyExists(_)), "{error:?}");
+
+    // 三张表一张都没少，字节也没动。
+    assert_eq!(describe(&path).expect("describe"), vec!["销售一", "销售二", "备注"]);
+    assert_eq!(fs::read(&path).expect("read bytes again"), before);
 }
