@@ -15,8 +15,23 @@ export const SHEET_COPY = {
     "这台电脑还不能直接读写 Excel 文件。你可以把表先另存成 CSV 再交给我，或者请技术同事帮忙装一次表格工具。",
 } as const;
 
+/**
+ * 「这台电脑能不能处理 PDF」的面向用户中文。
+ *
+ * 同样一个文件：SHEET_COPY 管表格，这里管 PDF，互不干扰。缺工具是边界、不是报错，
+ * 所以语气和中性的边界说明一致。
+ */
+export const PDF_COPY = {
+  /** 不能处理 PDF 时，确认页上给用户看的一句边界说明。 */
+  fallbackNote:
+    "这台电脑还不能直接处理 PDF。你可以先把它导出成别的格式，或者请技术同事帮忙装一次 PDF 工具。",
+} as const;
+
 /** 会被当成 Excel 文件的扩展名。 */
 const EXCEL_EXTENSIONS = [".xlsx", ".xls"] as const;
+
+/** 会被当成 PDF 文件的扩展名。 */
+const PDF_EXTENSIONS = [".pdf"] as const;
 
 /**
  * 选中的文件里有没有 Excel 文件。只看扩展名，够用而且不会误报。
@@ -25,5 +40,15 @@ export function hasExcelFile(paths: readonly string[]): boolean {
   return paths.some((path) => {
     const lowered = path.toLowerCase();
     return EXCEL_EXTENSIONS.some((extension) => lowered.endsWith(extension));
+  });
+}
+
+/**
+ * 选中的文件里有没有 PDF。只看扩展名，够用而且不会误报。
+ */
+export function hasPdfFile(paths: readonly string[]): boolean {
+  return paths.some((path) => {
+    const lowered = path.toLowerCase();
+    return PDF_EXTENSIONS.some((extension) => lowered.endsWith(extension));
   });
 }

@@ -19,9 +19,16 @@ mock.module("../tauri.ts", () => ({
   CommandRejected: class CommandRejected extends Error {},
 }));
 
-const { initSheetCapability, sheetCapability, sheetFallbackNote, sheetPromptLine } = await import(
-  "./capabilities.ts"
-);
+const {
+  initCapabilities,
+  initSheetCapability,
+  pdfCapability,
+  pdfFallbackNote,
+  pdfPromptLine,
+  sheetCapability,
+  sheetFallbackNote,
+  sheetPromptLine,
+} = await import("./capabilities.ts");
 
 describe("sheetPromptLine", () => {
   test("不可用时是 null", () => {
@@ -53,16 +60,57 @@ describe("sheetFallbackNote", () => {
   });
 });
 
-describe("initSheetCapability", () => {
-  test("探测失败时返回不可用，且不抛异常", async () => {
-    const cap = await initSheetCapability();
-    expect(cap.available).toBe(false);
+describe("pdfPromptLine", () => {
+  test("不可用时是 null", () => {
+    expect(pdfPromptLine({ available: false })).toBeNull();
+  });
+
+  test("可用时非空，并说明用 cante-pdf 的四件事", () => {
+    const line = pdfPromptLine({ available: true, path: "/opt/cante-pdf" });
+    expect(line).not.toBeNull();
+    expect(line).toContain("cante-pdf");
+    expect(line).toContain("pages");
+    expect(line).toContain("text");
+    expect(line).toContain("merge");
+    expect(line).toContain("split");
+    // 扫描件没有文字层时要先停下告诉用户，不许当成没内容。
+    expect(line).toContain("文字层");
+    expect(line).toContain("扫描");
+  });
+});
+
+describe("pdfFallbackNote", () => {
+  test("可用时是 null", () => {
+    expect(pdfFallbackNote({ available: true })).toBeNull();
+  });
+
+  test("不可用时给用户一条中性说明", () => {
+    const note = pdfFallbackNote({ available: false });
+    expect(note).not.toBeNull();
+    expect(note).toContain("PDF");
+    // 这是边界，不是错误：措辞里不出现报错口吻。
+    expect(note).not.toContain("错误");
+    expect(note).not.toContain("失败");
+  });
+});
+
+describe("initCapabilities", () => {
+  test("探测失败时两个工具都不可用，且不抛异常", async () => {
+    await initCapabilities();
     expect(sheetCapability().available).toBe(false);
+    expect(pdfCapability().available).toBe(false);
   });
 
   test("重复调用是幂等的", async () => {
-    const first = await initSheetCapability();
-    const second = await initSheetCapability();
-    expect(second).toEqual(first);
+    const first = await initCapabilities();
+    const second = await initCapabilities();
+    expect(first).toBeUndefined();
+    expect(second).toBeUndefined();
+    // 多次调用后缓存值保持一致。
+    expect(pdfCapability()).toEqual({ available: false });
+  });
+
+  test("initSheetCapability 仍是同一个入口（旧名字保留）", () => {
+    expect(initSheetCapability).toBe(initCapabilities);
   });
 });
