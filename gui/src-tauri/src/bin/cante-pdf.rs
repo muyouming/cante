@@ -55,10 +55,12 @@ fn run(args: &[String]) -> Result<(), String> {
             if !trimmed.is_empty() {
                 println!("{trimmed}");
             }
-            // 抽不出来不能装作抽出来了：CID 字体没有文字对照表时，上面打出来的
-            // 其实是乱码。给助手一个明确的信号（stderr + 退出码 3），让它停下来
-            // 告诉用户"这份大概是扫描件"，而不是拿着噪声去总结原件。
-            if let Some(reason) = pdf::text_layer_risk(Path::new(file)) {
+            // 抽不出来不能装作抽出来了：字体没有文字对照表时（CID 字体、
+            // Chrome/Skia 的 Type3 字体），上面打出来的其实是乱码。给助手一个明确的
+            // 信号（stderr + 退出码 3），让它停下来告诉用户"这份大概是扫描件或字体
+            // 没带出文字"，而不是拿着噪声去总结原件。issue #94：Type3 以前从这条
+            // 判据里漏过去了，退出码还是 0。
+            if let Some(reason) = pdf::text_layer_risk(Path::new(file), &text) {
                 eprintln!("警告：{reason}");
                 eprintln!(
                     "建议：不要拿这段文字下结论。先告诉用户这份 PDF 的文字提不出来（大概是扫描件，或字体没有带出文字信息），并请他核对原件。"

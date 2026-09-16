@@ -94,6 +94,73 @@ fn write_text_pdf(path: &Path, page_texts: &[&str]) {
     document.save(path).expect("save test pdf");
 }
 
+/// 造一份 Chrome / Skia 形态的 Type3 字体 PDF（issue #94 的真机样本）：字形是画出来
+/// 的程序，字符对照表挂在 /Encoding /Differences 上，字形名却是合成的 /g0，对不上
+/// 任何真实字符。`cante-pdf text` 遇到它会吐出乱码。
+fn write_type3_pdf(path: &Path) {
+    let mut document = Document::with_version("1.5");
+    let pages_id = document.new_object_id();
+    let char_proc_id = document.add_object(Stream::new(dictionary! {}, b"10 0 0 0 10 10 d1".to_vec()));
+    let mut char_procs = dictionary! {};
+    char_procs.set(b"g0".to_vec(), char_proc_id);
+    // Chrome / Skia 的 Type3 字体自己带一份 /ToUnicode，但 lopdf 先看不认识的
+    // /Encoding /Differences，解析失败后退回单字节表，把它忽略了。
+    let cmap_id = document.add_object(Stream::new(
+        dictionary! {},
+        b"1 beginbfchar\n<41> <0041>\nendbfchar\n".to_vec(),
+    ));
+    let font_id = document.add_object(dictionary! {
+        "Type" => "Font",
+        "Subtype" => "Type3",
+        "FontBBox" => vec![0.into(), 0.into(), 1000.into(), 1000.into()],
+        "FontMatrix" => vec![0.001.into(), 0.into(), 0.into(), 0.001.into(), 0.into(), 0.into()],
+        "CharProcs" => char_procs,
+        "Encoding" => dictionary! {
+            "Type" => "Encoding",
+            "Differences" => vec![0.into(), Object::Name(b"g0".to_vec())],
+        },
+        "ToUnicode" => cmap_id,
+        "FirstChar" => 0,
+        "LastChar" => 0,
+        "Widths" => vec![1000.into()],
+    });
+    let resources_id = document.add_object(dictionary! {
+        "Font" => dictionary! { "F1" => font_id },
+    });
+    let content = Content {
+        operations: vec![
+            Operation::new("BT", vec![]),
+            Operation::new("Tf", vec!["F1".into(), 24.into()]),
+            Operation::new("Td", vec![72.into(), 700.into()]),
+            Operation::new("Tj", vec![Object::string_literal("AB")]),
+            Operation::new("ET", vec![]),
+        ],
+    };
+    let content_id =
+        document.add_object(Stream::new(dictionary! {}, content.encode().expect("encode")));
+    let page_id = document.add_object(dictionary! {
+        "Type" => "Page",
+        "Parent" => pages_id,
+        "Contents" => content_id,
+        "Resources" => resources_id,
+        "MediaBox" => vec![0.into(), 0.into(), 595.into(), 842.into()],
+    });
+    document.objects.insert(
+        pages_id,
+        Object::Dictionary(dictionary! {
+            "Type" => "Pages",
+            "Kids" => vec![Object::Reference(page_id)],
+            "Count" => 1,
+        }),
+    );
+    let catalog_id = document.add_object(dictionary! {
+        "Type" => "Catalog",
+        "Pages" => pages_id,
+    });
+    document.trailer.set("Root", catalog_id);
+    document.save(path).expect("save type3 pdf");
+}
+
 #[test]
 fn merge_then_count_then_split_through_the_library_api() {
     let dir = TempDir::new("chain");
@@ -128,4 +195,27 @@ fn merge_then_count_then_split_through_the_library_api() {
     // 原文件没被动过。
     assert_eq!(pdf::page_count(&first).expect("first"), 2);
     assert_eq!(pdf::page_count(&second).expect("second"), 1);
+}
+
+/// issue #94：Type3 乱码以前随库 API 也漏过去了。
+///
+/// 这里走的是和命令行同一条链路：`extract_text` 能吐出东西（乱码），
+/// `text_layer_risk` 必须认出来，这样 `cante-pdf` 才会给退出码 3。
+#[test]
+fn a_type3_pdf_is_flagged_through_the_library_api() {
+    let dir = TempDir::new("type3");
+    let risky = dir.join("chrome导出.pdf");
+    write_type3_pdf(&risky);
+
+    let text = pdf::extract_text(&risky, None).expect("extract still returns something");
+    assert!(!text.trim().is_empty(), "the garbage is non-empty, which is the trap: {text:?}");
+
+    let reason = pdf::text_layer_risk(&risky, &text).expect("must warn about the Type3 font");
+    assert!(reason.contains("乱码") || reason.contains("对照表"), "reason: {reason}");
+
+    // 正常 PDF 走同一条链路不能被告警。
+    let fine = dir.join("正常.pdf");
+    write_text_pdf(&fine, &["Employee list July 2026"]);
+    let fine_text = pdf::extract_text(&fine, None).expect("extract normal");
+    assert_eq!(pdf::text_layer_risk(&fine, &fine_text), None);
 }
