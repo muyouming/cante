@@ -11,6 +11,8 @@
 import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
+import { TRUST } from "./copy.ts";
+import { checkNoteFromRows } from "./evidence.ts";
 import { fileName, folderName, onlineHint, onlineLabel } from "./run.ts";
 import type { TaskRun } from "./tasks/index.ts";
 import type { Store } from "../store.ts";
@@ -38,6 +40,9 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
     if (!impact) return false;
     return impact.created + impact.modified + impact.deleted > 0;
   };
+  // #63 — the assistant's own 【需要你核对】 paragraph for THIS run. Absent unless
+  // it actually wrote one, so the card never shows a canned warning.
+  const checkNote = () => checkNoteFromRows(props.store.rows());
 
   async function rerun(): Promise<void> {
     const current = run();
@@ -118,6 +123,15 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
         </Show>
 
         <p class="text-lg text-slate-100">{run()?.result?.summary}</p>
+
+        <Show when={checkNote()}>
+          <div class="rounded-2xl border border-amber-700 bg-amber-950/40 px-4 py-3">
+            <p class="text-base font-bold text-amber-100">{TRUST.checkTitle}</p>
+            <p class="mt-1 whitespace-pre-wrap break-words text-[16px] leading-relaxed text-amber-100/90">
+              {checkNote()}
+            </p>
+          </div>
+        </Show>
 
         <Show when={files().length > 0}>
           <ul class="divide-y divide-slate-800 overflow-hidden rounded-2xl border border-slate-700">
