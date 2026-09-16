@@ -61,7 +61,7 @@ describe("catalogue shape", () => {
   test("every card is complete", () => {
     expect(TASKS.length).toBeGreaterThan(0);
     for (const task of TASKS) {
-      expect(task.id).toMatch(/^[a-z]+\.[a-z]+$/);
+      expect(task.id).toMatch(/^[a-z]+(?:-[a-z]+)*\.[a-z]+(?:-[a-z]+)*$/);
       expect(task.title.length).toBeGreaterThan(3);
       expect(task.example.length).toBeGreaterThan(5);
       expect(GROUPS).toContain(task.group);
@@ -211,5 +211,69 @@ describe("the instruction handed to the assistant", () => {
     expect(prompt).toContain(files[0]!);
     expect(prompt).toContain("先说明你打算怎么做，再动手");
     expect(instructionFor("没有这张卡", files, "随便")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #74 — 能力中心新增的四张卡片，以及每份说明都要带的一条通用规矩：
+// 这台电脑缺工具时先说清楚，并给用户两条出路，不许硬做、也不许假装成功。
+// ---------------------------------------------------------------------------
+
+describe("the curated cards (#74)", () => {
+  const NEW_CARDS = ["excel.filter", "excel.split", "files.by-date", "doc.summary"];
+
+  test("each new card is in the catalogue and fully written", () => {
+    for (const id of NEW_CARDS) {
+      const task = taskById(id);
+      expect(task).toBeDefined();
+      // The ability centre shows four lines of result hints; the card owns them.
+      expect(task!.summaryHints.length).toBe(4);
+      expect(task!.plan.length).toBe(4);
+      expect((task!.risks ?? []).length).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  test("the new ids are unique", () => {
+    const all = TASKS.map((task) => task.id);
+    expect(new Set(all).size).toBe(all.length);
+    for (const id of NEW_CARDS) {
+      expect(TASKS.filter((task) => task.id === id).length).toBe(1);
+    }
+  });
+
+  test("the new cards declare sane needs and file filters", () => {
+    for (const id of NEW_CARDS) {
+      const task = taskById(id)!;
+      expect(["files", "folder", "none", "text"]).toContain(task.needs);
+      for (const ext of task.accept ?? []) {
+        expect(ext).toBe(ext.toLowerCase());
+        expect(ext).not.toContain(".");
+      }
+      // A folder card never carries a per-file filter (the picker offers folders).
+      if (task.needs === "folder") expect(task.accept).toBeUndefined();
+    }
+  });
+
+  test("every instruction says to stop when the computer lacks a tool", () => {
+    for (const task of TASKS) {
+      const prompt = task.prompt(sampleFiles(task), "按我说的做");
+      expect(prompt).toContain("缺少读或写这种文件的工具");
+      expect(prompt).toContain("另存成能读的格式");
+      expect(prompt).toContain("让我同意你装一个工具");
+      expect(prompt).toContain("不要假装成功");
+    }
+    expect(SAFETY_RULES.join("\n")).toContain("缺少读或写这种文件的工具");
+  });
+
+  test("grouping by month never deletes and asks before overwriting", () => {
+    const prompt = taskById("files.by-date")!.prompt(["/示例/文件夹"], "按月份分好");
+    expect(prompt).toContain("不要删除");
+    expect(prompt).toContain("不要覆盖");
+    expect(prompt).toContain("重名");
+  });
+
+  test("the summary card marks where every point came from", () => {
+    const prompt = taskById("doc.summary")!.prompt(["/示例/年度报告.pdf"], "总结成一页");
+    expect(prompt).toContain("来自：");
   });
 });

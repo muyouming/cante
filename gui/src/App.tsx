@@ -164,7 +164,7 @@ function SimpleApp(props: SimpleAppProps): JSX.Element {
         >
           <Show
             when={active()}
-            fallback={<Home onPickTask={pick} onSubmitText={say} />}
+            fallback={<Home store={props.store} onPickTask={pick} onSubmitText={say} />}
           >
             {(current) => (
               <Show

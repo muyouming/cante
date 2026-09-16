@@ -16,6 +16,10 @@ import { EXCEL_TASKS } from "./excel.ts";
 import { FILE_TASKS } from "./files.ts";
 import { DOCUMENT_TASKS } from "./document.ts";
 import { WECHAT_TASKS } from "./wechat.ts";
+// #74 — the four curated cards the ability centre adds on top of the above.
+import { SHEET_TASKS } from "./sheet.ts";
+import { BY_MONTH_TASKS } from "./bymonth.ts";
+import { SUMMARY_TASKS } from "./summary.ts";
 
 export type TaskGroup = "表格" | "文件" | "微信" | "文书" | "资料";
 
@@ -97,7 +101,15 @@ export type TaskState = RunState;
  * `[...EXCEL_TASKS, ...FILE_TASKS, ...DOCUMENT_TASKS, ...WECHAT_TASKS]` — so
  * the home screen and history pick the WeChat cards up automatically.
  */
-export const TASKS: TaskDef[] = [...EXCEL_TASKS, ...FILE_TASKS, ...DOCUMENT_TASKS, ...WECHAT_TASKS];
+export const TASKS: TaskDef[] = [
+  ...EXCEL_TASKS,
+  ...SHEET_TASKS,
+  ...FILE_TASKS,
+  ...BY_MONTH_TASKS,
+  ...DOCUMENT_TASKS,
+  ...SUMMARY_TASKS,
+  ...WECHAT_TASKS,
+];
 
 /** Look up one card by id (history, retry, and the runner all need it). */
 export function taskById(id: string): TaskDef | undefined {
