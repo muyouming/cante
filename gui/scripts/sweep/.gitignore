@@ -4,3 +4,7 @@ work/
 
 # Python 字节码
 __pycache__/
+
+# 普查打包出来的结果（报告 + work + 应用日志）。它是往开发机拷的中转件，
+# 内容就是 work/，不必进仓库。
+cante-sweep-*.zip

@@ -7,8 +7,14 @@
 #
 #   bash gui/scripts/task-sweep.sh                 # 跑全部卡
 #   bash gui/scripts/task-sweep.sh excel.merge excel.tidy
+#   bash gui/scripts/task-sweep.sh pdf               # 整类：只跑 pdf.*
 #   bash gui/scripts/task-sweep.sh --list
-#   TIMEOUT=300 bash gui/scripts/task-sweep.sh pdf.split
+#   SWEEP_TIMEOUT=900 bash gui/scripts/task-sweep.sh pdf.split   # 单卡上限 900 秒
+#   TIMEOUT=300 bash gui/scripts/task-sweep.sh pdf.split         # 同义，旧写法还认
+#   bash gui/scripts/task-sweep.sh --zip                         # 跑完打一个 zip 好拷回来
+#
+# 单卡上限默认交给 sweep.py（--timeout 1800 / SWEEP_TIMEOUT）：这里**只在明确设了
+# TIMEOUT 或 SWEEP_TIMEOUT 时**才传 --timeout，否则会盖掉那个默认值。
 #
 # 没配置模型端点时不会假装通过：脚本会写一份说明「本次没真跑」的报告并不报错。
 set -euo pipefail
@@ -17,7 +23,7 @@ here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 gui_root="$(cd -- "$here/.." && pwd)"
 repo_root="$(cd -- "$gui_root/.." && pwd)"
 
-timeout_seconds="${TIMEOUT:-600}"
+timeout_seconds="${TIMEOUT:-${SWEEP_TIMEOUT:-}}"
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "task-sweep: 需要 python3" >&2
@@ -74,4 +80,7 @@ fi
 export CANTE_SHEETS_BIN="${sheets_bin:-}"
 export CANTE_PDF_BIN="${pdf_bin:-}"
 
-exec python3 "$here/sweep/sweep.py" --timeout "$timeout_seconds" "$@"
+if [ -n "$timeout_seconds" ]; then
+  exec python3 "$here/sweep/sweep.py" --timeout "$timeout_seconds" "$@"
+fi
+exec python3 "$here/sweep/sweep.py" "$@"
