@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { createRoot } from "solid-js";
 
 import type { EventMsg } from "./protocol.ts";
+import { SCHEDULE_STORAGE_KEY } from "./simple/schedule.ts";
 
 // ---------------------------------------------------------------------------
 // Fake bridge — must be installed before store.ts is imported.
@@ -41,6 +42,33 @@ function reset(): void {
   calls.length = 0;
   healthSession = null;
   hydration = { cursor: 0, truncated: false, events: [], state: { status: "idle", session: null, pending_approval: null } };
+  clearStorage();
+}
+
+// ---------------------------------------------------------------------------
+// A localStorage stand-in for the #55 schedule tests. `bun test` has no
+// localStorage, so the tests install a tiny one and remove it again after each
+// case; a locked-down webview behaves the same way (writes just vanish).
+// ---------------------------------------------------------------------------
+
+function installStorage(initial: Record<string, string> = {}): Map<string, string> {
+  const map = new Map(Object.entries(initial));
+  const storage: Storage = {
+    get length() {
+      return map.size;
+    },
+    clear: () => map.clear(),
+    getItem: (key: string) => map.get(key) ?? null,
+    key: (index: number) => [...map.keys()][index] ?? null,
+    removeItem: (key: string) => void map.delete(key),
+    setItem: (key: string, value: string) => void map.set(key, value),
+  };
+  (globalThis as unknown as { localStorage?: Storage }).localStorage = storage;
+  return map;
+}
+
+function clearStorage(): void {
+  delete (globalThis as unknown as { localStorage?: Storage }).localStorage;
 }
 
 function record(name: string, args: unknown): void {
@@ -111,6 +139,17 @@ async function setup(hydrationEvents: EventMsg[] = [], session: unknown = SESSIO
 
 function event(name: string, payload: unknown): EventMsg {
   return { timestamp: "2026-01-01T00:00:00Z", id: `evt_${Math.random().toString(36).slice(2)}`, event: { [name]: payload } };
+}
+
+/** Mount a store without connecting, for "restart and read back" tests. */
+function mountStore(): { store: Store; dispose: () => void } {
+  let store!: Store;
+  let dispose!: () => void;
+  createRoot((root) => {
+    dispose = root;
+    store = createStore();
+  });
+  return { store, dispose };
 }
 
 beforeEach(reset);
@@ -1111,6 +1150,147 @@ describe("replyToRun", () => {
     await store.replyToRun("金额（元）就是金额");
     expect(opCalls("send_input").length).toBe(before);
     expect(store.currentRun()?.state).toBe("running");
+    dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("#55 定时/重复任务", () => {
+  const TASK = {
+    id: "excel.merge",
+    title: "把几张表合成一张",
+    plan: ["打开这几张表", "合成一张新表"],
+  };
+  const input = {
+    cadence: "weekly" as const,
+    day: 1,
+    hour: 9,
+    taskId: TASK.id,
+    taskTitle: TASK.title,
+    plan: [...TASK.plan],
+    files: ["/work/a.xlsx", "/work/b.xlsx"],
+    instruction: "把这两张表合成一张",
+  };
+
+  test("一开始没有任何自动任务", async () => {
+    const { store, dispose } = await setup();
+    expect(store.schedules()).toEqual([]);
+    dispose();
+  });
+
+  test("addSchedule 默认开启，并写进本地存储", async () => {
+    const map = installStorage();
+    const { store, dispose } = await setup();
+    const schedule = store.addSchedule(input);
+    expect(schedule.enabled).toBe(true);
+    expect(schedule.id).toBeTruthy();
+    expect(store.schedules()).toHaveLength(1);
+    const raw = map.get(SCHEDULE_STORAGE_KEY);
+    expect(raw).toBeTruthy();
+    expect(JSON.parse(raw!)[0].id).toBe(schedule.id);
+    dispose();
+  });
+
+  test("重启后能读回来，停掉与删掉也会写回", async () => {
+    installStorage();
+    const first = mountStore();
+    const schedule = first.store.addSchedule(input);
+    first.dispose();
+
+    // 换一个 store 当成「重启」。
+    const second = mountStore();
+    expect(second.store.schedules().map((item) => item.id)).toEqual([schedule.id]);
+
+    second.store.setScheduleEnabled(schedule.id, false);
+    expect(second.store.schedules()[0]!.enabled).toBe(false);
+    second.dispose();
+
+    const third = mountStore();
+    expect(third.store.schedules()[0]!.enabled).toBe(false);
+
+    third.store.removeSchedule(schedule.id);
+    third.dispose();
+
+    const fourth = mountStore();
+    expect(fourth.store.schedules()).toEqual([]);
+    fourth.dispose();
+  });
+
+  test("坏 JSON 不能让应用起不来，之后照样能用", async () => {
+    installStorage({ [SCHEDULE_STORAGE_KEY]: "{ 这不是 json" });
+    const { store, dispose } = await setup();
+    expect(store.schedules()).toEqual([]);
+    const schedule = store.addSchedule(input);
+    expect(store.schedules().map((item) => item.id)).toEqual([schedule.id]);
+    dispose();
+  });
+
+  test("没有本地存储也能加调度，只是记不住", async () => {
+    const { store, dispose } = await setup();
+    const schedule = store.addSchedule(input);
+    expect(store.schedules().map((item) => item.id)).toEqual([schedule.id]);
+    dispose();
+  });
+
+  test("runScheduled 用调度里的文件和话术，先摆到确认页而不是自己动手", async () => {
+    const { store, dispose } = await setup();
+    const schedule = store.addSchedule(input);
+    await store.runScheduled(schedule.id);
+
+    const run = store.currentRun();
+    expect(run?.state).toBe("preview");
+    expect(run?.taskId).toBe(TASK.id);
+    expect(run?.taskTitle).toBe(TASK.title);
+    expect(run?.plan).toEqual(TASK.plan);
+    expect(run?.files).toEqual(["/work/a.xlsx", "/work/b.xlsx"]);
+    expect(run?.instruction).toBe("把这两张表合成一张");
+    // 没有替她按「开始」：确认流程一模一样，所以没有发出任何指令。
+    expect(opCalls("send_input")).toEqual([]);
+    // 记下了这次时间，同一个时间点不会再触发。
+    expect(store.schedules()[0]!.lastRunAt).toBeGreaterThan(0);
+    dispose();
+  });
+
+  test("停掉的调度不会被启动", async () => {
+    const { store, dispose } = await setup();
+    const schedule = store.addSchedule(input);
+    store.setScheduleEnabled(schedule.id, false);
+    await store.runScheduled(schedule.id);
+    expect(store.currentRun()).toBeNull();
+    expect(store.schedules()[0]!.lastRunAt).toBeUndefined();
+    dispose();
+  });
+
+  test("当前有任务在跑时不重复启动", async () => {
+    const { store, dispose } = await setup();
+    const schedule = store.addSchedule(input);
+    await store.startRun(TASK, ["/work/a.xlsx"], "手动那次");
+    await store.confirmRun();
+    const running = store.currentRun();
+    expect(running?.state).toBe("running");
+
+    await store.runScheduled(schedule.id);
+
+    // 还是原来那一件，没有被顶掉；调度也没被记成「跑过了」。
+    expect(store.currentRun()?.id).toBe(running?.id);
+    expect(store.currentRun()?.instruction).toBe("手动那次");
+    expect(store.schedules()[0]!.lastRunAt).toBeUndefined();
+    dispose();
+  });
+
+  test("确认页还开着时，同一分钟不再排第二件", async () => {
+    const { store, dispose } = await setup();
+    const first = store.addSchedule(input);
+    const second = store.addSchedule({ ...input, taskId: "file.rename", taskTitle: "把文件改名" });
+    await store.runScheduled(first.id);
+    const staged = store.currentRun()?.id;
+
+    await store.runScheduled(second.id);
+    expect(store.currentRun()?.id).toBe(staged);
+    expect(store.currentRun()?.taskId).toBe(TASK.id);
+    expect(store.schedules().find((item) => item.id === second.id)?.lastRunAt).toBeUndefined();
+    expect(store.schedules().find((item) => item.id === first.id)?.lastRunAt).toBeGreaterThan(0);
     dispose();
   });
 });

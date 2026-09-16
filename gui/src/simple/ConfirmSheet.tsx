@@ -144,7 +144,7 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
               <ul class="mt-2 space-y-1">
                 <For each={visibleFiles()}>
                   {(path) => (
-                    <li class="truncate rounded-lg bg-slate-800/60 px-3 py-2 text-[16px] text-slate-200" title={path}>
+                    <li class="truncate rounded-lg bg-slate-800/60 px-3 py-2 text-[16px] text-slate-200" title={fileName(path)}>
                       {fileName(path)}
                       <span class="ml-2 text-[16px] text-slate-500">在 {folderName(path)}</span>
                     </li>

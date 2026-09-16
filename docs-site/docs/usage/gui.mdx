@@ -64,6 +64,12 @@ Tasks that need WeChat get their own screen, because that screen has a job: it e
 - **History.** The last twenty runs list what was processed and what came out, with a one-click undo.
 - **A confirmation sheet for anything destructive.** Deletions, overwrites and bulk messages are flagged in red, with the default focus on Cancel.
 
+## Spreadsheets in and out
+
+Excel files are what people actually have, so the app carries a small spreadsheet tool of its own (`cante-sheets`): it reads `.xlsx`, `.xls` and `.csv`, and writes real `.xlsx`. Its job is narrow and boring on purpose — keep what the cells meant. Dates stay dates, whole numbers do not sprout a trailing `.0`, a customer number like `00123` keeps its leading zeros, empty cells stay empty, and Chinese sheet names survive the round trip.
+
+At the start of a session the app looks for that tool once; if it finds it, it tells the assistant where it is — in the same place it is told everything else about the job, never guessed. If it is missing, the confirmation sheet says so in the same breath as the plan, with the two honest choices: save the sheet as CSV first, or have a technical colleague install the tool once. What it never does is run for two minutes and then admit, at the end, that it could not write the file.
+
 ## Where your data goes
 
 The 隐私 panel answers the question in plain language: what happens on this machine, what needs the network, and who receives it when it does. 只在本机处理 switches the session to local-only and turns off web search; every result card also says whether that run went online.
@@ -83,7 +89,8 @@ Every failure is one Chinese pair — 发生了什么, 你可以怎么做 — pl
 
 - **Screenshots and photos of tables** are not supported. The client's protocol carries text only, so an image cannot reach the model even if the model could read it, and ordinary office machines have no OCR tool. Shipping a card that made you wait and then fail would be worse than not shipping it. ([#48](https://github.com/muyouming/cante/issues/48) records both routes forward.)
 - **Attachments are paths.** You point at a file; nothing is uploaded as bytes. The tray says so rather than pretending otherwise.
-- **Scanned PDFs** are not converted silently: the run stops and asks, because the output would be gibberish.
+- **Scanned PDFs** are not converted silently: the run stops and asks, because the output would be gibberish. The same rule covers a PDF this machine cannot read at all — you hear about it at the confirmation step, not after waiting.
+- **Spreadsheet limits that are real:** a sheet with hundreds of thousands of rows, or one that uses merged cells as headers, may need a hand-checked pass; the confirmation sheet says so before anything starts.
 - **Very large tables** (beyond a few hundred thousand rows) and heavily merged spreadsheets may need checking by hand; the confirmation sheet says so up front.
 - **The interface is Chinese only**, and the product targets Windows first.
 
@@ -115,6 +122,7 @@ bunx tauri build --bundles app
 | `gui/ROADMAP.md` | The product's persona, product laws, priorities and decision log |
 | `gui/src/simple/` | The product surface: home, wizard, runner, result, history, privacy, task catalogue |
 | `gui/src-tauri/` | Daemon ownership, the run log and undo, native file dialogs |
+| `gui/src-tauri/src/sheets.rs`, `src/bin/cante-sheets.rs` | The spreadsheet tool the app ships (calamine in, rust_xlsxwriter out). `commands.rs` probes for it, `src/simple/capabilities.ts` remembers the answer and writes one line into the prompt envelope, and `src/simple/ConfirmSheet.tsx` states the honest alternative when it is absent. Another tool (PDF, say) copies that shape rather than inventing one |
 | `gui/scripts/e2e.sh` | The gate: install, tests, typecheck, web build, fixtures, `cargo test` |
 | `gui/scripts/dom-smoke.sh` | Renders the shell in Chrome and reads it back as text (no eyes required) |
 | `gui/fixtures/` | A scripted `cante serve` double, so the app runs with no Cante install |

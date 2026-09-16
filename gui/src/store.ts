@@ -45,6 +45,13 @@ import {
   type TaskRunUndo,
 } from "./simple/run.ts";
 import {
+  dueSchedules,
+  newScheduleId,
+  readSchedules,
+  writeSchedules,
+  type Schedule,
+} from "./simple/schedule.ts";
+import {
   EFFORTS,
   PERMISSION_MODES,
   eventName,
@@ -278,6 +285,20 @@ export interface Store {
   undoRun(id: string): Promise<void>;
   /** Re-read the on-disk run log (also runs at launch). */
   refreshRuns(): Promise<void>;
+  // ---- 定时/重复任务 (#55) -------------------------------------------------
+  /** 她定下的自动任务，按定下的先后排列。 */
+  schedules: Accessor<Schedule[]>;
+  /** 记下一个"以后到点自动做"的活；默认就是开启的。 */
+  addSchedule(input: Omit<Schedule, "id" | "createdAt" | "enabled" | "lastRunAt">): Schedule;
+  /** 彻底不要了。 */
+  removeSchedule(id: string): void;
+  /** 暂时停掉（false）或重新打开（true），记录留着。 */
+  setScheduleEnabled(id: string, enabled: boolean): void;
+  /**
+   * 到点了：用调度里存的那份交代去走**和手动一样的确认流程**。
+   * 只有真的把它排上队才记 `lastRunAt`；当前有活在跑就什么都不做。
+   */
+  runScheduled(id: string): Promise<void>;
 }
 
 /**
@@ -303,6 +324,8 @@ const GOAL_EMOJI = "🎯";
 const MAX_SEEN = 8_192;
 const RECONCILE_MS = 2_000;
 const PING_MS = 4_000;
+/** #55 — 应用运行期间每分钟看一眼有没有到点的自动任务。 */
+const SCHEDULE_TICK_MS = 60_000;
 
 function clampText(text: string, limit: number): string {
   if (text.length <= limit) return text;
@@ -528,6 +551,8 @@ export function createStore(): Store {
   const [localOnly, setLocalOnlySignal] = createSignal<boolean>(readLocalOnly());
   const [currentRun, setCurrentRun] = createSignal<TaskRun | null>(null);
   const [runs, setRuns] = createSignal<TaskRun[]>([]);
+  // #55 — 她定下的自动任务。启动时从本地读回来，坏数据当空。
+  const [schedules, setSchedules] = createSignal<Schedule[]>(readSchedules());
 
   // ---- #62 running progress -----------------------------------------------
   // The started-at clock is a signal so entering `running` redraws at once;
@@ -598,6 +623,7 @@ export function createStore(): Store {
   let unlisteners: UnlistenFn[] = [];
   let reconcileTimer: ReturnType<typeof setInterval> | undefined;
   let pingTimer: ReturnType<typeof setTimeout> | undefined;
+  let scheduleTimer: ReturnType<typeof setInterval> | undefined;
   let autoStarted = false;
   const seen = new Set<string>();
   const seenOrder: string[] = [];
@@ -607,6 +633,7 @@ export function createStore(): Store {
     for (const off of unlisteners) off();
     if (reconcileTimer !== undefined) clearInterval(reconcileTimer);
     if (pingTimer !== undefined) clearTimeout(pingTimer);
+    if (scheduleTimer !== undefined) clearInterval(scheduleTimer);
   });
 
   function remember(id: string | undefined): boolean {
@@ -624,6 +651,9 @@ export function createStore(): Store {
   function connect(): void {
     if (started || disposed) return;
     started = true;
+    scheduleTimer = setInterval(checkDueSchedules, SCHEDULE_TICK_MS);
+    // 开机先看一眼：关机时错过的那个，现在就摆到确认页等着她。
+    checkDueSchedules();
     void setup();
   }
 
@@ -1883,6 +1913,81 @@ export function createStore(): Store {
     }
   }
 
+  // ---- 定时/重复任务 (#55) ------------------------------------------------
+
+  /** 已经有活在手上：等她确认，或者正在做。这时不再排新的。 */
+  function activeRun(): boolean {
+    const run = currentRun();
+    return run !== null && (run.state === "preview" || run.state === "running");
+  }
+
+  function persistSchedules(list: Schedule[]): void {
+    writeSchedules(list);
+  }
+
+  function addSchedule(
+    input: Omit<Schedule, "id" | "createdAt" | "enabled" | "lastRunAt">,
+  ): Schedule {
+    const schedule: Schedule = {
+      ...input,
+      id: newScheduleId(),
+      createdAt: Date.now(),
+      enabled: true,
+    };
+    const next = [...schedules(), schedule];
+    setSchedules(next);
+    persistSchedules(next);
+    return schedule;
+  }
+
+  function removeSchedule(id: string): void {
+    const next = schedules().filter((schedule) => schedule.id !== id);
+    setSchedules(next);
+    persistSchedules(next);
+  }
+
+  function setScheduleEnabled(id: string, enabled: boolean): void {
+    const next = schedules().map((schedule) =>
+      schedule.id === id ? { ...schedule, enabled } : schedule,
+    );
+    setSchedules(next);
+    persistSchedules(next);
+  }
+
+  function markScheduleRan(id: string, at: number): void {
+    const next = schedules().map((schedule) =>
+      schedule.id === id ? { ...schedule, lastRunAt: at } : schedule,
+    );
+    setSchedules(next);
+    persistSchedules(next);
+  }
+
+  /**
+   * 到点了。依然走手动那条路：`startRun` 只是把活摆到确认页，真正的动手要她
+   * 点「开始」。所以微信任务也不会因为定时就自动发任何消息。
+   */
+  async function runScheduled(id: string): Promise<void> {
+    const schedule = schedules().find((item) => item.id === id);
+    if (!schedule || !schedule.enabled) return;
+    // 同一时刻只跑一个：手上有活就推迟到下一分钟，不排队堆积。
+    if (activeRun()) return;
+    await startRun(
+      { id: schedule.taskId, title: schedule.taskTitle, plan: schedule.plan },
+      schedule.files,
+      schedule.instruction,
+    );
+    // 真的摆上确认页了才记时间，避免同一个时间点反复触发。
+    markScheduleRan(id, Date.now());
+  }
+
+  function checkDueSchedules(): void {
+    if (disposed) return;
+    if (activeRun()) return;
+    const due = dueSchedules(schedules(), Date.now());
+    if (due.length === 0) return;
+    void runScheduled(due[0]!.id);
+  }
+
   return {
     mode,
     setMode,
@@ -1968,6 +2073,11 @@ export function createStore(): Store {
     replyToRun,
     undoRun,
     refreshRuns,
+    schedules,
+    addSchedule,
+    removeSchedule,
+    setScheduleEnabled,
+    runScheduled,
   };
 }
 
