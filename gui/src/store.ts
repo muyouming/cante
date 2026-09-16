@@ -702,10 +702,16 @@ export function createStore(): Store {
         if (health.cwd) setWorkspace(health.cwd);
         if (health.status) setDaemonStatus(health.status);
       });
-      // A reachable host with no session yet: open one with host defaults.
+      // A reachable host with no session yet: open one.
+      //
+      // `Auto` on purpose (#60): cante then runs everything except what it can
+      // prove is dangerous, so a non-technical user is not interrupted with a
+      // permission question per tool call. Her gate is the confirmation sheet
+      // before the run, in her own words — and if cante still stops, the
+      // approval sheet asks in plain Chinese instead of hanging.
       if (!autoStarted && session() === null) {
         autoStarted = true;
-        void startSession();
+        void startSession({ permission_mode: "Auto" });
       }
     } catch {
       if (disposed) return;
@@ -1666,10 +1672,16 @@ export function createStore(): Store {
     }
   }
 
-  function sendRunInstruction(text: string): void {
-    void invoke("send_input", { text, mode: "prompt" }).catch((error) => {
-      void finishRun("failed", trustDetail(error));
-    });
+  async function sendRunInstruction(text: string): Promise<void> {
+    // A run can start before the host has finished opening its session (the
+    // health probe and the first task run on different clocks). Open one with
+    // the same `Auto` policy rather than sending a prompt the daemon rejects.
+    if (session() === null) await startSession({ permission_mode: "Auto" });
+    try {
+      await invoke("send_input", { text, mode: "prompt" });
+    } catch (error) {
+      await finishRun("failed", trustDetail(error));
+    }
   }
 
   function runError(detail: string | undefined, run: TaskRun): TaskRun["error"] {
@@ -1740,7 +1752,7 @@ export function createStore(): Store {
     setCurrentRun(next);
     markProgressRunning();
     await beginSnapshot(next);
-    sendRunInstruction(allowOverwrite ? run.instruction + OVERWRITE_CONSENT : run.instruction);
+    await sendRunInstruction(allowOverwrite ? run.instruction + OVERWRITE_CONSENT : run.instruction);
   }
 
   async function dryRun(): Promise<void> {
@@ -1750,7 +1762,7 @@ export function createStore(): Store {
     setCurrentRun(next);
     markProgressRunning();
     await beginSnapshot(next);
-    sendRunInstruction(dryRunInstruction(run.instruction));
+    await sendRunInstruction(dryRunInstruction(run.instruction));
   }
 
   function cancelRun(): void {
