@@ -174,6 +174,16 @@ bunx tauri build --debug --no-bundle
 bun run e2e:windows
 ```
 
+One Windows trap, because it cost a red CI run: WebView2 runtime 150+ ignores the
+`WEBVIEW2_*` environment variables when the host process is **elevated**, and
+`msedgedriver` passes the remote debugging port through exactly that variable.
+An elevated shell therefore gets `session not created: DevToolsActivePort file
+doesn't exist` after a 60-second wait. A normal developer shell is not elevated
+and needs nothing extra; the CI runner *is*, so that step re-launches the script
+at medium integrity with [gsudo](https://github.com/gerardog/gsudo) — the recipe
+the wry maintainers publish for GitHub Actions in
+[tauri-apps/wry#1782](https://github.com/tauri-apps/wry/issues/1782).
+
 What it asserts — the same first-run strings `dom-smoke.sh` pins, so the two
 gates cannot drift apart: the app name, the 历史 and 隐私 entries, the three
 wizard steps (欢迎 / 检查电脑 / 开始使用) and the no-touch promise

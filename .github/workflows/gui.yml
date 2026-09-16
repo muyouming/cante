@@ -106,9 +106,26 @@ jobs:
         working-directory: gui
         run: bunx tauri build --debug --no-bundle
 
-      - name: UI smoke test (real WebView2 window)
-        working-directory: gui
-        run: bun run e2e:windows
+      # De-elevated on purpose. WebView2 runtime 150+ ignores `WEBVIEW2_*`
+      # environment variables when the host process runs elevated
+      # (MicrosoftEdge/WebView2Feedback#5645), and msedgedriver passes the remote
+      # debugging port through exactly that variable. The runner's process *is*
+      # elevated, so without this the session dies after 60s with
+      # "DevToolsActivePort file doesn't exist" — reproduced here, and documented
+      # upstream in tauri-apps/wry#1782, whose maintainers publish this gsudo
+      # recipe for GitHub Actions. `icacls` is what lets the medium-integrity
+      # process keep reading the workspace and writing the screenshots.
+      - name: UI smoke test (real WebView2 window, de-elevated)
+        shell: pwsh
+        run: |
+          winget install --id gerardog.gsudo --exact --accept-source-agreements --accept-package-agreements --disable-interactivity
+          icacls "$env:GITHUB_WORKSPACE" /grant "Everyone:(OI)(CI)F" | Out-Null
+          $gsudo = (Get-ChildItem "$env:LOCALAPPDATA\Microsoft\WinGet" -Recurse -Filter gsudo.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          if (-not $gsudo) { throw "gsudo was not found after winget install" }
+          # Absolute paths: the script finds the binary, the driver and its own
+          # artifact folder from its own location, so the cwd can be anything.
+          & $gsudo --integrity Medium node "$env:GITHUB_WORKSPACE\gui\e2e-windows\smoke.mjs"
+          exit $LASTEXITCODE
 
       # On failure this is the diagnosis: a screenshot, the rendered text and the
       # page HTML, next to the tauri-driver log in the step output.
