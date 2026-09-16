@@ -83,6 +83,10 @@ export function buildPrompt(parts: {
   if (sheetHelper) {
     blocks.push("【这台电脑怎么读写表格】", sheetHelper, "");
   }
+  // #50 — 同上，这台电脑能不能处理 PDF。默认也是 null。
+  if (pdfHelper) {
+    blocks.push("【这台电脑怎么处理 PDF】", pdfHelper, "");
+  }
   blocks.push(`【做完告诉我】${parts.done}`, "", CHECK_NOTE_BLOCK);
   return blocks.join("\n");
 }
@@ -100,6 +104,21 @@ let sheetHelper: string | null = null;
 /** 设置（或清空）这台电脑读写表格的说明。 */
 export function setSheetHelper(line: string | null): void {
   sheetHelper = line;
+}
+
+// ---------------------------------------------------------------------------
+// PDF 处理能力（#50）
+// ---------------------------------------------------------------------------
+
+/**
+ * PDF 能力探测只做一次，结果写到这里；默认是 null，所以现有的提示词一字不变。
+ * 由 `simple/capabilities.ts` 在启动时设置。
+ */
+let pdfHelper: string | null = null;
+
+/** 设置（或清空）这台电脑处理 PDF 的说明。 */
+export function setPdfHelper(line: string | null): void {
+  pdfHelper = line;
 }
 
 /**

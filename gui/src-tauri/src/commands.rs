@@ -10,38 +10,56 @@ use tauri::State;
 
 use crate::daemon::{Daemon, StartSessionArgs};
 
-/// The spreadsheet helper's file name. On Windows the executable carries the
+/// The helper binaries' file names. On Windows the executables carry the
 /// `.exe` suffix, and that is what both the app bundle and `PATH` contain.
 const SHEET_BIN_NAME: &str = if cfg!(windows) { "cante-sheets.exe" } else { "cante-sheets" };
+const PDF_BIN_NAME: &str = if cfg!(windows) { "cante-pdf.exe" } else { "cante-pdf" };
 
-/// Shown to the user when no helper could be found. One plain-Chinese sentence.
+/// Shown to the user when no helper could be found. One plain-Chinese sentence
+/// per tool; the frontend puts these straight on screen.
 const SHEET_UNAVAILABLE_WHY: &str = "这台电脑还没有表格读写工具。";
+const PDF_UNAVAILABLE_WHY: &str = "这台电脑还没有处理 PDF 的工具。";
 
-/// Whether this computer can read and write spreadsheets, and where the helper
-/// lives. Serialized straight to the frontend.
+/// Whether this computer can run one helper, and where that helper lives.
+/// Serialized straight to the frontend; `why` is Chinese meant for the user.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
-pub struct SheetCapability {
+pub struct ToolCapability {
     pub available: bool,
     pub path: Option<String>,
     pub why: Option<String>,
 }
 
-/// Resolve `cante-sheets` without touching the real process environment, so the
-/// lookup order can be unit-tested. Order is frozen (issue #75):
+/// Kept so the older `sheet_capability` command and its callers keep working.
+pub type SheetCapability = ToolCapability;
+
+/// What this computer can and cannot do, one entry per helper. The frontend
+/// probes this once at startup.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct ToolCapabilities {
+    pub sheets: ToolCapability,
+    pub pdf: ToolCapability,
+}
+
+/// Resolve one helper without touching the real process environment, so the
+/// lookup order can be unit-tested. Both tools share this logic; only the file
+/// name, the environment variable and the Chinese `why` differ. Order is frozen
+/// (issues #50, #75):
 ///
-/// 1. `CANTE_SHEETS_BIN` — if set at all, use it as-is;
+/// 1. the tool's environment variable — if set at all, use it as-is;
 /// 2. next to the current executable;
-/// 3. `../Resources/cante-sheets` next to the executable (macOS app bundle);
-/// 4. `$HOME/.cante/bin/cante-sheets`;
+/// 3. `../Resources/<name>` next to the executable (macOS app bundle);
+/// 4. `$HOME/.cante/bin/<name>`;
 /// 5. anywhere on `PATH`.
 ///
 /// Nothing found → `available: false` with a plain-Chinese `why`.
-pub fn resolve_sheet_bin(
+pub fn resolve_tool_bin(
+    bin_name: &str,
     env_bin: Option<&str>,
     exe_dir: Option<&Path>,
     home: Option<&Path>,
     path_var: Option<&str>,
-) -> SheetCapability {
+    why: &str,
+) -> ToolCapability {
     if let Some(value) = env_bin {
         let value = value.trim();
         if !value.is_empty() {
@@ -50,29 +68,49 @@ pub fn resolve_sheet_bin(
     }
 
     if let Some(dir) = exe_dir {
-        if let Some(found) = existing(dir.join(SHEET_BIN_NAME)) {
+        if let Some(found) = existing(dir.join(bin_name)) {
             return available(&found);
         }
-        if let Some(found) = existing(dir.join("..").join("Resources").join(SHEET_BIN_NAME)) {
+        if let Some(found) = existing(dir.join("..").join("Resources").join(bin_name)) {
             return available(&found);
         }
     }
 
     if let Some(home) = home {
-        if let Some(found) = existing(home.join(".cante").join("bin").join(SHEET_BIN_NAME)) {
+        if let Some(found) = existing(home.join(".cante").join("bin").join(bin_name)) {
             return available(&found);
         }
     }
 
     if let Some(raw_path) = path_var {
         for dir in std::env::split_paths(raw_path) {
-            if let Some(found) = existing(dir.join(SHEET_BIN_NAME)) {
+            if let Some(found) = existing(dir.join(bin_name)) {
                 return available(&found);
             }
         }
     }
 
-    SheetCapability { available: false, path: None, why: Some(SHEET_UNAVAILABLE_WHY.to_string()) }
+    ToolCapability { available: false, path: None, why: Some(why.to_string()) }
+}
+
+/// Resolve `cante-sheets` — the spreadsheet helper (#75).
+pub fn resolve_sheet_bin(
+    env_bin: Option<&str>,
+    exe_dir: Option<&Path>,
+    home: Option<&Path>,
+    path_var: Option<&str>,
+) -> ToolCapability {
+    resolve_tool_bin(SHEET_BIN_NAME, env_bin, exe_dir, home, path_var, SHEET_UNAVAILABLE_WHY)
+}
+
+/// Resolve `cante-pdf` — the PDF helper (#50).
+pub fn resolve_pdf_bin(
+    env_bin: Option<&str>,
+    exe_dir: Option<&Path>,
+    home: Option<&Path>,
+    path_var: Option<&str>,
+) -> ToolCapability {
+    resolve_tool_bin(PDF_BIN_NAME, env_bin, exe_dir, home, path_var, PDF_UNAVAILABLE_WHY)
 }
 
 fn existing(path: PathBuf) -> Option<String> {
@@ -83,8 +121,8 @@ fn existing(path: PathBuf) -> Option<String> {
     }
 }
 
-fn available(path: &str) -> SheetCapability {
-    SheetCapability { available: true, path: Some(path.to_string()), why: None }
+fn available(path: &str) -> ToolCapability {
+    ToolCapability { available: true, path: Some(path.to_string()), why: None }
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -97,13 +135,40 @@ fn home_dir() -> Option<PathBuf> {
 /// Does this computer have the spreadsheet helper? The frontend turns this into
 /// a line in the instruction envelope, or a neutral notice on the confirm page.
 #[tauri::command]
-pub fn sheet_capability() -> SheetCapability {
+pub fn sheet_capability() -> ToolCapability {
     let env_bin = std::env::var("CANTE_SHEETS_BIN").ok();
     let exe_dir =
         std::env::current_exe().ok().and_then(|path| path.parent().map(Path::to_path_buf));
     let home = home_dir();
     let path_var = std::env::var("PATH").ok();
     resolve_sheet_bin(env_bin.as_deref(), exe_dir.as_deref(), home.as_deref(), path_var.as_deref())
+}
+
+/// What can this computer do (#50): read/write spreadsheets and handle PDFs.
+/// One probe for the whole family, so the frontend never asks tool by tool.
+#[tauri::command]
+pub fn tool_capabilities() -> ToolCapabilities {
+    let sheet_env = std::env::var("CANTE_SHEETS_BIN").ok();
+    let pdf_env = std::env::var("CANTE_PDF_BIN").ok();
+    let exe_dir =
+        std::env::current_exe().ok().and_then(|path| path.parent().map(Path::to_path_buf));
+    let home = home_dir();
+    let path_var = std::env::var("PATH").ok();
+
+    ToolCapabilities {
+        sheets: resolve_sheet_bin(
+            sheet_env.as_deref(),
+            exe_dir.as_deref(),
+            home.as_deref(),
+            path_var.as_deref(),
+        ),
+        pdf: resolve_pdf_bin(
+            pdf_env.as_deref(),
+            exe_dir.as_deref(),
+            home.as_deref(),
+            path_var.as_deref(),
+        ),
+    }
 }
 
 #[tauri::command]
@@ -285,8 +350,13 @@ mod tests {
 
     /// 在目录下造一个（空的）可执行文件，返回它的路径字符串。
     fn place(dir: &Path) -> String {
+        place_named(dir, SHEET_BIN_NAME)
+    }
+
+    /// 同上，但可以指定工具名字（表格 / PDF 共用）。
+    fn place_named(dir: &Path, name: &str) -> String {
         fs::create_dir_all(dir).expect("create dir");
-        let binary = dir.join(SHEET_BIN_NAME);
+        let binary = dir.join(name);
         fs::write(&binary, b"#!/bin/sh\n").expect("write stub");
         binary.to_string_lossy().into_owned()
     }
@@ -367,5 +437,79 @@ mod tests {
         let cap = resolve_sheet_bin(None, Some(&dir.0), Some(&dir.0.join("home")), Some(&path_var));
         assert_eq!(cap.path.as_deref(), Some(expected.as_str()));
         assert_ne!(cap.path.as_deref(), Some(home.as_str()));
+    }
+
+    // -----------------------------------------------------------------------
+    // PDF 工具（#50）—— 和表格共用同一套解析顺序，只换文件名和文案。
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn pdf_env_var_wins_even_if_the_file_is_absent() {
+        let cap = resolve_pdf_bin(Some("/custom/cante-pdf"), None, None, None);
+        assert!(cap.available);
+        assert_eq!(cap.path.as_deref(), Some("/custom/cante-pdf"));
+        assert!(cap.why.is_none());
+    }
+
+    #[test]
+    fn pdf_found_next_to_the_executable() {
+        let dir = TempDir::new("pdf-exe");
+        let expected = place_named(&dir.0, PDF_BIN_NAME);
+        let cap = resolve_pdf_bin(None, Some(&dir.0), None, None);
+        assert!(cap.available);
+        assert_eq!(cap.path.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn pdf_falls_back_to_home_and_path() {
+        let dir = TempDir::new("pdf-home");
+        let home_bin =
+            place_named(&dir.0.join("personal").join(".cante").join("bin"), PDF_BIN_NAME);
+        let cap = resolve_pdf_bin(None, None, Some(&dir.0.join("personal")), None);
+        assert_eq!(cap.path.as_deref(), Some(home_bin.as_str()));
+
+        let path_dir = dir.0.join("on-path");
+        let path_bin = place_named(&path_dir, PDF_BIN_NAME);
+        let path_var = path_dir.to_string_lossy().into_owned();
+        let cap = resolve_pdf_bin(None, None, None, Some(&path_var));
+        assert_eq!(cap.path.as_deref(), Some(path_bin.as_str()));
+    }
+
+    #[test]
+    fn pdf_not_found_says_so_in_chinese() {
+        let cap = resolve_pdf_bin(None, None, None, Some("/definitely/not/here"));
+        assert!(!cap.available);
+        assert!(cap.path.is_none());
+        let why = cap.why.expect("why");
+        assert!(why.contains("PDF"), "why should name PDF: {why}");
+        assert!(why.contains("这台电脑"), "why should be Chinese: {why}");
+        assert!(!why.contains("cante-pdf"));
+    }
+
+    #[test]
+    fn each_tool_is_resolved_independently() {
+        let dir = TempDir::new("both");
+        // 只有表格工具时：表格命中，PDF 没命中，两边各说各的。
+        let sheets = place_named(&dir.0, SHEET_BIN_NAME);
+        assert_eq!(
+            resolve_sheet_bin(None, Some(&dir.0), None, None).path.as_deref(),
+            Some(sheets.as_str())
+        );
+        let pdf_cap = resolve_pdf_bin(None, Some(&dir.0), None, None);
+        assert!(!pdf_cap.available);
+        assert!(pdf_cap.why.as_deref().expect("why").contains("PDF"));
+
+        // 再把 PDF 工具放进去：两个都命中，指向各自的文件。
+        let pdf = place_named(&dir.0, PDF_BIN_NAME);
+        assert_eq!(
+            resolve_pdf_bin(None, Some(&dir.0), None, None).path.as_deref(),
+            Some(pdf.as_str())
+        );
+    }
+
+    #[test]
+    fn a_blank_pdf_env_var_is_ignored() {
+        let cap = resolve_pdf_bin(Some("   "), None, None, Some("/definitely/not/here"));
+        assert!(!cap.available);
     }
 }

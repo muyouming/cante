@@ -3,6 +3,7 @@
 pub mod commands;
 pub mod daemon;
 pub mod files;
+pub mod pdf;
 pub mod protocol;
 pub mod sheets;
 
@@ -68,6 +69,7 @@ pub fn run() {
             commands::goal,
             commands::catalog,
             commands::sheet_capability,
+            commands::tool_capabilities,
             commands::set_cwd,
             commands::shutdown,
             files::pick_files,
