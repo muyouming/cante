@@ -8,6 +8,7 @@
 
 /** The rules every job carries. Exported so the tests can pin the wording. */
 export const SAFETY_RULES: readonly string[] = [
+  "【说中文】给用户看的所有说明、总结和「需要你核对」都用中文写，不要用英文。",
   "【先说明再动手】先说明你打算怎么做，再动手。",
   "【不要动原文件】结果另存为新文件，不要改原文件。原来的文件只能读，不能改、不能删、不能覆盖。",
   "【只做这一件事】不要顺手做别的改动，也不要重命名原来的文件。",
