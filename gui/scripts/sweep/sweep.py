@@ -19,11 +19,13 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import hashlib
 import json
 import os
 import queue
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -39,20 +41,46 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 GUI_ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 REPO_ROOT = os.path.abspath(os.path.join(GUI_ROOT, ".."))
 FIXTURE_GEN = os.path.join(GUI_ROOT, "fixtures", "sweep", "generate.py")
+IS_WINDOWS = os.name == "nt"
+
+# Windows 上子进程的默认编码**不是** UTF-8（中文 Windows 是 GBK/CP936）。这个脚本
+# 里到处是中文字面量、中文文件名、中文提示词，所以：
+#   1) 所有跑子进程的地方都显式指定 encoding="utf-8", errors="replace"（下面这个
+#      常量），不靠系统默认；
+#   2) 自己的 stdout/stderr 在 main() 开头 reconfigure 成 UTF-8（见 force_utf8_streams）；
+#   3) 读文本文件走 read_text()，按 UTF-8（带 BOM 也认）解码并把 CRLF 归一成 LF。
+TEXT_KWARGS = {"text": True, "encoding": "utf-8", "errors": "replace"}
 
 sys.path.insert(0, os.path.dirname(FIXTURE_GEN))
 import generate  # noqa: E402  （同目录的 fixture 生成器）
 
+
+def env_seconds(name: str, fallback: int) -> int:
+    """读一个「秒数」环境变量。空字符串 / 不是数字都退回默认值。
+
+    Windows 上很容易出现 `$env:SWEEP_TIMEOUT = ""` 这种（变量存在但是空的）；
+    直接 int() 会在 import 阶段就崩，报一句跟真实原因无关的 ValueError。
+    """
+    raw = (os.environ.get(name) or "").strip()
+    if not raw:
+        return fallback
+    try:
+        value = int(raw)
+    except ValueError:
+        print(f"注意：{name}={raw!r} 不是秒数，按默认值 {fallback} 秒算。", file=sys.stderr)
+        return fallback
+    return value if value > 0 else fallback
+
 # 单卡上限（秒）。**必须给慢模型留足**：实测同一张卡在慢模型上要 850 秒，
 # 设成 600 会把成功误判成失败（真机上就这么误判过一次）。可用 --timeout 覆盖，
 # 也可用环境变量 SWEEP_TIMEOUT 一次性改掉。
-DEFAULT_TIMEOUT = int(os.environ.get("SWEEP_TIMEOUT", "1800"))
+DEFAULT_TIMEOUT = env_seconds("SWEEP_TIMEOUT", 1800)
 # "卡住"判据：这么久**一个事件都没有**才算卡住。为什么不用墙钟判成败：一张正常的卡
 # 只要 30–60 秒，但慢模型会到 850 秒；用墙钟会把"慢但在推进"误判成失败。而模型在流式
 # 输出（ThinkingDelta 每秒好几条），所以**长时间零事件**才是真的出事（循环、网关断线
 # 后不恢复）。默认 300 秒：留够网关"重连 60 秒 × 4 次"的自救时间，因为每次重连尝试都会
 # 发一条事件、会重置这个计时。
-DEFAULT_STALL_TIMEOUT = int(os.environ.get("SWEEP_STALL_TIMEOUT", "300"))
+DEFAULT_STALL_TIMEOUT = env_seconds("SWEEP_STALL_TIMEOUT", 300)
 DEFAULT_MODEL = "ocg/deepseek-flash"
 DEFAULT_PROVIDER = "openai-compatible"
 
@@ -254,6 +282,127 @@ def op_id() -> str:
     return "op_" + ulid()
 
 
+def force_utf8_streams() -> None:
+    """把本脚本自己的 stdout/stderr 钉成 UTF-8。
+
+    Windows 控制台默认是 GBK（或 UTF-16 管道），直接 print 中文会抛
+    UnicodeEncodeError 或者打出乱码——报告、卡片清单、进度全都会变成问号。
+    errors="replace" 是兜底：宁可打出一个「?」，也不要整轮普查崩在最后一步。
+    **注意这不改父进程/调用者的代码页**，也不是在改系统设置，只影响本进程。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:  # 被重定向到某些对象时没有这个 API
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (ValueError, OSError):
+            pass
+
+
+def read_text(path: str) -> str:
+    """读文本产出：UTF-8（带 BOM 也认），并把 \\r\\n / \\r 归一成 \\n。
+
+    Windows 上记事本 / WPS / 各种工具写出来的是 CRLF。要是把 \\r 当内容，行数、
+    字数、逐行比对都会偏一个字符——报告里的「读回 N 行」就不准了。
+    """
+    with open(path, "rb") as handle:
+        data = handle.read()
+    return data.decode("utf-8-sig", "replace").replace("\r\n", "\n").replace("\r", "\n")
+
+
+def load_json(path: str):
+    """读 JSON：同样按 UTF-8 读，顺手容忍 BOM（有人在 Windows 记事本里改过就带 BOM）。"""
+    return json.loads(read_text(path))
+
+
+def stop_process(process, grace: float = 10.0) -> None:
+    """结束子进程（它可能在 RDP 会话里还带着子进程）。
+
+    POSIX：先 SIGTERM，再向进程组补 SIGKILL（守门进程可能自己拉子进程）。
+    Windows：先 terminate，再 taskkill /T 连整个进程树一起收——否则残留的
+    守护进程会占着端口/文件，下一张卡直接失败，而且没人看得见原因。
+    os.killpg / signal.SIGKILL 在 Windows 上根本不存在，不能无保护地调。
+    """
+    try:
+        process.terminate()
+        process.wait(timeout=grace)
+        return
+    except Exception:  # noqa: BLE001
+        pass
+    if IS_WINDOWS:
+        taskkill = shutil.which("taskkill")
+        if taskkill:
+            try:
+                subprocess.run(
+                    [taskkill, "/F", "/T", "/PID", str(process.pid)],
+                    capture_output=True,
+                    timeout=30,
+                    **TEXT_KWARGS,
+                )
+                return
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            process.kill()
+        except Exception:  # noqa: BLE001
+            pass
+        return
+    try:
+        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def set_env_var(env: dict, name: str, value: str) -> None:
+    """给子进程环境变量赋值，Windows 上先按名字找已有的键。
+
+    Windows 的环境变量名不区分大小写，而 os.environ.copy() 给的是**普通 dict**
+    （丢掉了大小写不敏感）。中文 Windows 上遇到的多半是 `Path` 而不是 `PATH`；
+    直接 `env["PATH"] = …` 会在环境块里多出一个同名不同大小写的键，子进程
+    拿到哪个得看系统心情——极端情况下它整个 PATH 都没了（连系统 DLL 都找不到）。
+    """
+    if IS_WINDOWS:
+        for key in list(env):
+            if key.upper() == name.upper():
+                env[key] = value
+                return
+    env[name] = value
+
+
+def prepend_path(env: dict, directory: str) -> None:
+    """把一个目录插到 PATH 最前面（保持原来那个键名的大小写）。"""
+    key = "PATH"
+    if IS_WINDOWS:
+        for existing in env:
+            if existing.upper() == "PATH":
+                key = existing
+                break
+    set_env_var(env, key, directory + os.pathsep + env.get(key, ""))
+
+
+def desktop_dirs() -> list[str]:
+    r"""可能的「桌面」目录：文书类卡被要求把结果存到桌面，得知道去哪里找。
+
+    macOS/Linux 上就是 `~/Desktop`；Windows 上可能是 `~ Desktop`，也可能是
+    **OneDrive 重定向**之后的 `~\OneDrive\Desktop`（中文系统里文件夹叫「桌面」
+    的情况也存在）。只认一个目录的话，OneDrive 重定向的机器上助手把结果写到真
+    桌面，普查会误判成「没有产出」——这正是 Windows 上最容易假失败的一条。
+    只管已存在的目录，不会去创它们。
+    """
+    home = os.path.expanduser("~")
+    if not home or home in ("/", ""):
+        return []
+    found: list[str] = []
+    bases = [home] + sorted(glob.glob(os.path.join(home, "OneDrive*")))
+    for base in bases:
+        for name in ("Desktop", "桌面"):
+            candidate = os.path.join(base, name)
+            if os.path.isdir(candidate) and candidate not in found:
+                found.append(candidate)
+    return found
+
+
 def sha256(path: str) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as handle:
@@ -289,6 +438,18 @@ def human_time(seconds: float) -> str:
     return f"{minutes} 分 {rest} 秒"
 
 
+def die(message: str, code: int = 2) -> "NoReturn":
+    """中文报错 + 固定的退出码。
+
+    退出码的约定（task-sweep.ps1 / 人和 CI 都靠这个判断）：
+      0 = 跑完，没有卡失败（包括「本次没真跑」那种说明性报告）
+      1 = 跑完，但有卡失败
+      2 = 环境或参数不对（找不到 bin、bun、工作目录不可写、卡名认不出）
+    """
+    print(message, file=sys.stderr)
+    raise SystemExit(code)
+
+
 def truncate(text: str, limit: int = 600) -> str:
     text = (text or "").strip()
     if len(text) <= limit:
@@ -296,15 +457,80 @@ def truncate(text: str, limit: int = 600) -> str:
     return text[: limit - 1] + "…"
 
 
+# 路径脱敏。报告会提交、zip 会发回开发机，用户真实主目录不能进去：
+#   /Users/<名>/…            macOS
+#   /home/<名>/…             Linux
+#   C:\Users\<名>\…          Windows（反斜杠）
+#   C:/Users/<名>/…          Windows（正斜杠：git-bash、Node、很多 Python 库都这么打印）
+#   C:\Documents and Settings\<名>\…   老 Windows
+#   \\?\C:\Users\<名>\…     长路径前缀
+# 用户名可能带空格（王杰 / Wang Jie），所以 Windows 那段取到下一个分隔符为止，
+# 而不是到第一个空格——宁可多抹掉一点，也不能漏。
 _PRIVATE_HOME = re.compile(r"/(?:Users|home)/[^/\s，。；、）)】]+")
+_WINDOWS_HOME = re.compile(
+    r"((?:\\\\\?\\)?[A-Za-z]:[\\/](?:Users|Documents and Settings)[\\/])(?![\\/])[^\\/\r\n]{0,80}",
+    re.IGNORECASE,
+)
+
+# 环境变量里像密钥的那些（名字）。报告与 zip 都要按**值**擦一遍：
+# 只要它出现在文本里，就说明它正跟着报告/日志外流。
+_SECRET_NAME = re.compile(r"(API[_-]?KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)", re.IGNORECASE)
+# 名字明确是密钥的，长度要求放宽（本地假 key 可能很短）；靠名字模式猜出来的
+# 要够长才动，否则一个像 "1234abcd" 的值会把报告里的普通数字擦成 <已隐藏>。
+_KNOWN_SECRET_NAMES = (
+    "OPENAI_COMPATIBLE_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "CANTE_API_KEY",
+)
+_SECRETS: list[tuple[str, str]] = []  # main() 里用 collect_secrets() 填
 
 
-def redact(text: str) -> str:
-    """报告会提交，用户私人路径不能进去。把真实主目录换成 ~ / <用户>。"""
+def collect_secrets() -> list[tuple[str, str]]:
+    """找出当前环境里所有像密钥的值（名字, 值），长的在前。"""
+    found: list[tuple[str, str]] = []
+    for name, value in os.environ.items():
+        if not value:
+            continue
+        if name in _KNOWN_SECRET_NAMES:
+            minimum = 4
+        elif _SECRET_NAME.search(name):
+            minimum = 12
+        else:
+            continue
+        if len(value) >= minimum:
+            found.append((name, value))
+    found.sort(key=lambda item: len(item[1]), reverse=True)
+    return found
+
+
+def scrub_secrets(text: str) -> tuple[str, int]:
+    """把已知密钥值从文本里换掉。返回（洗过的文本, 擦了几处）。"""
+    hits = 0
+    for _name, value in _SECRETS:
+        count = text.count(value)
+        if count:
+            hits += count
+            text = text.replace(value, "<已隐藏的密钥>")
+    return text, hits
+
+
+def redact_paths(text: str) -> str:
+    """只换路径（不碰密钥），因为有些地方（比如打包）要分开计数。"""
     home = os.path.expanduser("~")
     if home and home not in ("/", ""):
         text = text.replace(home, "~")
+        # Windows 上同一个目录两种写法都会出现（原生反斜杠、Node/bun 的正斜杠）。
+        forward = home.replace("\\", "/")
+        if forward != home:
+            text = text.replace(forward, "~")
     text = _PRIVATE_HOME.sub("/<用户>", text)
+    return _WINDOWS_HOME.sub(r"\1<用户>", text)
+
+
+def redact(text: str) -> str:
+    """报告会提交、zip 会发回开发机：用户私人路径与密钥都不能进去。"""
+    text, _hits = scrub_secrets(redact_paths(text))
     return text
 
 
@@ -408,17 +634,19 @@ def read_xlsx_rows(path: str) -> list[list[str]] | None:
         return None
 
 
-def verify_sheet(path: str, sheets_bin: str | None) -> dict:
+def verify_sheet(path: str, sheets_bin: list[str] | None) -> dict:
     result = {"path": path, "kind": "sheet", "ok": False, "note": ""}
     # cante-sheets 读不了 csv（它只认 xls/xlsx/ods），csv 直接按文本核对。
     if path.lower().endswith(".csv"):
         return _verify_csv(path, result)
     if sheets_bin:
         try:
+            # argv 用列表（可能是 ["C:\\Program Files\\Cante\\cante-sheets.exe"]）：
+            # 路径带空格时拼字符串再交给 shell 一定会断。
             described = subprocess.run(
-                [sheets_bin, "sheets", path], capture_output=True, text=True, timeout=60
+                [*sheets_bin, "sheets", path], capture_output=True, timeout=60, **TEXT_KWARGS
             )
-            read = subprocess.run([sheets_bin, "read", path], capture_output=True, text=True, timeout=60)
+            read = subprocess.run([*sheets_bin, "read", path], capture_output=True, timeout=60, **TEXT_KWARGS)
             if read.returncode == 0:
                 rows = [line for line in read.stdout.splitlines() if line.strip()]
                 result["ok"] = len(rows) >= 1
@@ -437,8 +665,8 @@ def verify_sheet(path: str, sheets_bin: str | None) -> dict:
 
 def _verify_csv(path: str, result: dict) -> dict:
     try:
-        with open(path, encoding="utf-8-sig", errors="replace") as handle:
-            rows = [line for line in handle.read().splitlines() if line.strip()]
+        # 按行数算：CRLF 归一在 read_text 里做完了，不会把 \r 当内容。
+        rows = [line for line in read_text(path).splitlines() if line.strip()]
         result["ok"] = len(rows) >= 1
         result["note"] = f"csv 按文本读回 {len(rows)} 行"
     except Exception as error:  # noqa: BLE001
@@ -446,11 +674,11 @@ def _verify_csv(path: str, result: dict) -> dict:
     return result
 
 
-def verify_pdf(path: str, pdf_bin: str | None) -> dict:
+def verify_pdf(path: str, pdf_bin: list[str] | None) -> dict:
     result = {"path": path, "kind": "pdf", "ok": False, "note": ""}
     if pdf_bin:
         try:
-            pages = subprocess.run([pdf_bin, "pages", path], capture_output=True, text=True, timeout=60)
+            pages = subprocess.run([*pdf_bin, "pages", path], capture_output=True, timeout=60, **TEXT_KWARGS)
             if pages.returncode == 0 and pages.stdout.strip().isdigit():
                 count = int(pages.stdout.strip())
                 result["ok"] = count >= 1
@@ -498,8 +726,7 @@ def verify_doc(path: str) -> dict:
             result["note"] = f"docx 读不了：{error}"
         return result
     try:
-        with open(path, encoding="utf-8", errors="replace") as handle:
-            text = handle.read()
+        text = read_text(path)
         result["ok"] = len(text.strip()) > 0
         result["note"] = f"文本里读到 {len(text.strip())} 个字"
     except Exception as error:  # noqa: BLE001
@@ -507,7 +734,7 @@ def verify_doc(path: str) -> dict:
     return result
 
 
-def verify_file(path: str, sheets_bin: str | None, pdf_bin: str | None) -> dict:
+def verify_file(path: str, sheets_bin: list[str] | None, pdf_bin: list[str] | None) -> dict:
     ext = os.path.splitext(path)[1].lower()
     if ext in SHEET_EXT:
         return verify_sheet(path, sheets_bin)
@@ -546,9 +773,9 @@ class Runner:
         self.options = options
         self.model = os.environ.get("CANTE_SWEEP_MODEL", DEFAULT_MODEL)
         self.provider = os.environ.get("CANTE_SWEEP_PROVIDER", DEFAULT_PROVIDER)
-        self.bin = resolve_cante_bin()
-        self.sheets_bin = os.environ.get("CANTE_SHEETS_BIN") or shutil.which("cante-sheets")
-        self.pdf_bin = os.environ.get("CANTE_PDF_BIN") or shutil.which("cante-pdf")
+        self.bin = resolve_cante_bin()  # argv（含 serve）
+        self.sheets_bin = helper_argv("cante-sheets")
+        self.pdf_bin = helper_argv("cante-pdf")
 
     def prepare(self, card: dict, manifest: dict) -> dict:
         """建好这一卡的独立目录，把输入拷贝进去。
@@ -599,18 +826,22 @@ class Runner:
         label = card.get("scenario") or card["id"]
 
         before = snapshot(run_dir)
-        real_desktop = os.path.expanduser("~/Desktop")
-        before_real = set(walk_files(real_desktop)) if os.path.isdir(real_desktop) else set()
+        # 「桌面」可能有好几个（OneDrive 重定向、中文文件夹名），每个都看一眼。
+        desktops = desktop_dirs()
+        before_real = {desktop: set(walk_files(desktop)) for desktop in desktops}
         started = time.monotonic()
         started_wall = time.time()
         record = self._drive(prompts[key]["prompt"], run_dir, prep["home"], prep["inputs"])
         elapsed = time.monotonic() - started
-        # 文书类任务被要求存到「桌面」。macOS 上真实桌面不认 HOME 环境变量，助手有
-        # 时会写到真的桌面去；把这一轮确实由它写出的文件收进 run 目录，既留住证据，
-        # 也不会在你的桌面上留垃圾。
-        escaped = self._capture_escaped(
-            real_desktop, before_real, record.get("tool_args_text", ""), started_wall, run_dir
-        )
+        # 文书类任务被要求存到「桌面」。macOS 与 Windows 上真实桌面都不认 HOME /
+        # USERPROFILE 环境变量（系统照样给真桌面），助手有时会写到真桌面去；把这一
+        # 轮确实由它写出的文件收进 run 目录，既留住证据，也不会在桌面上留垃圾。
+        escaped: list[str] = []
+        args_text = record.get("tool_args_text", "")
+        for desktop in desktops:
+            escaped += self._capture_escaped(
+                desktop, before_real[desktop], args_text, started_wall, run_dir
+            )
         record.pop("tool_args_text", None)
         record["escaped"] = escaped
         after = snapshot(run_dir)
@@ -685,12 +916,21 @@ class Runner:
 
     def _drive(self, prompt: str, run_dir: str, home: str, inputs: list[str]) -> dict:
         env = os.environ.copy()
-        env["HOME"] = home
+        # 隔离 HOME：文书类任务写到「桌面」时不该碰用户真正的桌面。
+        # Windows 上 Rust 的 home_dir / Python 的 expanduser 看的是 USERPROFILE，
+        # 只设 HOME 根本不起作用（这是最容易被忽略的一条），所以两个都设。
+        set_env_var(env, "HOME", home)
+        if IS_WINDOWS:
+            set_env_var(env, "USERPROFILE", home)
+            drive, tail = os.path.splitdrive(home)
+            if drive:
+                set_env_var(env, "HOMEDRIVE", drive)
+                set_env_var(env, "HOMEPATH", tail or "\\")
         # 让裸的 cante-sheets / cante-pdf 也能找到（提示词里给的是绝对路径，这是双保险）。
         for binary in (self.sheets_bin, self.pdf_bin):
             if binary:
-                env["PATH"] = os.path.dirname(binary) + os.pathsep + env.get("PATH", "")
-        command = [self.bin, "serve"]
+                prepend_path(env, os.path.dirname(binary[0]))
+        command = list(self.bin)
         process = subprocess.Popen(
             command,
             stdin=subprocess.PIPE,
@@ -698,15 +938,19 @@ class Runner:
             stderr=subprocess.PIPE,
             cwd=run_dir,
             env=env,
-            text=True,
             bufsize=1,
-            start_new_session=True,
+            start_new_session=not IS_WINDOWS,
+            # 串行跑几十张卡时，别让每个子进程在 RDP 会话里冒一个控制台窗口出来
+            # （也是我们给真实用户修过的那类黑窗）。
+            creationflags=subprocess.CREATE_NO_WINDOW if IS_WINDOWS else 0,
+            **TEXT_KWARGS,
         )
         events: queue.Queue = queue.Queue()
 
         def pump(stream, tag):
             for line in stream:
-                events.put((tag, line.rstrip("\n")))
+                # 行尾统一剥掉：Windows 上即使解码对了，也可能留下 \r。
+                events.put((tag, line.rstrip("\r\n")))
 
         threading.Thread(target=pump, args=(process.stdout, "out"), daemon=True).start()
         threading.Thread(target=pump, args=(process.stderr, "err"), daemon=True).start()
@@ -732,7 +976,9 @@ class Runner:
             try:
                 process.stdin.write(json.dumps(payload, ensure_ascii=False) + "\n")
                 process.stdin.flush()
-            except (BrokenPipeError, ValueError):
+            except (BrokenPipeError, ValueError, OSError):
+                # 守护进程已经死了的常见表现。Windows 上写已关闭的管道抛的往往是
+                # OSError（errno 22 / 句柄无效）而不是 BrokenPipeError，两个都得接。
                 pass
 
         try:
@@ -861,14 +1107,7 @@ class Runner:
                 process.stdin.close()
             except Exception:  # noqa: BLE001
                 pass
-            try:
-                process.terminate()
-                process.wait(timeout=10)
-            except Exception:  # noqa: BLE001
-                try:
-                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-                except Exception:  # noqa: BLE001
-                    pass
+            stop_process(process)
         record["last_message"] = record["messages"][-1] if record["messages"] else ""
         record["prompt"] = prompt
         record["inputs"] = inputs
@@ -947,17 +1186,157 @@ class Runner:
         return "failed", f"产出了 {len(created)} 个文件，但没有一类符合预期（{expected}）"
 
 
-def resolve_cante_bin() -> str:
-    for candidate in (os.environ.get("CANTE_BIN"), os.environ.get("ANTE_BIN")):
-        if candidate and os.path.exists(candidate):
-            return candidate
+def _override_argv(value: str | None) -> list[str] | None:
+    """把 CANTE_BIN / ANTE_BIN 解析成 argv。
+
+    既支持单条路径（含空格的路径在 Windows 上很常见，如 C:\\Program Files\\Cante
+    \\ante.exe），也支持带参数的形式（开发机上用真机外壳包 fixture：
+    CANTE_BIN="bun /repo/gui/fixtures/fake-cante.ts"）。整个值本身就是一个存在的
+    路径时优先当成一条路径，不要被空格切成两截。
+    """
+    if not value or not value.strip():
+        return None
+    value = value.strip()
+    if os.path.exists(value):
+        return [value]
+    for candidate in (value, value + ".exe"):
+        if os.path.exists(candidate):
+            return [candidate]
+    # posix=False 在 Windows 上保留引号，所以手动去掉成对的引号。
+    parts = shlex.split(value, posix=not IS_WINDOWS)
+    if not parts:
+        return None
+    parts = [part[1:-1] if len(part) >= 2 and part[0] == part[-1] == '"' else part for part in parts]
+    return parts
+
+
+def _exe_names(stem: str) -> list[str]:
+    """同一件事在 Windows 上是 ante.exe（可能还有 .cmd / .bat 的包装）。"""
+    if IS_WINDOWS:
+        return [stem + ".exe", stem + ".cmd", stem + ".bat", stem]
+    return [stem]
+
+
+def _candidate_dirs() -> list[str]:
+    """按产品里的顺序列找二进制的目录。顺序：安装目录/主程序旁 → 用户目录 → PATH。
+
+    Windows 上安装包（NSIS/MSI）会把 cante-sheets.exe / cante-pdf.exe 放进安装
+    目录（通常与主程序同目录），所以"主程序在哪"必须参与推理。
+    """
+    dirs: list[str] = []
+    for env_name in ("CANTE_HOME", "CANTE_INSTALL_DIR", "ANTE_HOME"):
+        value = os.environ.get(env_name)
+        if value:
+            dirs.append(value)
+    if getattr(sys, "frozen", False):
+        dirs.append(os.path.dirname(os.path.abspath(sys.executable)))
+    home = os.path.expanduser("~")
+    if home and home not in ("/", ""):
+        dirs.append(os.path.join(home, ".cante", "bin"))
+        dirs.append(os.path.join(home, ".ante", "bin"))
+    if IS_WINDOWS:
+        for env_name in ("LOCALAPPDATA", "PROGRAMFILES", "PROGRAMFILES(X86)", "ProgramW6432"):
+            base = os.environ.get(env_name)
+            if not base:
+                continue
+            dirs.append(os.path.join(base, "Programs", "Cante"))
+            dirs.append(os.path.join(base, "Cante"))
+    # 本 worktree 的构建产物（开发机上就是这个）。
+    for profile in ("debug", "release"):
+        dirs.append(os.path.join(GUI_ROOT, "src-tauri", "target", profile))
+    return dirs
+
+
+def resolve_helper(stem: str) -> list[str] | None:
+    """找 cante-sheets / cante-pdf。找到就返回 argv（列表），找不到返回 None。
+
+    顺序：环境变量（CANTE_SHEETS_BIN / CANTE_PDF_BIN）→ 安装目录（与主程序同目录
+    或 %LOCALAPPDATA%\\Programs\\Cante）→ 用户目录 → 本 worktree 构建产物 → PATH。
+    返回列表而不是字符串，是因为路径很可能带空格（C:\\Program Files\\…）——
+    所有调用点直接把列表传给 subprocess，**绝不**拼成一个字符串交给 shell。
+    Windows 上 shutil.which 会自动补 .exe / PATHEXT，所以 PATH 这一支不用特别处理。
+    """
+    env_name = "CANTE_SHEETS_BIN" if stem == "cante-sheets" else "CANTE_PDF_BIN"
+    argv = _override_argv(os.environ.get(env_name))
+    if argv:
+        return argv
+    found = shutil.which(stem)
+    if found:
+        return [found]
+    # 主程序旁边最可能是安装目录——先把主程序的位置算出来一起找。
+    extra: list[str] = []
+    for token in self_bin_argv_hint():
+        if os.path.isabs(token):
+            extra.append(os.path.dirname(token))
+    for directory in extra + _candidate_dirs():
+        for name in _exe_names(stem):
+            candidate = os.path.join(directory, name)
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return [candidate]
+    return None
+
+
+def self_bin_argv_hint() -> list[str]:
+    """主程序在哪（不报错版）：用在找 cante-sheets / cante-pdf 的时候。"""
+    for env_name in ("CANTE_BIN", "ANTE_BIN"):
+        argv = _override_argv(os.environ.get(env_name))
+        if argv:
+            return argv
     found = shutil.which("ante") or shutil.which("cante")
     if found:
-        return found
-    fallback = os.path.expanduser("~/.ante/bin/ante")
-    if os.path.exists(fallback):
-        return fallback
-    raise SystemExit("找不到 ante / cante 可执行文件；请设置 CANTE_BIN。")
+        return [found]
+    for directory in _candidate_dirs():
+        for stem in ("ante", "cante"):
+            for name in _exe_names(stem):
+                candidate = os.path.join(directory, name)
+                if os.path.isfile(candidate):
+                    return [candidate]
+    return []
+
+
+_HELPER_CACHE: dict[str, list[str] | None] = {}
+
+
+def helper_argv(stem: str) -> list[str] | None:
+    """同一个答案不要找两遍（Runner 与写报告都要用）。"""
+    if stem not in _HELPER_CACHE:
+        _HELPER_CACHE[stem] = resolve_helper(stem)
+    return _HELPER_CACHE[stem]
+
+
+def resolve_cante_bin() -> list[str]:
+    """找真守护进程。找不到时的提示必须能直接照做（说清该设哪个环境变量）。"""
+    for env_name in ("CANTE_BIN", "ANTE_BIN"):
+        argv = _override_argv(os.environ.get(env_name))
+        if argv:
+            return argv + ["serve"]
+    found = shutil.which("ante") or shutil.which("cante")
+    if found:
+        return [found, "serve"]
+    for directory in _candidate_dirs():
+        for stem in ("ante", "cante"):
+            for name in _exe_names(stem):
+                candidate = os.path.join(directory, name)
+                if os.path.isfile(candidate):
+                    return [candidate, "serve"]
+    looked = "\n  ".join(_candidate_dirs())
+    if IS_WINDOWS:
+        hint = (
+            "  在 PowerShell 里这样指（把路径换成你装的位置）：\n"
+            '        $env:CANTE_BIN = "$env:USERPROFILE\\.ante\\bin\\ante.exe"\n'
+            "  或者它在安装目录里：\n"
+            '        $env:CANTE_BIN = "$env:LOCALAPPDATA\\Programs\\Cante\\ante.exe"'
+        )
+    else:
+        hint = '    export CANTE_BIN=/path/to/ante'
+    die(
+        "找不到 ante / cante 可执行文件。请任选一种：\n"
+        "  1) 设环境变量 CANTE_BIN 指向它（也可以叫 ANTE_BIN）；写成 "
+        '"命令 参数" 也认：\n' + hint + "\n"
+        "  2) 或把它的目录加进 PATH。\n"
+        f"  已经找过这些地方：\n  {looked}\n"
+        "  （cante-sheets / cante-pdf 可以用 CANTE_SHEETS_BIN / CANTE_PDF_BIN 单独指。）"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -969,11 +1348,28 @@ def load_prompts(plan: list[dict], work: str) -> dict:
     plan_path = os.path.join(work, "plan.json")
     with open(plan_path, "w", encoding="utf-8") as handle:
         json.dump(plan, handle, ensure_ascii=False, indent=2)
-    command = ["bun", os.path.join(HERE, "prompts.ts"), plan_path]
-    result = subprocess.run(command, capture_output=True, text=True, cwd=GUI_ROOT, timeout=120)
+    prompt_script = os.path.join(HERE, "prompts.ts")
+    command = ["bun", prompt_script, plan_path]
+    try:
+        result = subprocess.run(command, capture_output=True, cwd=GUI_ROOT, timeout=120, **TEXT_KWARGS)
+    except FileNotFoundError:
+        die(
+            "找不到 bun。普查要用产品自己的提示词函数（gui/scripts/sweep/prompts.ts），"
+            "所以 bun 是必须的：装好 bun（https://bun.sh）再跑，不要另抄一份提示词。"
+        )
     if result.returncode != 0:
-        raise SystemExit(f"生成提示词失败（bun prompts.ts）：\n{result.stderr.strip()}")
-    entries = json.loads(result.stdout)
+        # stdout 也要打：bun 的报错有时只进 stdout。
+        die(
+            f"生成提示词失败（bun prompts.ts，退出码 {result.returncode}）：\n"
+            f"{result.stderr.strip() or result.stdout.strip()}"
+        )
+    try:
+        entries = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        die(
+            f"bun prompts.ts 的输出不是 JSON（{error}）。前 400 字：\n"
+            f"{result.stdout[:400]}\n--- stderr ---\n{result.stderr[:400]}"
+        )
     return {f"{item['id']}[{item['scenario']}]" if item.get("scenario") else item["id"]: item for item in entries}
 
 
@@ -985,6 +1381,35 @@ VERDICT_LABEL = {
 }
 
 
+def render_environment(options, extra_lines: list[str] | None = None) -> list[str]:
+    """报告开头的「这次是怎么跑的」：路径、旋钮、平台。
+
+    路径写进报告很关键：Windows 服务器上仓库可能只读，实际用的工作目录是
+    `--work` 指的那个。报告里写的是相对位置或带 <用户> 的形式（不外泄真实
+    家目录），完整绝对路径在控制台上直接打出来。
+    """
+    work = getattr(options, "work", "")
+    report = getattr(options, "report", "")
+    zip_path = getattr(options, "zip_path", "") or "（没打包，加 --zip）"
+    lines = [
+        "## 这次是怎么跑的",
+        "",
+        f"- 平台：{'Windows' if IS_WINDOWS else os.name}；Python "
+        f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        f"- 工作目录（--work）：{work}",
+        f"- 报告（--report）：{report}",
+        f"- 结果包（--zip）：{zip_path}",
+        f"- 单卡上限（--timeout）：{human_time(getattr(options, 'timeout', DEFAULT_TIMEOUT))}"
+        f"；卡住判据（--stall-timeout）：{human_time(getattr(options, 'stall_timeout', DEFAULT_STALL_TIMEOUT))}",
+        "- 「卡住」（那么久一个事件都没有）与「超时到顶」（总时长到上限）是两类不同结论，不要混着看。",
+        "- 计时用 time.monotonic()（单调时钟），不受系统对时 / 时区 / Windows 计时器精度影响。",
+    ]
+    for line in extra_lines or []:
+        lines.append(line)
+    lines.append("")
+    return lines
+
+
 def render_report(results: list[dict], options, skipped_reason: str | None) -> str:
     lines: list[str] = []
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -992,6 +1417,7 @@ def render_report(results: list[dict], options, skipped_reason: str | None) -> s
     lines.append("")
     lines.append(f"生成时间：{stamp}")
     lines.append("")
+    lines.extend(render_environment(options))
     if skipped_reason:
         lines.append(f"> 本次没有真跑：{skipped_reason}")
         lines.append("")
@@ -1036,7 +1462,7 @@ def render_report(results: list[dict], options, skipped_reason: str | None) -> s
             lines.append("- 新产出：")
             for rel in item["created"]:
                 absolute = os.path.join(item["run_dir"], rel)
-                info = verify_file(absolute, os.environ.get("CANTE_SHEETS_BIN"), os.environ.get("CANTE_PDF_BIN"))
+                info = verify_file(absolute, helper_argv("cante-sheets"), helper_argv("cante-pdf"))
                 lines.append(f"    - {display_path(rel)} — {info['note']}")
         if item.get("escaped"):
             lines.append(f"    - （写到真桌面上的文件已收进 escaped/：{'、'.join(item['escaped'])}）")
@@ -1048,10 +1474,216 @@ def render_report(results: list[dict], options, skipped_reason: str | None) -> s
     # 这样「报告 = 证据 + 结论」是一次跑出来的。
     notes_path = os.path.join(HERE, "notes.md")
     if os.path.exists(notes_path):
-        with open(notes_path, encoding="utf-8") as handle:
-            lines.append(handle.read().rstrip())
+        lines.append(read_text(notes_path).rstrip())
         lines.append("")
     return redact("\n".join(lines) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# 打包：报告 + 工作目录 + 应用日志，一次拿走（issue #83 / ws/r15）
+# ---------------------------------------------------------------------------
+
+# 文件名一看就知道不该进包的东西。就算值扫漏了（比如被 base64 了），也不让它
+# 进包：这些文件对「哪张卡出了什么事」没有帮助，却是放密钥最多的地方。
+ZIP_BLOCKED_NAMES = {
+    "settings.json",
+    "catalog.json",
+    "credentials.json",
+    "credentials",
+    "auth.json",
+    ".env",
+    "installation-id",
+    "user_input_history.jsonl",
+}
+ZIP_BLOCKED_SUFFIX = (".env", ".pem", ".key", ".pfx", ".p12", "_rsa")
+# 超过这个大小就不整个读进来洗密钥了，直接流式扫（不安全的就整个不打包）。
+ZIP_TEXT_MAX = 32 * 1024 * 1024
+
+
+def _blocked_arcname(name: str) -> bool:
+    lower = name.lower()
+    return lower in ZIP_BLOCKED_NAMES or lower.endswith(ZIP_BLOCKED_SUFFIX)
+
+
+def _stream_contains_secret(path: str) -> str | None:
+    """流式找密钥值（不把整个文件读进内存）。找到就返回是哪个环境变量。"""
+    needles = [(name, value.encode("utf-8")) for name, value in _SECRETS]
+    if not needles:
+        return None
+    longest = max(len(value) for _name, value in needles)
+    try:
+        with open(path, "rb") as handle:
+            tail = b""
+            while True:
+                chunk = handle.read(1 << 20)
+                if not chunk:
+                    return None
+                window = tail + chunk
+                for name, needle in needles:
+                    if needle in window:
+                        return name
+                # 临界处可能被切开，留一段尾巴继续看。
+                tail = window[-(longest - 1) :] if longest > 1 else b""
+    except OSError:
+        return None
+
+
+def _has_recent_file(directory: str, cutoff: float) -> bool:
+    for base, _dirs, files in os.walk(directory):
+        for name in files:
+            try:
+                if os.path.getmtime(os.path.join(base, name)) >= cutoff:
+                    return True
+            except OSError:
+                continue
+    return False
+
+
+def app_log_dirs(days: int) -> list[tuple[str, str]]:
+    """找应用日志目录：返回 [(标签, 绝对路径)]。
+
+    真机上的位置：Windows `%USERPROFILE%\\.ante\\logs`、macOS/Linux `~/.ante/logs`。
+    普查给每张卡隔离了 HOME，所以卡自己的日志在 `<work>/runs/<卡>/home/.ante/logs`——
+    那一份已经在 work 目录里了，这里只管“外面那份”真应用日志。
+    """
+    home = os.path.expanduser("~")
+    found: list[tuple[str, str]] = []
+    if home and home not in ("/", ""):
+        for label in (".ante/logs", ".cante/logs"):
+            directory = os.path.join(home, *label.split("/"))
+            if os.path.isdir(directory):
+                found.append((label.replace("/", "-"), directory))
+    if not days:
+        return found
+    # 日志可能攒了好几个月；只带最近几天的，否则包太大、RDP 传不回来。
+    cutoff = time.time() - days * 86400
+    return [(label, directory) for label, directory in found if _has_recent_file(directory, cutoff)]
+
+
+def build_zip(zip_path: str, options, log_days: int) -> str:
+    """把报告 + work 目录 + 应用日志打成一个 zip，返回它的路径。
+
+    两条纪律：
+      1) 绝不把密钥写进 zip——逐文件扫环境里的密钥值，命中了的文本换成
+         <已隐藏的密钥>、二进制整个不打包（并记在包内的 ZIP-说明.txt 里）；
+      2) 路径按 user 真实家目录敏化——包可能整整飞一趟 RDP 回来，
+         报告和说明里的路径与 report.md 一致。
+    """
+    zip_path = os.path.abspath(zip_path)
+    parent = os.path.dirname(zip_path)
+    os.makedirs(parent, exist_ok=True)
+    work = os.path.abspath(getattr(options, "work", ""))
+    report = os.path.abspath(getattr(options, "report", ""))
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    root = f"cante-sweep-{stamp}"  # 解压出来不会洒一桌子文件
+    stats: dict = {"files": 0, "redacted": [], "excluded": [], "logs": [], "bytes": 0}
+
+    def add(zf: zipfile.ZipFile, path: str, arcname: str) -> None:
+        if os.path.abspath(path) == zip_path or _blocked_arcname(os.path.basename(path)):
+            return
+        try:
+            if os.path.getsize(path) > ZIP_TEXT_MAX:
+                secret = _stream_contains_secret(path)
+                if secret:
+                    stats["excluded"].append(f"{arcname}（太大且包含 {secret}，不能安全地洗）")
+                    return
+                zf.write(path, arcname)
+                stats["files"] += 1
+                return
+            with open(path, "rb") as handle:
+                raw = handle.read()
+        except OSError as error:
+            stats["excluded"].append(f"{arcname}（读不了：{error}）")
+            return
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            # 二进制：不能洗，命中密钥就整个不要。
+            secret = _stream_contains_secret(path)
+            if secret:
+                stats["excluded"].append(f"{arcname}（二进制且包含 {secret}）")
+                return
+            zf.writestr(arcname, raw)
+            stats["files"] += 1
+            return
+        # 文本文件：路径与密钥都洗一遍。路径也要洗，因为应用日志/助手产出里会带着
+        # 用户真实主目录，而这个 zip 是要往外发的。
+        path_cleaned = redact_paths(text)
+        scrubbed, hits = scrub_secrets(path_cleaned)
+        marks = []
+        if path_cleaned != text:
+            marks.append("路径")
+        if hits:
+            marks.append(f"密钥 {hits} 处")
+        if marks:
+            stats["redacted"].append(f"{arcname}（洗了：{'、'.join(marks)}）")
+            zf.writestr(arcname, scrubbed.encode("utf-8"))
+        else:
+            zf.writestr(arcname, raw)
+        stats["files"] += 1
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        # 报告放最外层，拆开就能看。
+        if os.path.isfile(report):
+            add(zf, report, f"{root}/report.md")
+        if os.path.isdir(work):
+            for path in walk_files(work):
+                rel = os.path.relpath(path, work).replace(os.sep, "/")
+                add(zf, path, f"{root}/work/{rel}")
+        for label, directory in app_log_dirs(log_days):
+            for path in walk_files(directory):
+                rel = os.path.relpath(path, directory).replace(os.sep, "/")
+                # 只收最近几天的（和 app_log_dirs 同一个口径）。
+                try:
+                    if log_days and os.path.getmtime(path) < time.time() - log_days * 86400:
+                        continue
+                except OSError:
+                    continue
+                add(zf, path, f"{root}/app-logs/{label}/{rel}")
+            stats["logs"].append(f"{label} <- {directory}")
+        readme = [
+            "这个包里是什么",
+            "================",
+            "",
+            f"工作目录：{redact(work)}",
+            f"报告：{redact(report)}",
+            f"应用日志（最近 {log_days} 天）：" if log_days else "应用日志（全部）：",
+        ]
+        if stats["logs"]:
+            readme += [f"  - {redact(item)}" for item in stats["logs"]]
+        else:
+            readme.append("  -（没找到日志目录）")
+        readme += [
+            "",
+            "拿回开发机只要这一个 zip：report.md 是结论，work/ 是每张卡的输入副本、",
+            "产出与事件日志（sweep-events.jsonl），app-logs/ 是应用自己的日志。",
+            "",
+            "隐私与路径（打包脚本自己做的）：",
+            "  - 环境变量里的密钥值已从文本文件里擦掉，命中的二进制文件直接不打包；",
+            "  - 文本文件里的用户真实家目录也换成了 <用户> / ~；",
+            "  - settings.json / catalog.json / *.env / *.pem / *.key 等文件从不进入这个包。",
+        ]
+        if stats["redacted"]:
+            readme.append("  - 洗过的文件（只列前 40 个）：")
+            readme += [f"      {item}" for item in stats["redacted"][:40]]
+            if len(stats["redacted"]) > 40:
+                readme.append(f"      …还有 {len(stats['redacted']) - 40} 个")
+        if stats["excluded"]:
+            readme.append("  - 没打包的文件：")
+            readme += [f"      {redact(item)}" for item in stats["excluded"]]
+        zf.writestr(f"{root}/ZIP-说明.txt", redact("\n".join(readme)) + "\n")
+
+    stats["bytes"] = os.path.getsize(zip_path)
+    print(f"结果包：{zip_path}（{stats['bytes'] / 1024 / 1024:.1f} MB，{stats['files']} 个文件）")
+    if stats["logs"]:
+        print("应用日志：" + "；".join(stats["logs"]))
+    else:
+        print("应用日志：没找到 ~/.ante/logs（用户目录下没有日志目录）", file=sys.stderr)
+    if stats["redacted"]:
+        print(f"注意：有 {len(stats['redacted'])} 个文本文件洗过（密钥 / 真实家目录），见包内 ZIP-说明.txt。")
+    if stats["excluded"]:
+        print(f"注意：有 {len(stats['excluded'])} 个文件没进包（含密钥或读不了），见包内 ZIP-说明.txt。")
+    return zip_path
 
 
 # ---------------------------------------------------------------------------
@@ -1059,9 +1691,85 @@ def render_report(results: list[dict], options, skipped_reason: str | None) -> s
 # ---------------------------------------------------------------------------
 
 
+def card_key(card: dict) -> str:
+    return f"{card['id']}[{card['scenario']}]" if card.get("scenario") else card["id"]
+
+
+def match_cards(wanted: list[str], cards: list[dict] = CARDS) -> tuple[list[dict], list[str]]:
+    """按用户写的词挑卡。支持三种写法：
+
+    * `excel.diff`        ——完整的卡 id（id 相同、场景不同的会一起中，比如
+                             `excel.merge` 会中「默认」和「列名一致」两张）
+    * `excel.merge[列名一致]` ——精确到某个场景
+    * `pdf` / `excel` / `wechat` / `doc` / `files` ——整类前缀（“只跑一类”）
+
+    返回（选中的卡, 没认出来的词）。没认出来的词要让用户看得见，不能静默变成
+    “什么都没跑”。
+    """
+    chosen: list[dict] = []
+    unknown: list[str] = []
+    if not [item for item in wanted if item.strip()]:
+        return list(cards), unknown  # 没写就是全跑
+    for raw in wanted:
+        want = raw.strip()
+        if not want:
+            continue
+        hits = [card for card in cards if want in (card["id"], card_key(card))]
+        if not hits:
+            prefix = want.rstrip(".") + "."
+            hits = [card for card in cards if card["id"].startswith(prefix) or card["id"] == want.rstrip(".")]
+        if not hits:
+            unknown.append(want)
+            continue
+        for card in hits:
+            if card not in chosen:
+                chosen.append(card)
+    return chosen, unknown
+
+
+def is_writable_dir(directory: str) -> bool:
+    try:
+        os.makedirs(directory, exist_ok=True)
+        probe = os.path.join(directory, ".sweep-write-probe")
+        with open(probe, "w", encoding="utf-8") as handle:
+            handle.write("ok")
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
+
+
+def require_writable_dir(directory: str, what: str) -> None:
+    if is_writable_dir(directory):
+        return
+    if IS_WINDOWS:
+        example = '  python gui\\scripts\\sweep\\sweep.py --work "$env:TEMP\\cante-sweep" ...'
+        why = "（Windows 上仓库可能是只读的、或在受控目录里）"
+    else:
+        example = "  python3 gui/scripts/sweep/sweep.py --work /tmp/cante-sweep ..."
+        why = ""
+    die(
+        f"{what}不可写：{directory}{why}\n"
+        f"用 --work 指到别处再跑，例如：\n{example}"
+    )
+
+
 def main(argv: list[str]) -> int:
+    force_utf8_streams()
+    if sys.version_info < (3, 10):
+        print(
+            f"注意：本脚本只在 Python 3.10+ 上验过，你现在是 "
+            f"{sys.version_info.major}.{sys.version_info.minor}。先跑吧，出错就把版本升上去。",
+            file=sys.stderr,
+        )
+    if IS_WINDOWS:
+        # Python 3.7+ 的 UTF-8 模式：子进程（bun、ante）也看到 UTF-8 环境。
+        os.environ.setdefault("PYTHONUTF8", "1")
+        os.environ.setdefault("PYTHONIOENCODING", "utf-8:replace")
+    _SECRETS.extend(collect_secrets())
+
     parser = argparse.ArgumentParser(description="真机任务普查")
-    parser.add_argument("cards", nargs="*", help="只跑这些卡（默认全部）")
+    parser.add_argument("cards", nargs="*", help="只跑这些卡（id / id[场景] / 整类前缀如 pdf）")
     parser.add_argument("--skip", default="", help="这次不跑的卡，逗号分隔（沿用上次攒下的结果）")
     parser.add_argument(
         "--stall-timeout",
@@ -1075,45 +1783,96 @@ def main(argv: list[str]) -> int:
         default=DEFAULT_TIMEOUT,
         help="单卡上限，秒（默认 1800，慢模型别调小；也可用 SWEEP_TIMEOUT 覆盖）",
     )
-    parser.add_argument("--work", default=os.path.join(HERE, "work"), help="工作目录")
+    parser.add_argument(
+        "--work",
+        default=os.path.join(HERE, "work"),
+        help="工作目录（仓库只读时指到别处，如 Windows 的 $env:TEMP\\cante-sweep）",
+    )
     parser.add_argument("--report", default=os.path.join(HERE, "report.md"), help="报告写到哪")
     parser.add_argument("--no-fixtures", action="store_true", help="不重新生成 fixture")
     parser.add_argument("--list", action="store_true", help="列出所有卡并退出")
     parser.add_argument("--render-only", action="store_true", help="不跑，只拿 work/results.json 重写报告")
+    parser.add_argument(
+        "--zip",
+        action="store_true",
+        help="跑完把报告 + 工作目录 + 应用日志打成一个 zip（不把密钥写进去）",
+    )
+    parser.add_argument(
+        "--zip-out",
+        default="",
+        help="zip 放到哪（默认 gui/scripts/sweep/cante-sweep-<时间>.zip，不可写时落到工作目录）",
+    )
+    parser.add_argument(
+        "--zip-log-days",
+        type=int,
+        default=7,
+        help="应用日志只带最近几天（默认 7，0 = 全带）",
+    )
     options = parser.parse_args(argv)
+    # 绝对路径：Windows 上用户可能用相对路径 / 环境变量拼出来的路径，后面
+    # 子进程、zip、报告都要用同一个绝对位置。
+    options.work = os.path.abspath(os.path.expanduser(options.work))
+    options.report = os.path.abspath(os.path.expanduser(options.report))
 
     if options.list:
         for card in CARDS:
             label = f"[{card['scenario']}]" if card.get("scenario") else ""
             print(f"{card['id']}{label}")
+        print(
+            "（也可以只给整类前缀跑一类：excel / files / pdf / doc / wechat；"
+            "带上 --list 以外的参数就是挑卡跑）",
+            file=sys.stderr,
+        )
         return 0
+
+    # 报告位置先定下来（写不进就落到工作目录），这样报告里写的路径就是真的那个。
+    if not is_writable_dir(os.path.dirname(options.report)):
+        original = options.report
+        options.report = os.path.join(options.work, "report.md")
+        print(f"报告原位置不可写（{original}），改写到：{options.report}", file=sys.stderr)
+    options.zip_path = ""
+    if options.zip:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+        if options.zip_out:
+            options.zip_path = os.path.abspath(os.path.expanduser(options.zip_out))
+            require_writable_dir(os.path.dirname(options.zip_path), "zip 目录")
+        elif is_writable_dir(HERE):
+            options.zip_path = os.path.join(HERE, f"cante-sweep-{stamp}.zip")
+        else:
+            options.zip_path = os.path.join(options.work, f"cante-sweep-{stamp}.zip")
 
     if options.render_only:
         results_path = os.path.join(options.work, "results.json")
         if not os.path.exists(results_path):
             print(f"没有可用的结果：{results_path}", file=sys.stderr)
             return 2
-        with open(results_path, encoding="utf-8") as handle:
-            data = json.load(handle)
+        data = load_json(results_path)
         accumulated = data if isinstance(data, dict) else {item["key"]: item for item in data}
         results = []
         for card in CARDS:
-            key = f"{card['id']}[{card['scenario']}]" if card.get("scenario") else card["id"]
-            if key in accumulated:
-                results.append(accumulated[key])
-        for key, item in accumulated.items():
-            if key not in {entry["key"] for entry in results}:
+            if card_key(card) in accumulated:
+                results.append(accumulated[card_key(card)])
+        for _key, item in accumulated.items():
+            if item["key"] not in {entry["key"] for entry in results}:
                 results.append(item)
         report = render_report(results, options, None)
         with open(options.report, "w", encoding="utf-8") as handle:
             handle.write(report)
         print(f"报告写到：{options.report}")
+        if options.zip:
+            build_zip(options.zip_path, options, options.zip_log_days)
         return 0
 
-    selected = [card for card in CARDS if not options.cards or card["id"] in options.cards]
+    selected, unknown = match_cards(options.cards)
+    if unknown:
+        print(
+            f"认不出这些卡：{' '.join(unknown)}（用 --list 看有哪些卡，或给整类前缀如 pdf / excel）",
+            file=sys.stderr,
+        )
+        return 2
     skipped = {name.strip() for name in options.skip.split(",") if name.strip()}
     if skipped:
-        selected = [card for card in selected if card["id"] not in skipped]
+        selected = [card for card in selected if card["id"] not in skipped and card_key(card) not in skipped]
     if not selected:
         print(f"没有匹配的卡：{' '.join(options.cards)}", file=sys.stderr)
         return 2
@@ -1126,9 +1885,18 @@ def main(argv: list[str]) -> int:
         with open(options.report, "w", encoding="utf-8") as handle:
             handle.write(report)
         print(report)
+        if options.zip:
+            build_zip(options.zip_path, options, options.zip_log_days)
         return 0
 
-    os.makedirs(options.work, exist_ok=True)
+    require_writable_dir(options.work, "工作目录（--work）")
+    if IS_WINDOWS and len(options.work) > 120:
+        print(
+            "提示：工作目录路径偏长，Windows 老的长路径限制（260 字）可能让产物读写失败；"
+            f"能用就用短的（现在是 {len(options.work)} 字）：{options.work}",
+            file=sys.stderr,
+        )
+    print(f"工作目录：{options.work}", flush=True)
     fixtures_root = os.path.join(options.work, "fixtures")
     manifest_path = os.path.join(options.work, "manifest.json")
     if not options.no_fixtures or not os.path.isdir(fixtures_root):
@@ -1137,14 +1905,22 @@ def main(argv: list[str]) -> int:
             json.dump(manifest, handle, ensure_ascii=False, indent=2)
     else:
         print("复用已有的 fixture（--no-fixtures）")
-        with open(manifest_path, encoding="utf-8") as handle:
-            manifest = json.load(handle)
+        manifest = load_json(manifest_path)
 
     runner = Runner(options)
+    print(f"守护进程：{' '.join(runner.bin)}", flush=True)
     if not runner.sheets_bin:
-        print("提示：找不到 cante-sheets，表格产出只能用内置兜底读取。", file=sys.stderr)
+        print(
+            "提示：找不到 cante-sheets，表格产出只能用内置兜底读取。"
+            "可以设 CANTE_SHEETS_BIN 指到它的 .exe 上。",
+            file=sys.stderr,
+        )
     if not runner.pdf_bin:
-        print("提示：找不到 cante-pdf，PDF 产出只能用内置兜底读取。", file=sys.stderr)
+        print(
+            "提示：找不到 cante-pdf，PDF 产出只能用内置兜底读取。"
+            "可以设 CANTE_PDF_BIN 指到它的 .exe 上。",
+            file=sys.stderr,
+        )
 
     # 先把每张卡的输入拷进各自的目录，再用拷贝后的路径生成提示词——顺序反了，
     # 助手就会把结果写在公共 fixture 旁边。
@@ -1168,8 +1944,7 @@ def main(argv: list[str]) -> int:
     accumulated: dict[str, dict] = {}
     if os.path.exists(results_path):
         try:
-            with open(results_path, encoding="utf-8") as handle:
-                data = json.load(handle)
+            data = load_json(results_path)
             if isinstance(data, dict):
                 accumulated = {key: item for key, item in data.items() if isinstance(item, dict)}
             else:
@@ -1180,10 +1955,9 @@ def main(argv: list[str]) -> int:
     def ordered() -> list[dict]:
         order = []
         for card in CARDS:
-            key = f"{card['id']}[{card['scenario']}]" if card.get("scenario") else card["id"]
-            if key in accumulated:
-                order.append(accumulated[key])
-        for key, item in accumulated.items():
+            if card_key(card) in accumulated:
+                order.append(accumulated[card_key(card)])
+        for _key, item in accumulated.items():
             if item not in order:
                 order.append(item)
         return order
@@ -1228,7 +2002,12 @@ def main(argv: list[str]) -> int:
     with open(options.report, "w", encoding="utf-8") as handle:
         handle.write(report)
     print(f"\n报告写到：{options.report}")
-    return 0 if all(item["verdict"] != "failed" for item in results) else 1
+    if options.zip:
+        build_zip(options.zip_path, options, options.zip_log_days)
+    failed = [item for item in results if item["verdict"] == "failed"]
+    if failed:
+        print(f"有 {len(failed)} 张卡失败：{'、'.join(item['key'] for item in failed[:5])}", file=sys.stderr)
+    return 0 if not failed else 1
 
 
 if __name__ == "__main__":

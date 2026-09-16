@@ -13,13 +13,27 @@ export OPENAI_COMPATIBLE_API_KEY=…
 
 bash gui/scripts/task-sweep.sh                       # 全部卡
 bash gui/scripts/task-sweep.sh excel.merge excel.tidy  # 只跑指定卡
+bash gui/scripts/task-sweep.sh pdf                   # 整类：所有 pdf.* 卡
 bash gui/scripts/task-sweep.sh --list                # 看有哪些卡（含场景）
-TIMEOUT=900 bash gui/scripts/task-sweep.sh pdf.split  # 单卡上限，默认 600 秒
+bash gui/scripts/task-sweep.sh --timeout 900 pdf.split  # 单卡上限（默认 1800 秒）
+SWEEP_TIMEOUT=900 bash gui/scripts/task-sweep.sh pdf.split  # 同上，环境变量写法
+bash gui/scripts/task-sweep.sh --work /tmp/cante-sweep excel.diff  # 工作目录换到别处
+bash gui/scripts/task-sweep.sh --zip                 # 跑完打一个 zip，方便整包拷回来
+```
+
+Windows 上没有 bash，用同一个脚本的 PowerShell 入口（参数与退出码原样转发）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File gui\scripts\task-sweep.ps1 --zip
+powershell -ExecutionPolicy Bypass -File gui\scripts\task-sweep.ps1 --list
+powershell -ExecutionPolicy Bypass -File gui\scripts\task-sweep.ps1 excel.diff
 ```
 
 结果写在 `gui/scripts/sweep/report.md`；中间产物（脏输入、每张卡的副本与产出）
 在 `gui/scripts/sweep/work/`，已 gitignore。`work/results.json` 是按卡累加的，
-分几次跑（先表格、再 PDF）最后也会拼成一份完整报告。
+分几次跑（先表格、再 PDF）最后也会拼成一份完整报告。报告开头一节的「这次是怎么
+跑的」会写明实际用的工作目录、报告路径、结果包路径与两个超时旋钮——用 `--work`
+指到别处时，以报告里写的为准。
 
 ## 它到底做了什么
 
@@ -40,12 +54,33 @@ TIMEOUT=900 bash gui/scripts/task-sweep.sh pdf.split  # 单卡上限，默认 60
 
 ## 依赖与降级
 
-* `python3`、`bun` 必须有。
-* `cante-sheets` / `cante-pdf` 按产品的解析顺序找：环境变量 → 本 worktree 的
-  `target/{debug,release}` → `~/.cante/bin` → PATH；找不到会试着自己 `cargo build`。
-  再找不到就退回脚本内置的读取方式，并在报告里说明——不会假装核对过。
+* `python3`（**3.10+**）与 `bun` 必须有：提示词一律由 `prompts.ts` 调产品自己的
+  任务卡生成，脚本里没有第二份提示词。
+* `cante-sheets` / `cante-pdf` 按产品的解析顺序找：环境变量（`CANTE_SHEETS_BIN` /
+  `CANTE_PDF_BIN`）→ 安装目录 / 主程序旁边 → `~/.cante/bin`、`~/.ante/bin` →
+  本 worktree 的 `target/{debug,release}` → PATH。Windows 上它们是 `.exe`，
+  `shutil.which` 会自动补后缀，调用一律用列表参数（安装目录带空格也不会断）。
+  `task-sweep.sh` 找不到还会试着自己 `cargo build`；`task-sweep.ps1` 不做这件事
+  （Windows 服务器不该要求 Rust 工具链）。再找不到就退回脚本内置的读取方式，
+  并在报告里说明——不会假装核对过。真守护进程 `ante` / `cante` 找不到时，报错会
+  直接写出该设哪个环境变量、以及已经找过哪些目录。
 * 模型端点只从 `OPENAI_COMPATIBLE_BASE_URL` / `OPENAI_COMPATIBLE_API_KEY` 读，
-  不写进任何文件。
+  不写进任何文件。环境变量里像密钥的值在写报告与打包时都会被擦掉（见下）。
+* 仓库只读时用 `--work` 指到别处（Windows 上例如 `--work $env:TEMP\cante-sweep`）；
+  `--report` 写不进去也会自动落到工作目录，并在报告里写明实际路径。
+
+## 打包拿结果（`--zip`）
+
+`--zip` 把三样东西打成一个包：`report.md`、整个 `work/`（每张卡的输入副本、产出、
+`sweep-events.jsonl` 事件日志）、以及应用日志（Windows `%USERPROFILE%\.ante\logs`、
+macOS/Linux `~/.ante/logs`，默认只带最近 7 天，`--zip-log-days` 可改）。
+默认落在 `gui/scripts/sweep/cante-sweep-<时间>.zip`（不可写时落到工作目录），
+控制台会打印完整路径——拷这一个文件回来就够。
+
+密钥与隐私：环境变量里像密钥的值（`*_API_KEY` / `*TOKEN*` / `*SECRET*` …）会从
+所有文本文件里擦成 `<已隐藏的密钥>`，命中的二进制文件整个不打包；文本文件里的
+用户真实家目录也换成 `<用户>` / `~`；`settings.json` / `catalog.json` / `*.env` /
+`*.pem` / `*.key` 从不进包。包内 `ZIP-说明.txt` 会列出洗过与没打包的文件。
 
 ## 时间：慢不等于坏（实测数据）
 
@@ -61,7 +96,7 @@ TIMEOUT=900 bash gui/scripts/task-sweep.sh pdf.split  # 单卡上限，默认 60
 工具只占 6–25%；剩下是模型在推理型生成（每步动手前先想一遍），7–8 次往返 ×
 每步约 5 秒。**所以要调的不是"给工具更多时间"，而是模型与步数。**
 
-因此这里有两个**互相独立**的旋钮：
+因此这里有两个**互相独立**的旋钮（两个脚本、两条路都认）：
 
 - `--timeout`（默认 1800 秒，`SWEEP_TIMEOUT`）：**安全上限**——防止单卡无限跑下去。
   它不是预期耗时；实测最慢的一次（Gemma-4，零工具调用）846 秒，所以上限必须比它大，
