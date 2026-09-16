@@ -24,6 +24,11 @@ use rust_xlsxwriter::Workbook;
 /// 能读的扩展名（小写）；不在这个名单里的格式直接说"读不了"，而不是硬试。
 const SUPPORTED_EXTENSIONS: &[&str] = &["xls", "xla", "xlsx", "xlsm", "xlam", "xlsb", "ods"];
 
+/// WPS 自己的格式：`.et` 表格、`.ett` 模板、`.wps` 文字、`.dps` 演示。国内办公大量用
+/// WPS，所以这类文件是她最可能交过来的之一；它们是好的文件，只是底层不是
+/// OOXML/BIFF，读不了——因此单独给一条"怎么办"的话，而不是笼统地说读不了。
+const WPS_EXTENSIONS: &[&str] = &["et", "ett", "wps", "dps"];
+
 /// 没给表名时写进 xlsx 的默认表名。
 const DEFAULT_SHEET_NAME: &str = "Sheet1";
 
@@ -40,6 +45,9 @@ pub enum SheetError {
     NotFound(String),
     /// 这个扩展名我们不认识 / 读不了。
     Unsupported(String),
+    /// WPS 自己的表格格式（`.et` 等）：文件是好的，只是**不是 Excel 格式**。
+    /// 而她多半就是拿 WPS 做的表，所以要说清"怎么办"，不能只说读不了。
+    WpsFormat(String),
     /// 文件在，但打不开（坏了、加密了、表名对不上……）。
     Broken(String),
 }
@@ -49,6 +57,10 @@ impl fmt::Display for SheetError {
         match self {
             SheetError::NotFound(path) => write!(f, "文件不存在：{path}"),
             SheetError::Unsupported(path) => write!(f, "这个格式我读不了：{path}"),
+            SheetError::WpsFormat(path) => write!(
+                f,
+                "这是 WPS 表格自己的格式（不是 Excel 格式），我读不了：{path}。在 WPS 里打开它，点「另存为」选 Excel 文件（.xlsx），再把新文件交给我就行。"
+            ),
             SheetError::Broken(what) => write!(f, "这个文件像是坏了，读不开：{what}"),
         }
     }
@@ -130,6 +142,9 @@ fn open(path: &Path) -> Result<Spreadsheet, SheetError> {
     }
     if let Some(extension) = path.extension().and_then(|value| value.to_str()) {
         let lowered = extension.to_ascii_lowercase();
+        if WPS_EXTENSIONS.contains(&lowered.as_str()) {
+            return Err(SheetError::WpsFormat(path.display().to_string()));
+        }
         if !SUPPORTED_EXTENSIONS.contains(&lowered.as_str()) {
             return Err(SheetError::Unsupported(path.display().to_string()));
         }
@@ -527,6 +542,19 @@ mod tests {
             other => panic!("expected NotFound, got {other:?}"),
         }
         assert!(describe(&path).unwrap_err().to_string().contains("文件不存在"));
+    }
+
+    #[test]
+    fn wps_formats_are_told_what_to_do_instead_of_just_refused() {
+        let dir = TempDir::new("wps");
+        // 内容无所谓：扩展名就不该走到解析那一步，而她是用 WPS 做的表。
+        let path = dir.join("销售表.et");
+        std::fs::write(&path, b"not really a spreadsheet").expect("write");
+        let message = read_sheet(&path, None).expect_err("must refuse").to_string();
+        assert!(message.contains("WPS"), "要说是 WPS 的格式：{message}");
+        assert!(message.contains("另存为"), "要给出怎么办：{message}");
+        assert!(message.contains("xlsx"), "要说清存成什么：{message}");
+        assert!(!message.contains("坏了"), "文件是好的，不能说她的文件坏了：{message}");
     }
 
     #[test]
