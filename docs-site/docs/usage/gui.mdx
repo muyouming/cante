@@ -1,262 +1,108 @@
 ---
-title: Desktop GUI
-description: "Build and run the Tauri desktop client that drives cante serve"
+title: Desktop Client
+description: "A desktop app for people who do not work in IT: four steps, plain Chinese, and it cannot damage your files"
 ---
 
-The Cante desktop GUI is a graphical client for [`cante serve`](/usage/serve). It does not reimplement the agent: it spawns a `cante` binary as a child process, speaks the same [JSONL protocol](/reference/protocol-reference) as every other client, and renders the event stream as a window-shaped conversation.
+The Cante desktop client is built for one audience: **people who do not work in IT** — an office administrator, a finance clerk, a shop owner — on Windows, with WeChat open and Excel that they can copy, paste and sum in.
 
-The client lives in [`gui/`](https://github.com/muyouming/cante/tree/main/gui) in this repository. It is a preview, built from source; the release workflow does package desktop bundles (see [Bundles](#bundles)), and they are unsigned. Expect rough edges alongside the rest of the beta.
+It is not a chat window and it is not a developer tool. You pick a task, pick the files, say what you want in one sentence, confirm, and read the result. **The interface is Chinese only**, by design: the people it is for do not read English labels, and should never meet the words *model*, *token*, *path* or *permission*.
 
-## Stack
+Three promises decide every trade-off in it:
 
-| Layer | Choice |
+1. **It finishes the errand.** The entry point is a task, not an empty prompt box.
+2. **It cannot wreck your work.** It writes a new file, never over your original, and everything it does can be undone.
+3. **You can always tell what happened and what to do next.** Errors say 发生了什么 and 你可以怎么做, and offer a way to hand the detail to an IT colleague.
+
+## Getting started
+
+Install the bundle (see [Installing](#installing)), open it, and the first run walks you through a three-step check of the machine. No account, no API key, no path to type: if the company configured Cante centrally, the wizard skips itself.
+
+Then you see the task cards.
+
+## One card, four steps
+
+| Step | What you do | What the app promises |
+| --- | --- | --- |
+| 1. Pick | Choose files or a folder through the normal file dialog, or drop them on the window | Nothing is read yet |
+| 2. Say | One sentence, prefilled with an example you can edit | Your own words are kept as the task |
+| 3. Confirm | Read the plan, the files involved, the estimated effect, **what can go wrong on this task**, and your own track record with it | Nothing has been touched; press 先试跑给我看 to see the plan without running it |
+| 4. Result | See the new file, open it or its folder, undo it, or run the task again | Your original files are byte-for-byte unchanged |
+
+While it runs you get the plan as a checklist that fills in step by step, with the elapsed time — not a spinner. Evidence from the [Wharton AI-agent adoption study](https://ai.wharton.upenn.edu/) is blunt that explaining the process is what makes an agent feel reliable and safe, and that admitting known limits raises trust rather than lowering it. So the confirmation sheet names the specific ways *this* task can go wrong, and the result card repeats whatever the run actually flagged for you to check.
+
+## What it can do
+
+The task catalogue is grouped the way the work is, not the way the technology is:
+
+| Group | Tasks |
 | --- | --- |
-| Shell | Tauri 2 (Rust) |
-| Frontend | Vite + SolidJS + TypeScript |
-| Styles | Tailwind CSS v4 (`@tailwindcss/vite`) |
-| Tests | `bun test` for the pure TypeScript modules, `cargo test` for the Rust shell |
+| 表格 | Merge several sheets into one and remove duplicates · group totals and a chart for the monthly report · tidy formats and compare two lists |
+| 文件 | Batch rename, file by type, find duplicate files · merge, split or convert PDFs |
+| 微信 | Turn an exported chat log into a table · write reply drafts you send yourself |
+| 文书 | Notices, leave requests, weekly reports — pick a template, fill two or three blanks, adjust the tone |
 
-The Rust side is a thin bridge. It spawns the daemon, frames the protocol over stdio, and forwards each event **verbatim** to the webview — it never re-serializes a typed event, so unknown fields and future variants survive the trip. Interpreting events into rows, transcript lines, and commands is pure TypeScript, which is why it unit-tests without a window.
+Tasks that need WeChat get their own screen, because that screen has a job: it explains how to export the chat log, and it states the rule in the interface itself.
 
-## Running it
+## It will not damage your work
 
-The client needs [Bun](https://bun.sh) and a `cante` binary. From the repository root:
+- **New files, never overwrites.** Every result is saved beside the original with a suffix; the original is untouched. Overwriting is possible only behind a red checkbox on the confirmation sheet.
+- **Undo that does not trust the assistant.** Before a run the app snapshots the folders it will touch; after the run it diffs them itself to learn which files appeared. Undo moves those to the trash (recoverable) and restores what was renamed or removed — the safety is built on filesystem facts, not on the agent's word.
+- **History.** The last twenty runs list what was processed and what came out, with a one-click undo.
+- **A confirmation sheet for anything destructive.** Deletions, overwrites and bulk messages are flagged in red, with the default focus on Cancel.
 
-```bash
-cd gui
-bun install
-bun run dev
-```
+## Where your data goes
 
-`bun run dev` launches `tauri dev`: Vite serves the frontend on port 1420 and Tauri opens the native window pointed at it. The first run compiles the Rust shell. On Linux that build needs Tauri's [WebKitGTK prerequisites](https://tauri.app/start/prerequisites/) — the CI workflow installs them explicitly for the same reason.
+The 隐私 panel answers the question in plain language: what happens on this machine, what needs the network, and who receives it when it does. 只在本机处理 switches the session to local-only and turns off web search; every result card also says whether that run went online.
 
-### Windows
+## WeChat: read and draft, never send
 
-The client is an ordinary Tauri app on Windows: WebView2 renders the frontend
-(Windows 11 ships it, and the bundler installs it when missing) and `cante.exe`
-resolves from `PATH`, so the commands above work unchanged from PowerShell. The
-Rust tests drive the scripted fixture through `CANTE_BIN="bun <script>"` — the
-override accepts leading arguments precisely because Windows cannot execute a
-`#!` script directly — and CI runs the same gate on `windows-latest`.
+Two red lines, enforced in code and in the interface:
 
-### Pointing at a binary
+- The app reads a chat log **you exported**. It does not log in to WeChat, does not read your phone, and does not touch an encrypted database.
+- It never sends. There is no send button anywhere in the product, drafts are copied by hand, and batch work produces a checklist plus one draft per item. This is a platform and compliance line, not a missing feature.
 
-The shell resolves `cante` on `PATH` unless `CANTE_BIN` overrides it:
+## When something goes wrong
 
-```bash
-CANTE_BIN=/path/to/cante bun run dev
-```
+Every failure is one Chinese pair — 发生了什么, 你可以怎么做 — plus three exits: 重试, 换个方法, and 复制详情 (technical detail for the colleague who helps you). The common cases are mapped to plain language: no network, the file is open in Excel, no permission, the model is not set up yet. A failure leaves your files alone, and says so.
 
-The daemon starts **lazily**, on the first command that needs it, so the window opens even when no binary is found. The header and status bar then show the status as `offline`, `health` keeps answering with the workspace it will spawn in, and the first operation that needs the daemon fails with the binary it tried to start.
+## What it does not do yet
 
-To produce a local bundle:
-
-```bash
-bun run build
-```
-
-`bun run build` runs `tauri build`, which needs the platform's bundling tools. It is deliberately absent from the pull-request gate — `gui.yml` stops at `scripts/e2e.sh` — while the separate `gui-release.yml` workflow bundles both platforms on a `gui-v*` tag or a manual run.
-
-### Tests
-
-```bash
-cd gui
-bun test src                              # frontend unit tests
-bunx tsc --noEmit                         # frontend typecheck
-cargo test --manifest-path src-tauri/Cargo.toml   # Rust shell
-```
-
-[`gui/fixtures/fake-cante.ts`](https://github.com/muyouming/cante/tree/main/gui/fixtures) is a scripted `cante serve` double: point `CANTE_BIN` at it to exercise the UI without a provider or an API key.
-
-### Bundles
-
-```bash
-cd gui
-bun run build          # .app + .dmg (macOS) or .msi + NSIS .exe (Windows)
-bun run build:app      # macOS: .app only
-```
-
-The bundles are unsigned — Gatekeeper warns on first launch and SmartScreen asks
-for confirmation. `.github/workflows/gui-release.yml` builds both platforms and
-attaches the images to a release (push a `gui-v*` tag, or run it manually).
+- **Screenshots and photos of tables** are not supported. The client's protocol carries text only, so an image cannot reach the model even if the model could read it, and ordinary office machines have no OCR tool. Shipping a card that made you wait and then fail would be worse than not shipping it. ([#48](https://github.com/muyouming/cante/issues/48) records both routes forward.)
+- **Attachments are paths.** You point at a file; nothing is uploaded as bytes. The tray says so rather than pretending otherwise.
+- **Scanned PDFs** are not converted silently: the run stops and asks, because the output would be gibberish.
+- **Very large tables** (beyond a few hundred thousand rows) and heavily merged spreadsheets may need checking by hand; the confirmation sheet says so up front.
+- **The interface is Chinese only**, and the product targets Windows first.
 
 ## Installing
 
-Two families of installer come out of that workflow — attached to the `gui-v*`
-release when it runs, and left as workflow artifacts otherwise:
+Two bundles per release, both unsigned for now:
 
-| Platform | Artifact | What it is |
+| Platform | Artefact | Notes |
 | --- | --- | --- |
-| macOS, Apple silicon | `Cante_<version>_aarch64.dmg` | A disk image holding `Cante.app`; drag the app to Applications. The bundle declares macOS 11.0 as its minimum. |
-| Windows, x86_64 | `Cante_<version>_x64-setup.exe` (NSIS) and `Cante_<version>_x64_en-US.msi` | Ordinary installers: Start-menu entry, entry in the uninstall list. |
+| macOS (Apple silicon) | `Cante_<version>_aarch64.dmg` | Drag to Applications; first launch needs right-click → Open |
+| Windows (x86_64) | `Cante_<version>_x64-setup.exe` (per-user) and `.msi` (per-machine) | SmartScreen asks once — 更多信息 → 仍要运行 |
 
-**Per-user on Windows, per-machine for the MSI.** The NSIS `setup.exe` is built
-with `installMode: "currentUser"`: it installs into `%LOCALAPPDATA%\Cante`,
-registers itself in your own account's uninstall list, and never asks for
-administrator rights. The `.msi` is per-machine — it installs under
-`Program Files` and elevates. Either installs the same application; you do not
-need both.
+WebView2 is installed by the bundle when the machine does not already have it (Windows 11 ships it). The app is not code-signed yet, so macOS Gatekeeper and Windows SmartScreen both warn on first launch and stop warning afterwards.
 
-**WebView2.** The Windows installers are built with
-`webviewInstallMode: "downloadBootstrapper"`: when the WebView2 runtime is
-missing, the installer downloads Microsoft's bootstrapper and runs it silently,
-so installing needs a network connection. Windows 11, and Windows 10 with Edge
-updates, already ship WebView2 — then nothing is downloaded.
+## For developers
 
-**Unsigned means one confirmation, once.** The project has no signing
-identities, so macOS Gatekeeper refuses the first launch and reports that it
-cannot verify the app (`Apple could not verify … is free of malware` on recent
-macOS), and Windows SmartScreen shows `Windows protected your PC`. Neither
-warning means the download is corrupt. Confirm it: on macOS, right-click the app
-→ **Open**, or System Settings → Privacy & Security → **Open Anyway**; on
-Windows, **More info** → **Run anyway**. Take installers only from the project's
-own `gui-v*` releases — or build from source — rather than a mirror. The long
-version of this is [The bundles are unsigned](#the-bundles-are-unsigned).
+The client is a Tauri 2 shell around `cante serve`, with a Vite + SolidJS + Tailwind front end. The Rust side owns the daemon process; the front end is plain TypeScript, which is why the task catalogue, the run model and the progress folding all unit-test without a window.
 
-## What it drives
-
-Everything the GUI does becomes one of the protocol operations below. Each is a Tauri `invoke` that returns `ok` or a human-readable error string.
-
-| Command | What it does in the UI |
-| --- | --- |
-| `health` | Resolves the `cante` binary, reports the working directory, whether the daemon is up, and the current status |
-| `events_since` | Polls the event ring from a cursor; returns the events, the new cursor, and whether a cursor fell off the front (`truncated`) |
-| `start_session` | Opens a session with an optional model, provider, effort, permission mode, working directory, or a session to resume |
-| `update_session` | Changes the model, permission mode, or title of the running session |
-| `send_input` | Sends a prompt, a mid-turn steer, or a shell-style line |
-| `approve` | Answers a pending approval with per-tool decisions |
-| `interrupt` | Stops the running turn |
-| `compact` | Compacts the conversation, optionally with instructions |
-| `context_report` | Requests a context/token report |
-| `slash` | Runs a slash command by name with its arguments |
-| `goal` | Sets, clears, or shows the session's goal condition |
-| `catalog` | Fetches the provider and model catalog the model picker is built from |
-| `set_cwd` | Chooses the directory the daemon is spawned in |
-| `shutdown` | Stops the daemon and closes the connection |
-
-The shell feeds the window four events: `cante://event` (one protocol event), `cante://state` (status, session, pending approval), `cante://log` (a stdout/stderr/app line), and `cante://exit` (the daemon died). Status moves through `idle`, `thinking`, `streaming`, `awaiting`, `error`, and `offline`; an approval request parks the turn in `awaiting` until the approval panel answers it.
-
-## The window
-
-- **Header** — the product mark, the session title or working directory, chips for model / provider / effort / permissions, and a `MENU` chip that opens the command palette.
-- **Session rail** — session id, model, provider, effort, permissions, `Commands…`, `Clear view`, `Compact history`, `Context report`, the working directory, and daemon status. Hidden below 900 px wide.
-- **Transcript** — a virtualized list of 20 px rows: user, agent, thinking, tool, info, error, and turn entries. Diffs are coloured, fenced code is monospaced, and tool output is capped. Click a row for the full entry.
-- **Composer** — multiline input with Send and Stop. `Enter` sends, `Shift+Enter` inserts a newline, a leading `/` opens the command palette, and `↑`/`↓` walk prompt history.
-- **Approval panel** — per-call `Once`, `Session`, `Always`, or `Deny`.
-- **Model picker** — built from the catalog, with the current model marked.
-- **Status bar** — turn status, tokens in and out, context usage, step count, and the last notice.
-
-Keyboard: `Cmd/Ctrl+K` opens the command palette, `Cmd/Ctrl+M` the model picker, `Esc` closes an overlay, and `Cmd/Ctrl+.` interrupts the turn.
-
-## Limits
-
-- **Preview, built from source.** Installers are the unsigned bundles from the `gui-v*` release workflow ([Installing](#installing)); anything else means running from a checkout as above.
-- **It needs its own `cante`.** The window and the daemon are separate processes, and the shell only spawns `cante serve` over stdio. Unix-socket and WebSocket hosts are not connectable from the GUI.
-- **One connection per window.** Closing the window drops the child daemon.
-- **The event ring is bounded.** The bridge keeps the last 4096 events with a monotonic cursor; a client that falls too far behind is told `truncated` and reloads the transcript from state.
-- **Approvals need a human.** A turn paused for approval stays paused until the panel — or some other client — answers it.
-- **No fabricated events.** The bridge never synthesizes protocol messages, so the window shows exactly what the daemon emitted.
-- **Platform.** The release bundles target Apple silicon macOS and Windows x86_64; on Linux, build from source with Tauri's WebKitGTK prerequisites. The Rust bridge's tests run on both the Linux and Windows CI jobs.
-
-## Troubleshooting
-
-Each entry names the exact symptom, what causes it, and what to do. The string the window shows is quoted from the code, so you can search it.
-
-### "Desktop bridge unavailable"
-
-**Symptom.** A banner under the header reads "Desktop bridge unavailable — this is the browser preview; open the Cante desktop app to talk to the daemon"; the status bar repeats `desktop bridge unavailable — open the Cante desktop app`. The transcript stays empty and nothing sends.
-
-**Cause.** The page is running outside the Tauri shell. `src/tauri.ts` probes for `window.__TAURI_INTERNALS__`, which only Tauri injects; with no host every `invoke` rejects with `BridgeUnavailable`. This is the normal state of the Vite preview — `bun run dev:web`, or the dev-server URL (`http://localhost:1420`) opened in a browser — and `scripts/dom-smoke.sh` asserts the fallback paints so the shell never goes blank.
-
-**Fix.** Run the desktop window, not just Vite: `bun run dev`. If a browser tab is pointed at a dev server left over from an earlier checkout, close it and start from a clean `bun run dev`; `bun run dev:web` is a frontend preview only and can never reach the daemon.
-
-### The window is blank in a debug build
-
-**Symptom.** `cargo run` (or a debug build) opens the native window, but it is blank: no header, no transcript, no chips.
-
-**Cause.** `src-tauri/tauri.conf.json` points debug builds at `devUrl` (`http://localhost:1420`) and runs `beforeDevCommand: bun run dev:web` only when you go through `tauri dev`. A bare `cargo run` skips both, so the window loads a URL where nothing is listening. This is Tauri's dev behaviour, not a broken shell.
-
-**Fix.** Start Vite (or let Tauri start it): `bun run dev`. For a window that serves the built assets with no dev server, `bun run build` and open the bundle.
-
-### `cante` is not found
-
-**Symptom.** The window opens and the rail's bridge dot is green (`● bridge`) — the Tauri host is reachable — but the line below it and the status bar both read `daemon offline`, and there is no version next to the dot. At launch two probes fail and write the status-bar notice: the automatic `start_session` reports ``could not start `cante serve`: No such file or directory (os error 2)`` and the catalog probe reports ``catalog: could not run `cante catalog`: …`` (whichever resolves last is what you see; both name the binary, and the trailing OS text varies by platform). The transcript stays empty.
-
-**Cause.** The bridge resolves `CANTE_BIN` from the environment and otherwise falls back to `cante` on `PATH`. It spawns the daemon lazily, on the first op that needs it, so the window itself opens and `health` still answers (`ok: true`, `cante: null`, `daemon: false`); only the spawn fails. A failed spawn leaves no process behind, and the next op retries it.
-
-**Fix.** Install `cante`, put it on `PATH`, or point `CANTE_BIN` at it. `CANTE_BIN` is a **command spec**, not a path: leading arguments are kept and the daemon's own `serve` (or `catalog` / `--version`) is appended, and double-quoted tokens survive spaces, so a script or a Windows path with spaces works.
-
-```bash
-CANTE_BIN=/opt/cante/bin/cante bun run dev
-CANTE_BIN='"/Applications/Cante Tools/cante"' bun run dev
-CANTE_BIN="bun /path/to/fake-cante.ts" bun run dev   # script double, no install
-```
-
-After fixing the path, the next operation that needs the daemon retries the spawn — the rail's session chip, `New session` (`/new`) from the palette, or sending a prompt. No restart of the window is needed.
-
-### The daemon exits mid-session
-
-**Symptom.** A running turn stops. The status bar flips to `daemon offline`, any approval panel disappears, and the notice reads `cante daemon exited (<code>)` — or `cante daemon exited (signal)` when the child died by signal. The transcript keeps everything already rendered.
-
-**Cause.** The bridge emits `cante://exit`; the Rust side sets status `offline` and clears the session and pending approval, and the store's exit handler sets the same status and notice. Neither touches the event ring or the rendered rows, so the conversation stays on screen — only the live session is gone.
-
-**Fix.** Nothing to recover — the child is gone, and a new one is spawned lazily. Press the rail's session chip, or run `New session` (`/new`) from the palette; both clear the view and send `start_session`. Picking a model starts a fresh session too. The GUI never resumes the dead session.
-
-### The model picker is empty
-
-**Symptom.** `Cmd/Ctrl+M` (or the `MODEL` chip) opens the picker, the subtitle says `catalog unavailable`, the body says `No models — press RELOAD.`, and the status-bar notice begins with `catalog:`.
-
-**Cause.** The picker is built from `cante catalog`, which the bridge runs out-of-process with the same `CANTE_BIN` spec. If the binary is missing, the command exits without JSON, or it prints non-JSON to stdout, `loadCatalog` catches the failure and sets `catalog: <message>`. A **successful** catalog is cached for 60 seconds; a failure is not cached.
-
-**Fix.** Press `RELOAD`, and run the command by hand in the same environment to see the real error:
-
-```bash
-cante catalog
-```
-
-If it prints JSON with a `providers` array, the picker fills. A binary that is a fixture or wrapper and does not implement `catalog` (see [Running with no Cante install at all](#running-with-no-cante-install-at-all)) leaves the picker empty by design.
-
-### Building on macOS
-
-Two distinct traps, both macOS-only.
-
-**Xcode licence.** If `/usr/bin/cc` refuses to link with *"You have not agreed to the Xcode license agreements"*, the Rust build and Tauri's Swift bridge cannot link. Accept it once with `sudo xcodebuild -license accept`, or use the zig-based shims where they exist. `scripts/toolchain.sh` probes whether `cc` can link and either exports the zig compiler/linker variables or prints the one-line fix; `dev.sh` and `e2e.sh` source it, so those work unchanged. For a bare cargo command, source it yourself first:
-
-```bash
-cd gui && source scripts/toolchain.sh && cargo test --manifest-path src-tauri/Cargo.toml
-```
-
-On a licensed Mac and on Linux CI it is a no-op.
-
-**The `.dmg` step.** `bun run build` produces `.app + .dmg`, and the disk-image step drives Finder through AppleScript to lay out the window. A terminal without Automation permission — a sandboxed agent, a locked screen — cannot, so the `.dmg` step fails while the app itself bundles fine. Use `bun run build:app` for the `.app` alone; `gui-release.yml` has the permission and produces both.
-
-### The bundles are unsigned
-
-**Symptom.** On macOS, Gatekeeper warns on first launch. On Windows, SmartScreen asks for confirmation.
-
-**Cause.** The bundles are unsigned — the project has no signing identities, and `gui-release.yml` uploads the images as built. This is expected, not a corruption signal.
-
-**Fix.** Confirm the OS warning once to open the app: macOS's right-click → Open (or System Settings → Privacy & Security → Open Anyway) and SmartScreen's More info → Run anyway. Take installers only from the project's own `gui-v*` releases — the workflow attaches the `.dmg`, `.msi`, and NSIS `*setup.exe` — or build from source yourself.
-
-### Running with no Cante install at all
-
-**Goal.** See the shell without installing `cante`.
-
-**Fix.** [`gui/fixtures/fake-cante.ts`](https://github.com/muyouming/cante/tree/main/gui/fixtures) is a scripted `cante serve` double that speaks the real JSON Lines protocol, and `scripts/dev.sh` points `CANTE_BIN` at it (as an absolute path), seeds `FAKE_CANTE_SEED=1`, and runs `bun run dev`:
-
-```bash
+```sh
 cd gui
-bash scripts/dev.sh
-FAKE_CANTE_SEED=0 bash scripts/dev.sh   # empty transcript instead
+bun install
+bun run dev                 # tauri dev against your installed cante
+bunx tauri build --bundles app
 ```
 
-The seed is a finished exchange plus one pending approval, so the window opens populated and parked on an approval gate. The fixture answers the ops a session needs: `StartSession` → `SessionStart` (plus the seed), `UserInput` → `TurnStart` … `TurnPause` (an approval on `turn_1`), `ApprovalResponse` → `TurnResume` / `ToolEnd` / `UsageUpdate` / `TurnEnd`, `Goal` → `Info`, `Interrupt` → `TurnEnd`, and `Shutdown` → `Goodbye` then exit 0. `FAKE_CANTE_SLOW_DELTAS=1` splits a delta run across a tick.
+| Where | What |
+| --- | --- |
+| `gui/CONTRACT.md` | The frozen Rust ↔ front-end contract (commands, events, state transitions) |
+| `gui/ROADMAP.md` | The product's persona, product laws, priorities and decision log |
+| `gui/src/simple/` | The product surface: home, wizard, runner, result, history, privacy, task catalogue |
+| `gui/src-tauri/` | Daemon ownership, the run log and undo, native file dialogs |
+| `gui/scripts/e2e.sh` | The gate: install, tests, typecheck, web build, fixtures, `cargo test` |
+| `gui/scripts/dom-smoke.sh` | Renders the shell in Chrome and reads it back as text (no eyes required) |
+| `gui/fixtures/` | A scripted `cante serve` double, so the app runs with no Cante install |
 
-What it does **not** simulate:
-
-- **No model or provider.** The session is `fake-model` on provider `fake`; there is no API key and no network call.
-- **No real tools.** `Bash` and `Write` are scripted events with canned results — nothing on disk is read, written, or executed.
-- **No out-of-process subcommands.** `--version` and `catalog` return nothing, so the rail shows no version and the model picker stays `catalog unavailable`.
-- **No persistence.** The session is not saved and cannot be resumed.
-
-It is a test double and is never shipped.
+CI runs the same gate on Linux and Windows. That is deliberate: the product targets Windows first, and the dual-platform gate has already caught things this Mac could not — a path spelled `nested\deep.txt` on Windows while everything else used `nested/deep.txt`, and a test that depended on the clock's resolution.
