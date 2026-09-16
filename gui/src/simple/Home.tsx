@@ -9,11 +9,13 @@ import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { HOME, TASK_GROUPS, taskGroupRank } from "./copy.ts";
+import { SCHEDULE } from "./copy-schedule.ts";
 import { LIBRARY } from "./copy-library.ts";
+import { describe as describeSchedule } from "./schedule.ts";
 import TaskCard from "./TaskCard.tsx";
 import TaskLibrary from "./TaskLibrary.tsx";
 import type { Store } from "../store.ts";
-import { TASKS, type TaskDef } from "./tasks/index.ts";
+import { TASKS, freeTask, taskById, type TaskDef } from "./tasks/index.ts";
 
 export interface HomeProps {
   /** A card was pressed: start that task's flow. */
@@ -32,6 +34,19 @@ export default function Home(props: HomeProps): JSX.Element {
   // The shell's store, required: a fallback here would be a second store, and a
   // store opens its own connection to the daemon.
   const store = (): Store => props.store;
+  // #55 — 已经开启的自动任务。没有就不占地方。
+  const activeSchedules = () => props.store.schedules().filter((item) => item.enabled);
+  // #55 — 到点的自动任务会先停在确认页。如果她正在首页，这里得给个入口把它叫出来，
+  // 否则那件活就卡在后台没人看得见（也不会去做——它本来就要等她点头）。
+  const pendingRun = () => {
+    const run = props.store.currentRun();
+    return run?.state === "preview" ? run : null;
+  };
+  const openPending = (): void => {
+    const run = pendingRun();
+    if (!run) return;
+    props.onPickTask(taskById(run.taskId) ?? freeTask(run.instruction));
+  };
 
   // Group the catalogue once; unknown groups fall to the end rather than
   // disappearing, so a task with a new group is never silently lost.
@@ -71,6 +86,47 @@ export default function Home(props: HomeProps): JSX.Element {
         <div class="mx-auto w-full max-w-3xl">
           <h1 class="text-[26px] leading-tight font-bold text-slate-100">{HOME.greeting}</h1>
           <p class="mt-2 text-[16px] text-slate-400">{HOME.intro}</p>
+
+          {/* #55 — 到点的自动任务在等她确认；它不会自己动手，得让她找得到入口。 */}
+          <Show when={pendingRun()}>
+            <section class="mt-5 rounded-2xl border-2 border-sky-600 bg-sky-950/40 px-5 py-4">
+              <h2 class="text-[20px] font-semibold text-sky-100">{SCHEDULE.pendingTitle}</h2>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-300">{SCHEDULE.pendingBody}</p>
+              <button
+                type="button"
+                onClick={openPending}
+                class="mt-3 min-h-[48px] rounded-xl bg-sky-500 px-6 text-[16px] font-bold text-slate-950 hover:bg-sky-400"
+              >
+                {SCHEDULE.pendingOpen}
+              </button>
+            </section>
+          </Show>
+
+          {/* #55 — 她不用记着哪天做；这里告诉她下次什么时候做、做什么，随时能停。 */}
+          <Show when={activeSchedules().length > 0}>
+            <section class="mt-6 rounded-2xl border border-emerald-800 bg-emerald-950/20 px-5 py-4">
+              <h2 class="text-[20px] font-semibold text-slate-100">{SCHEDULE.homeTitle}</h2>
+              <ul class="mt-3 space-y-3">
+                <For each={activeSchedules()}>
+                  {(schedule) => (
+                    <li class="flex flex-wrap items-center justify-between gap-3">
+                      <p class="min-w-0 text-[16px] text-slate-200">
+                        {SCHEDULE.homeNext(describeSchedule(schedule), schedule.taskTitle)}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => props.store.setScheduleEnabled(schedule.id, false)}
+                        class="min-h-[44px] shrink-0 rounded-xl border border-slate-600 px-6 text-[16px] font-semibold text-slate-200 hover:bg-slate-800"
+                      >
+                        {SCHEDULE.homeStop}
+                      </button>
+                    </li>
+                  )}
+                </For>
+              </ul>
+              <p class="mt-3 text-[16px] leading-relaxed text-slate-400">{SCHEDULE.confirmNote}</p>
+            </section>
+          </Show>
 
           {/* #74 — 除了下面几张常用卡片，还能按「想做的事」去整个任务库搜。 */}
           <div class="mt-6 flex flex-col gap-3 rounded-2xl border border-sky-800 bg-sky-950/30 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">

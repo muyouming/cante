@@ -12,9 +12,11 @@ import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { FOLLOWUP, TRUST } from "./copy.ts";
+import { SCHEDULE } from "./copy-schedule.ts";
 import { checkNoteFromRows, lastAgentText } from "./evidence.ts";
 import { endedWithQuestion } from "./followup.ts";
 import { fileName, folderName, onlineHint, onlineLabel } from "./run.ts";
+import { describe as describeSchedule, describeCadence, type Cadence, type Schedule } from "./schedule.ts";
 import type { TaskRun } from "./tasks/index.ts";
 import type { Store } from "../store.ts";
 
@@ -73,6 +75,46 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
       current.files,
       current.instruction,
     );
+  }
+
+  // #55 — 以后自动做。默认「每周一 09:00」，一眼能看懂；开启后随时能停。
+  const [cadence, setCadence] = createSignal<Cadence>("weekly");
+  const [weekday, setWeekday] = createSignal(1);
+  const [monthDay, setMonthDay] = createSignal(5);
+  const [hour, setHour] = createSignal(9);
+  const scheduleForRun = (): Schedule | undefined => {
+    const taskId = run()?.taskId;
+    if (!taskId) return undefined;
+    return props.store.schedules().find((item) => item.taskId === taskId);
+  };
+  const autoOn = (): boolean => scheduleForRun()?.enabled === true;
+  const pickedDay = (): number => (cadence() === "monthly" ? monthDay() : weekday());
+  const nextText = (): string => {
+    const schedule = scheduleForRun();
+    return schedule ? describeSchedule(schedule) : "";
+  };
+
+  function turnOn(): void {
+    const current = run();
+    if (!current) return;
+    const existing = scheduleForRun();
+    // 之前停掉过就清掉旧记录，按这次选的时间重新开。
+    if (existing) props.store.removeSchedule(existing.id);
+    props.store.addSchedule({
+      cadence: cadence(),
+      day: cadence() === "daily" ? 0 : pickedDay(),
+      hour: hour(),
+      taskId: current.taskId,
+      taskTitle: current.taskTitle,
+      plan: [...current.plan],
+      files: [...current.files],
+      instruction: current.instruction,
+    });
+  }
+
+  function turnOff(): void {
+    const existing = scheduleForRun();
+    if (existing) props.store.setScheduleEnabled(existing.id, false);
   }
 
   return (
@@ -245,6 +287,112 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
           <p class="rounded-2xl border border-slate-700 bg-slate-800/40 px-4 py-3 text-sm text-slate-300">
             这次没有生成新文件。
           </p>
+        </Show>
+
+        {/* #55 — 一次成功的任务之后，不打扰地问一句「以后要不要自动做」。
+            默认关闭；开了随时能停，并且一直说明「该确认的还是会停下来问」。 */}
+        <Show when={state() === "done" && run()?.taskId}>
+          <section class="rounded-2xl border border-slate-700 bg-slate-800/40 px-4 py-4">
+            <Show when={autoOn()}>
+              <div class="flex flex-col gap-3">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 class="text-[20px] font-semibold text-slate-100">{SCHEDULE.on}</h3>
+                    <p class="mt-1 text-[16px] text-slate-300">
+                      {SCHEDULE.nextPrefix}
+                      {nextText()}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={turnOff}
+                    class="min-h-[48px] rounded-xl border border-slate-600 px-6 text-[16px] font-semibold text-slate-200 hover:bg-slate-800"
+                  >
+                    {SCHEDULE.stop}
+                  </button>
+                </div>
+                <p class="text-[16px] leading-relaxed text-slate-400">{SCHEDULE.confirmNote}</p>
+              </div>
+            </Show>
+
+            <Show when={!autoOn()}>
+              <div class="flex flex-col gap-3">
+                <div>
+                  <h3 class="text-[20px] font-semibold text-slate-100">{SCHEDULE.title}</h3>
+                  <p class="mt-1 text-[16px] leading-relaxed text-slate-400">{SCHEDULE.intro}</p>
+                </div>
+                <div class="flex flex-wrap items-end gap-3">
+                  <label class="flex flex-col gap-1 text-[16px] text-slate-300">
+                    <span>{SCHEDULE.cadenceLabel}</span>
+                    <select
+                      class="min-h-[44px] rounded-xl border border-slate-600 bg-slate-900 px-3 text-[16px] text-slate-100"
+                      value={cadence()}
+                      onChange={(event) => setCadence(event.currentTarget.value as Cadence)}
+                    >
+                      <option value="daily">{SCHEDULE.cadence.daily}</option>
+                      <option value="weekly">{SCHEDULE.cadence.weekly}</option>
+                      <option value="monthly">{SCHEDULE.cadence.monthly}</option>
+                    </select>
+                  </label>
+                  <Show when={cadence() === "weekly"}>
+                    <label class="flex flex-col gap-1 text-[16px] text-slate-300">
+                      <span>{SCHEDULE.weekdayLabel}</span>
+                      <select
+                        class="min-h-[44px] rounded-xl border border-slate-600 bg-slate-900 px-3 text-[16px] text-slate-100"
+                        value={String(weekday())}
+                        onChange={(event) => setWeekday(Number(event.currentTarget.value))}
+                      >
+                        <For each={[...SCHEDULE.weekdays]}>
+                          {(name, index) => <option value={String(index())}>{name}</option>}
+                        </For>
+                      </select>
+                    </label>
+                  </Show>
+                  <Show when={cadence() === "monthly"}>
+                    <label class="flex flex-col gap-1 text-[16px] text-slate-300">
+                      <span>{SCHEDULE.monthDayLabel}</span>
+                      <select
+                        class="min-h-[44px] rounded-xl border border-slate-600 bg-slate-900 px-3 text-[16px] text-slate-100"
+                        value={String(monthDay())}
+                        onChange={(event) => setMonthDay(Number(event.currentTarget.value))}
+                      >
+                        <For each={Array.from({ length: 28 }, (_, index) => index + 1)}>
+                          {(value) => <option value={String(value)}>{value}</option>}
+                        </For>
+                      </select>
+                    </label>
+                    <p class="text-[16px] text-slate-500">{SCHEDULE.monthDayHint}</p>
+                  </Show>
+                  <label class="flex flex-col gap-1 text-[16px] text-slate-300">
+                    <span>{SCHEDULE.hourLabel}</span>
+                    <select
+                      class="min-h-[44px] rounded-xl border border-slate-600 bg-slate-900 px-3 text-[16px] text-slate-100"
+                      value={String(hour())}
+                      onChange={(event) => setHour(Number(event.currentTarget.value))}
+                    >
+                      <For each={Array.from({ length: 24 }, (_, index) => index)}>
+                        {(value) => <option value={String(value)}>{`${String(value).padStart(2, "0")}:00`}</option>}
+                      </For>
+                    </select>
+                  </label>
+                </div>
+                <p class="text-[16px] text-slate-300">
+                  {SCHEDULE.nextPrefix}
+                  {describeCadence(cadence(), cadence() === "daily" ? 0 : pickedDay(), hour())}
+                </p>
+                <div class="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={turnOn}
+                    class="min-h-[48px] rounded-xl bg-sky-600 px-6 text-[16px] font-semibold text-white hover:bg-sky-500"
+                  >
+                    {SCHEDULE.enable[cadence()]}
+                  </button>
+                  <span class="text-[16px] text-slate-400">{SCHEDULE.confirmNote}</span>
+                </div>
+              </div>
+            </Show>
+          </section>
         </Show>
 
         <footer class="flex flex-wrap items-center justify-end gap-3">
