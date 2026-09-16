@@ -12,7 +12,7 @@ import { HOME, TASK_GROUPS, taskGroupRank } from "./copy.ts";
 import { LIBRARY } from "./copy-library.ts";
 import TaskCard from "./TaskCard.tsx";
 import TaskLibrary from "./TaskLibrary.tsx";
-import { createStore, type Store } from "../store.ts";
+import type { Store } from "../store.ts";
 import { TASKS, type TaskDef } from "./tasks/index.ts";
 
 export interface HomeProps {
@@ -20,11 +20,8 @@ export interface HomeProps {
   onPickTask(task: TaskDef): void;
   /** The free-form box was submitted: handle this sentence. */
   onSubmitText(text: string): void;
-  /**
-   * The app's shared store (#74), handed down by the shell. Optional so Home
-   * still renders on its own — see the note by `fallbackStore` below.
-   */
-  store?: Store;
+  /** The app's shared store (#74): the ability centre reads its session. */
+  store: Store;
 }
 
 export default function Home(props: HomeProps): JSX.Element {
@@ -32,12 +29,9 @@ export default function Home(props: HomeProps): JSX.Element {
   const [hint, setHint] = createSignal<string | null>(null);
   // #74 — the ability centre is a local overlay; the shell does not need to know.
   const [libraryOpen, setLibraryOpen] = createSignal(false);
-  // Home is normally given the shell's store. If it is rendered without one the
-  // ability centre still needs a store object, so use a private, never-connected
-  // one rather than letting the entry become a dead end. The shell passes the
-  // real store, and every real action still goes through `onPickTask`.
-  const fallbackStore = props.store ? null : createStore();
-  const store = (): Store => props.store ?? (fallbackStore as Store);
+  // The shell's store, required: a fallback here would be a second store, and a
+  // store opens its own connection to the daemon.
+  const store = (): Store => props.store;
 
   // Group the catalogue once; unknown groups fall to the end rather than
   // disappearing, so a task with a new group is never silently lost.
