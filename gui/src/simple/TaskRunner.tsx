@@ -303,16 +303,16 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
   };
 
   const button =
-    "rounded-lg bg-sky-600 px-5 py-3 text-base font-semibold text-white shadow hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400";
+    "min-h-[44px] rounded-lg bg-sky-600 px-5 py-3 text-base font-semibold text-white shadow hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400";
   const quietButton =
-    "rounded-lg border border-slate-700 px-4 py-2.5 text-sm text-slate-300 hover:border-slate-500 hover:text-slate-100";
+    "min-h-[44px] rounded-lg border border-slate-700 px-4 py-2.5 text-[16px] text-slate-300 hover:border-slate-500 hover:text-slate-100";
 
   return (
     <div class="flex h-full w-full flex-col overflow-hidden bg-[#0b0f14] text-slate-100">
       <header class="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
         <div class="min-w-0">
-          <h1 class="truncate text-lg font-semibold">{props.task.title}</h1>
-          <p class="mt-0.5 text-xs text-slate-400">说一句话就行，剩下的我来做</p>
+          <h1 class="text-[20px] font-semibold">{props.task.title}</h1>
+          <p class="mt-0.5 text-[16px] text-slate-400">说一句话就行，剩下的我来做</p>
         </div>
         <Show when={props.onExit}>
           <button type="button" class={quietButton} onClick={() => props.onExit?.()}>
@@ -321,7 +321,7 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
         </Show>
       </header>
 
-      <ol class="flex shrink-0 items-center gap-2 border-b border-slate-800 px-5 py-2 text-xs">
+      <ol class="flex shrink-0 items-center gap-2 border-b border-slate-800 px-5 py-2 text-[16px]">
         <For each={STEP_LABELS}>
           {(label, index) => (
             <li class="flex items-center gap-2">
@@ -347,7 +347,7 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
 
       <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
         <Show when={localError()}>
-          <div class="mb-4 rounded-lg border border-amber-700/60 bg-amber-950/40 px-4 py-3 text-sm text-amber-100">
+          <div class="mb-4 rounded-lg border border-amber-700/60 bg-amber-950/40 px-4 py-3 text-[16px] text-amber-100">
             {localError()}
           </div>
         </Show>
@@ -362,18 +362,18 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
                   <button type="button" class={button} onClick={() => void chooseFiles()}>
                     选择文件
                   </button>
-                  <p class="mt-2 text-xs text-slate-400">可以一次选多个文件</p>
+                  <p class="mt-2 text-[16px] text-slate-400">可以一次选多个文件</p>
                 </>
               }
             >
               <button type="button" class={button} onClick={() => void chooseFolder()}>
                 选择文件夹
               </button>
-              <p class="mt-2 text-xs text-slate-400">选中要整理的那个文件夹就行</p>
+              <p class="mt-2 text-[16px] text-slate-400">选中要整理的那个文件夹就行</p>
             </Show>
 
             <div
-              class="mt-4 rounded-xl border border-dashed px-4 py-6 text-center text-sm"
+              class="mt-4 rounded-xl border border-dashed px-4 py-6 text-center text-[16px]"
               classList={{
                 "border-sky-500 bg-sky-950/30 text-sky-100": dropping(),
                 "border-slate-700 text-slate-400": !dropping(),
@@ -389,13 +389,13 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
                 <For each={selection()}>
                   {(path) => (
                     <li class="flex items-center justify-between gap-3 px-3 py-2">
-                      <span class="min-w-0 flex-1 truncate text-sm text-slate-200" title={path}>
+                      <span class="min-w-0 flex-1 truncate text-[16px] text-slate-200" title={path}>
                         {nameOf(path)}
                       </span>
                       <Show when={props.task.needs === "files"}>
                         <button
                           type="button"
-                          class="shrink-0 text-xs text-slate-400 hover:text-slate-100"
+                          class="shrink-0 min-h-[44px] text-[16px] text-slate-400 hover:text-slate-100"
                           onClick={() => removePicked(path)}
                         >
                           不要这个
@@ -416,7 +416,7 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
               >
                 下一步
               </button>
-              <span class="text-xs text-slate-500">
+              <span class="text-[16px] text-slate-500">
                 {selection().length === 0 ? "先选一个" : `已经选了 ${selection().length} 个`}
               </span>
             </div>
@@ -429,22 +429,22 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
             <Show
               when={pickable()}
               fallback={
-                <p class="rounded-lg border border-slate-800 bg-slate-900/40 px-4 py-3 text-sm text-slate-300">
+                <p class="rounded-lg border border-slate-800 bg-slate-900/40 px-4 py-3 text-[16px] text-slate-300">
                   这个任务不用选文件，直接说你要写什么就行。
                 </p>
               }
             >
-              <p class="rounded-lg border border-slate-800 bg-slate-900/40 px-4 py-3 text-sm text-slate-300">
+              <p class="rounded-lg border border-slate-800 bg-slate-900/40 px-4 py-3 text-[16px] text-slate-300">
                 已经选好 {selection().length} 个，下面用一句话说说要做到什么程度。
               </p>
             </Show>
 
-            <label class="mt-4 block text-sm font-medium text-slate-200" for="task-instruction">
+            <label class="mt-4 block text-[16px] font-medium text-slate-200" for="task-instruction">
               你要做什么
             </label>
             <textarea
               id="task-instruction"
-              class="mt-2 w-full resize-none rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500"
+              class="mt-2 w-full resize-none rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-[16px] text-slate-100 placeholder:text-slate-500"
               rows={3}
               placeholder={props.task.example}
               value={instruction()}
@@ -453,12 +453,12 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
             <div class="mt-2 flex items-center gap-3">
               <button
                 type="button"
-                class="text-xs text-sky-300 hover:text-sky-200"
+                class="min-h-[44px] text-[16px] text-sky-300 hover:text-sky-200"
                 onClick={() => setInstruction(props.task.example)}
               >
                 就照这个例子来
               </button>
-              <span class="text-xs text-slate-500">只改几个字也行</span>
+              <span class="text-[16px] text-slate-500">只改几个字也行</span>
             </div>
 
             <div class="mt-6 flex items-center gap-3">
@@ -512,7 +512,7 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
                     }}
                   >
                     <span
-                      class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[14px] font-semibold"
+                      class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[16px] font-semibold"
                       classList={{
                         "bg-emerald-600 text-white": item.state === "done",
                         "bg-sky-600 text-white": item.state === "active",

@@ -30,16 +30,30 @@ Then you see the task cards.
 
 While it runs you get the plan as a checklist that fills in step by step, with the elapsed time — not a spinner. Evidence from the [Wharton AI-agent adoption study](https://ai.wharton.upenn.edu/) is blunt that explaining the process is what makes an agent feel reliable and safe, and that admitting known limits raises trust rather than lowering it. So the confirmation sheet names the specific ways *this* task can go wrong, and the result card repeats whatever the run actually flagged for you to check.
 
+## When it stops to ask
+
+Some jobs have a judgement call in the middle: two sheets whose columns are 金额 and 金额（元）, a stray 合计 row among the detail, a folder where two files would end up with the same name. The task prompts tell the assistant to stop and ask instead of choosing for you, and it does.
+
+That question is not a dead end: the result card offers a reply box. Type the answer — 金额（元）就是金额, 填进金额那一列 — and the same job continues where it stopped, with the step list and the clock picking up again. Pressing Enter sends the answer; Shift+Enter keeps a line break. If you would rather not decide, one button says 你看着办, and it finishes the job and tells you what it chose.
+
 ## What it can do
 
 The task catalogue is grouped the way the work is, not the way the technology is:
 
 | Group | Tasks |
 | --- | --- |
-| 表格 | Merge several sheets into one and remove duplicates · group totals and a chart for the monthly report · tidy formats and compare two lists |
-| 文件 | Batch rename, file by type, find duplicate files · merge, split or convert PDFs |
+| 表格 | Merge several sheets into one and remove duplicates · pick the rows you want out of a big sheet · split one column into two · group totals and a chart for the monthly report · tidy formats and compare two lists |
+| 文件 | Batch rename, file by type, find duplicate files · file a folder's contents into month subfolders · merge, split or convert PDFs |
 | 微信 | Turn an exported chat log into a table · write reply drafts you send yourself |
-| 文书 | Notices, leave requests, weekly reports — pick a template, fill two or three blanks, adjust the tone |
+| 文书 | Notices, leave requests, weekly reports — pick a template, fill two or three blanks, adjust the tone · turn long documents into a one-page summary where every point names its source |
+
+### Finding the one you want
+
+The home screen shows the tasks people reach for most; the rest are behind **看看能做什么** on the same screen. That opens a search box you type into the way you would say it out loud — 把表合起来, 去重, 对账, 按月份整理, 微信 — and it answers with tasks, not tool names. Synonym matching is deliberate: 合并 and 汇总 and 拼 are the same intention, and a search that only matched the word on the card would be useless to someone who has never read the card.
+
+Every result states three things before you commit to anything: what it needs from you (files, a folder, or just a sentence), what it will touch, and whether this machine can do it at all. When nothing matches, you get two ways out rather than a dead end: rephrase, or go back and say the whole thing in one sentence.
+
+It is a curated list, not a plugin marketplace, and that is a product decision rather than a limitation of effort: judging whether a third-party capability is safe is not something a non-technical user can do, and asking her to do it means using her files to find out. Everything in the list was written, tested and given its own honest limits by us.
 
 Tasks that need WeChat get their own screen, because that screen has a job: it explains how to export the chat log, and it states the rule in the interface itself.
 

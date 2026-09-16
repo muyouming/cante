@@ -39,7 +39,7 @@ function ResultCard(props: { task: TaskDef; onPick(task: TaskDef): void }): JSX.
       <button
         type="button"
         onClick={() => props.onPick(props.task)}
-        class="flex w-full flex-col items-start gap-2 rounded-2xl px-5 py-4 text-left"
+        class="flex min-h-[44px] w-full flex-col items-start gap-2 rounded-2xl px-5 py-4 text-left"
       >
         <span class="text-[20px] leading-snug font-semibold text-slate-100">{props.task.title}</span>
         <span class="text-[16px] leading-relaxed text-slate-400">{props.task.example}</span>

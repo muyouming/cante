@@ -92,11 +92,11 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
           </span>
           <div class="min-w-0 flex-1">
             <h2 class="text-2xl font-bold text-slate-50">{STATE_TITLE[state()] ?? "做好了"}</h2>
-            <p class="truncate text-sm text-slate-400">{run()?.taskTitle}</p>
+            <p class="text-[16px] text-slate-400">{run()?.taskTitle}</p>
           </div>
           <div class="flex flex-col items-end">
             <span
-              class="rounded-full px-3 py-1 text-xs font-semibold"
+              class="rounded-full px-3 py-1 text-[16px] font-semibold"
               classList={{
                 "bg-sky-500/20 text-sky-200": run()?.online === true,
                 "bg-emerald-500/20 text-emerald-200": run()?.online === false,
@@ -104,14 +104,14 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
             >
               {onlineLabel(run()?.online === true)}
             </span>
-            <span class="mt-1 max-w-[16rem] text-right text-[11px] text-slate-500">
+            <span class="mt-1 max-w-[16rem] text-right text-[16px] text-slate-500">
               {onlineHint(run()?.online === true)}
             </span>
           </div>
         </header>
 
         <Show when={run()?.dryRun}>
-          <p class="rounded-2xl border border-sky-700 bg-sky-950/50 px-4 py-3 text-sm text-sky-100">
+          <p class="rounded-2xl border border-sky-700 bg-sky-950/50 px-4 py-3 text-[16px] text-sky-100">
             这是一次试跑。它只说明了打算怎么做，没有改动任何文件。
           </p>
         </Show>
@@ -119,16 +119,16 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
         <Show when={state() === "failed"}>
           <div class="rounded-2xl border-2 border-rose-600 bg-rose-950/50 px-4 py-4">
             <p class="text-base font-bold text-rose-100">{run()?.error?.what ?? "这件事没有做完。"}</p>
-            <p class="mt-1 text-sm text-rose-200">{run()?.error?.how ?? "原来的文件都还在。"}</p>
+            <p class="mt-1 text-[16px] text-rose-200">{run()?.error?.how ?? "原来的文件都还在。"}</p>
             <Show when={showDetail()}>
-              <p class="mt-2 whitespace-pre-wrap break-words rounded-lg bg-black/30 px-3 py-2 text-xs text-rose-200/80">
+              <p class="mt-2 whitespace-pre-wrap break-words rounded-lg bg-black/30 px-3 py-2 text-[16px] text-rose-200/80">
                 {run()?.error?.detail}
               </p>
             </Show>
             <button
               type="button"
               onClick={() => setShowDetail((value) => !value)}
-              class="mt-2 rounded-lg px-2 py-1 text-xs text-rose-200 hover:bg-rose-900/50"
+              class="mt-2 min-h-[44px] rounded-lg px-2 text-[16px] text-rose-200 hover:bg-rose-900/50"
             >
               {showDetail() ? "收起细节" : "看看细节"}
             </button>
@@ -136,7 +136,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
         </Show>
 
         <Show when={state() === "cancelled"}>
-          <p class="rounded-2xl border border-amber-700 bg-amber-950/40 px-4 py-3 text-sm text-amber-100">
+          <p class="rounded-2xl border border-amber-700 bg-amber-950/40 px-4 py-3 text-[16px] text-amber-100">
             {changed()
               ? "你叫停了这件事，但已经产生了一些改动。可以用下面的「一键撤销」还原。"
               : "你叫停了这件事，没有改动任何文件。"}
@@ -188,7 +188,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
               >
                 {FOLLOWUP.send}
               </button>
-              <span class="text-[14px] text-slate-400">{FOLLOWUP.enterHint}</span>
+              <span class="text-[16px] text-slate-400">{FOLLOWUP.enterHint}</span>
             </div>
             {/* The exit: she does not have to answer. One tap says "you decide". */}
             <div class="mt-4 border-t border-slate-700 pt-3">
@@ -200,7 +200,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
               >
                 {FOLLOWUP.letItDecide}
               </button>
-              <p class="mt-1 text-[14px] text-slate-400">{FOLLOWUP.letItDecideHint}</p>
+              <p class="mt-1 text-[16px] text-slate-400">{FOLLOWUP.letItDecideHint}</p>
             </div>
           </section>
         </Show>
@@ -214,10 +214,10 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
                     <p class="truncate text-base font-semibold text-slate-100" title={file.path}>
                       {fileName(file.path)}
                     </p>
-                    <p class="truncate text-xs text-slate-500" title={folderName(file.path)}>
+                    <p class="truncate text-[16px] text-slate-500" title={folderName(file.path)}>
                       位置：{folderName(file.path)}
                     </p>
-                    <p class="mt-1 text-sm text-slate-300">{file.summary}</p>
+                    <p class="mt-1 text-[16px] text-slate-300">{file.summary}</p>
                   </div>
                   <div class="flex shrink-0 gap-3">
                     <button
@@ -242,7 +242,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
         </Show>
 
         <Show when={files().length === 0 && state() !== "failed"}>
-          <p class="rounded-2xl border border-slate-700 bg-slate-800/40 px-4 py-3 text-sm text-slate-300">
+          <p class="rounded-2xl border border-slate-700 bg-slate-800/40 px-4 py-3 text-[16px] text-slate-300">
             这次没有生成新文件。
           </p>
         </Show>
@@ -261,7 +261,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
             </button>
           </Show>
           <Show when={run()?.undone === true}>
-            <span class="rounded-xl border border-emerald-700 bg-emerald-950/40 px-4 py-2 text-sm text-emerald-200">
+            <span class="rounded-xl border border-emerald-700 bg-emerald-950/40 px-4 py-2 text-[16px] text-emerald-200">
               已经撤销，文件都放回去了。
             </span>
           </Show>
