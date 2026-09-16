@@ -9,8 +9,9 @@
 //   * 可用时给指令信封各加一段中文说明，告诉助手该用哪个命令行工具、怎么用；
 //   * 不可用时给确认页一段中性说明，让用户知道这是边界，不是错误。
 import { invoke } from "../tauri.ts";
-import { PDF_COPY, SHEET_COPY } from "./copy-capability.ts";
-import { setPdfHelper, setSheetHelper } from "./tasks/prompt.ts";
+import type { SessionInfo } from "../protocol.ts";
+import { PDF_COPY, SHEET_COPY, VISION_COPY } from "./copy-capability.ts";
+import { setPdfHelper, setSheetHelper, setVisionHelper } from "./tasks/prompt.ts";
 
 export interface ToolCapability {
   available: boolean;
@@ -143,4 +144,64 @@ export function sheetFallbackNote(cap: ToolCapability): string | null {
 export function pdfFallbackNote(cap: ToolCapability): string | null {
   if (cap.available) return null;
   return PDF_COPY.fallbackNote;
+}
+
+// ---------------------------------------------------------------------------
+// 看图能力（#48）
+//
+// 和表格/PDF 不一样：这条不看这台电脑装了什么，而看当前会话用的那个设置能不能
+// 看懂照片。信息就写在会话的模型信息里（`ModelSpec.support_vision`），由守护进程
+// 在 `SessionStart` 时声明。这里只负责把它读出来、翻成两句人话：一句给助手（提示词
+// 信封），一句给她（确认页的边界说明）。
+// ---------------------------------------------------------------------------
+
+/**
+ * 这个会话背后的助手能不能看图。
+ *
+ * 读不到（字段缺省、还没开会话）一律当「看不了」——这是保守的方向：看不了时我
+ * 们会先告诉她，而不是让助手对着照片硬编一张表。
+ */
+export function visionAvailable(session: SessionInfo | null | undefined): boolean {
+  return session?.model?.support_vision === true;
+}
+
+/**
+ * 把「能不能看图」同步进提示词信封，并返回当前结论。
+ *
+ * 确认页显示时会调用（会话信息可能比首屏晚到，所以跟着会话变化重复调用也无妨）。
+ * 可用不可用都写进信封：看不了图时，助手也要知道这件事，才会在用户塞来照片时先
+ * 停下来说明，而不是凭空编一张表。
+ */
+export function syncVisionForPrompt(session: SessionInfo | null | undefined): boolean {
+  const available = visionAvailable(session);
+  setVisionHelper(visionPromptLine(available));
+  return available;
+}
+
+/**
+ * 给助手看的一段中文说明：这个会话能不能看图。可用、不可用都返回非 null。
+ *
+ * 允许出现「图片」「照片」「截图」这些词——这是发给助手的内容，不是给用户看的。
+ * 关键的一句是最后那句：看不了就如实说做不到，不要编一张表出来。
+ */
+export function visionPromptLine(available: boolean): string {
+  if (available) {
+    return [
+      "这个会话背后的助手可以直接看图片：照片和截图（jpg、png、heic、webp 等）都能看。",
+      "遇到图片里的表格，就按上面的做法逐格照抄；看不清的格子一律留空并指出来，绝对不要猜一个数。",
+    ].join("\n");
+  }
+  return [
+    "这个会话背后的助手看不了图片：照片和截图里的内容它看不到。",
+    "如果用户给了图片，先停下来如实说明看不了，并请他把表里的内容用文字写下来、或者换一个能看图的设置。不要凭空编一张表出来，也不要假装看懂了。",
+  ].join("\n");
+}
+
+/**
+ * 看不了图时给用户看的一句中性说明，否则 null。
+ *
+ * 这是边界不是错误，所以措辞里没有「失败」「错误」，确认页也用中性颜色显示。
+ */
+export function visionFallbackNote(available: boolean): string | null {
+  return available ? null : VISION_COPY.fallbackNote;
 }

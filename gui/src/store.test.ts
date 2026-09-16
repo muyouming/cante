@@ -849,3 +849,299 @@ describe("#55 定时/重复任务", () => {
     dispose();
   });
 });
+
+// ---------------------------------------------------------------------------
+// r13 — 队列：一次说好几件事，一件件来。
+//
+// 这里钉的是那条产品律：排队**不等于**自动做完。每一件都还是要先摆到确认页，
+// 她点了「开始」才动手；上一件做完了，队列只把下一件推到确认页，不会自己往下跑。
+// ---------------------------------------------------------------------------
+
+describe("r13 队列（一次说好几件事）", () => {
+  const A = { id: "excel.merge", title: "把几张表合成一张", plan: ["打开这几张表", "合成一张新表"] };
+  const B = { id: "file.rename", title: "把文件改名", plan: ["读出原来的名字", "换成新的名字"] };
+  const C = { id: "files.tidy", title: "整理文件夹", plan: ["列出文件夹里的东西", "分门别类"] };
+
+  const inputA = {
+    taskId: A.id,
+    taskTitle: A.title,
+    plan: A.plan,
+    files: ["/work/a.xlsx"],
+    instruction: "合成一张",
+  };
+  const inputB = {
+    taskId: B.id,
+    taskTitle: B.title,
+    plan: B.plan,
+    files: ["/work/b.docx"],
+    instruction: "改个名",
+  };
+  const inputC = {
+    taskId: C.id,
+    taskTitle: C.title,
+    plan: C.plan,
+    files: ["/work/c"],
+    instruction: "整理一下",
+  };
+
+  /** 把手上这件正在跑的活做完（一次成功的回合）。 */
+  async function finishTurn(): Promise<void> {
+    emit("event", event("TurnEnd", { status: "Completed", steps: 1 }));
+    await Bun.sleep(25);
+  }
+
+  /** 队里的某一件（按任务找，测试里够用）。 */
+  function queuedTask(store: Store, taskId: string) {
+    return store.queue().find((job) => job.taskId === taskId);
+  }
+
+  test("一开始队列是空的；排一件只是排上，不会开始做", async () => {
+    const { store, dispose } = await setup();
+    expect(store.queue()).toEqual([]);
+
+    const job = store.enqueue(inputA);
+    expect(job?.taskId).toBe(A.id);
+    expect(store.queue().map((item) => item.state)).toEqual(["waiting"]);
+    // 排上 ≠ 开始：没有摆到确认页，也没有发出任何指令。
+    expect(store.currentRun()).toBeNull();
+    expect(opCalls("send_input")).toEqual([]);
+    dispose();
+  });
+
+  test("startNextQueued 把排在头一件摆到确认页，仍然要她点头", async () => {
+    const { store, dispose } = await setup();
+    store.enqueue(inputA);
+    store.enqueue(inputB);
+
+    const staged = store.startNextQueued();
+    expect(staged?.taskId).toBe(A.id);
+    expect(store.currentRun()?.state).toBe("preview");
+    expect(store.currentRun()?.taskId).toBe(A.id);
+    expect(store.currentRun()?.files).toEqual(["/work/a.xlsx"]);
+    // 只停在确认页：一个指令都没发。
+    expect(opCalls("send_input")).toEqual([]);
+    expect(store.queue().map((item) => item.state)).toEqual(["running", "waiting"]);
+
+    // 手上已经有活了，就不再摆第二件。
+    expect(store.startNextQueued()).toBeNull();
+    expect(store.currentRun()?.taskId).toBe(A.id);
+    dispose();
+  });
+
+  test("做完一件，下一件自动摆到确认页——但绝不自作主张动手", async () => {
+    const { store, dispose } = await setup();
+    store.enqueue(inputA);
+    store.enqueue(inputB);
+    store.startNextQueued();
+    await store.confirmRun();
+    expect(store.currentRun()?.state).toBe("running");
+
+    await finishTurn();
+
+    // 下一件到了确认页，计划和文件都是它自己的。
+    expect(store.currentRun()?.state).toBe("preview");
+    expect(store.currentRun()?.taskId).toBe(B.id);
+    expect(store.currentRun()?.plan).toEqual(B.plan);
+    expect(store.currentRun()?.files).toEqual(["/work/b.docx"]);
+    expect(queuedTask(store, A.id)?.state).toBe("done");
+    expect(queuedTask(store, B.id)?.state).toBe("running");
+    // 第二件的指令一个字都没发出去：它只是在等她点头。
+    const sent = opCalls("send_input") as Array<{ text: string }>;
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.text).toContain("合成一张");
+    dispose();
+  });
+
+  test("结果先留给她看：下一件的确认页不许把它盖住", async () => {
+    const { store, dispose } = await setup();
+    store.enqueue(inputA);
+    store.enqueue(inputB);
+    store.startNextQueued();
+    await store.confirmRun();
+    await finishTurn();
+
+    // 刚做完、还没看过的那一件。
+    expect(store.lastFinished()?.taskId).toBe(A.id);
+    expect(store.lastFinished()?.state).toBe("done");
+
+    // 「知道了」/「看下一件」只表示结果看过了：等她确认的那件不能跟着被丢掉。
+    store.dismissRun();
+    expect(store.lastFinished()).toBeNull();
+    expect(store.currentRun()?.state).toBe("preview");
+    expect(store.currentRun()?.taskId).toBe(B.id);
+    dispose();
+  });
+
+  test("跳过：队里这件拿掉，下一件顶上来；最后一件跳过就收工", async () => {
+    const { store, dispose } = await setup();
+    store.enqueue(inputA);
+    store.enqueue(inputB);
+    store.enqueue(inputC);
+    store.startNextQueued();
+
+    const staged = store.queue().find((item) => item.state === "running")!;
+    store.removeFromQueue(staged.id);
+    expect(store.queue().some((item) => item.id === staged.id)).toBe(false);
+    expect(store.currentRun()?.state).toBe("preview");
+    expect(store.currentRun()?.taskId).toBe(B.id);
+
+    const second = store.queue().find((item) => item.state === "running")!;
+    store.removeFromQueue(second.id);
+    expect(store.currentRun()?.taskId).toBe(C.id);
+
+    // 最后一件跳过之后，队列不会自己去找活干。
+    const third = store.queue().find((item) => item.state === "running")!;
+    store.removeFromQueue(third.id);
+    expect(store.currentRun()).toBeNull();
+    expect(store.queue()).toEqual([]);
+    expect(opCalls("send_input")).toEqual([]);
+    dispose();
+  });
+
+  test("正在做的时候再排一件：不打断，也不插队", async () => {
+    const { store, dispose } = await setup();
+    store.enqueue(inputA);
+    store.startNextQueued();
+    await store.confirmRun();
+    const running = store.currentRun();
+    expect(running?.state).toBe("running");
+
+    store.enqueue(inputB);
+
+    // 手上这件没被顶掉，也没被打断。
+    expect(store.currentRun()?.id).toBe(running?.id);
+    expect(store.queue().map((item) => item.state)).toEqual(["running", "waiting"]);
+    expect(opCalls("interrupt")).toEqual([]);
+
+    // 等它做完了才轮到刚排的那件。
+    await finishTurn();
+    expect(store.currentRun()?.taskId).toBe(B.id);
+    expect(store.currentRun()?.state).toBe("preview");
+    dispose();
+  });
+
+  test("重复加入同一件事只排一件；同一张卡换个说法/换批文件算两件", async () => {
+    const { store, dispose } = await setup();
+    store.enqueue(inputA);
+    const again = store.enqueue(inputA);
+    expect(store.queue()).toHaveLength(1);
+    expect(again?.id).toBe(store.queue()[0]!.id);
+
+    store.enqueue({ ...inputA, instruction: "只保留上个月" });
+    store.enqueue({ ...inputA, files: ["/work/z.xlsx"] });
+    expect(store.queue()).toHaveLength(3);
+    dispose();
+  });
+
+  test("停掉剩下的：队列清空；停在确认页的收起来，正在做的不打断", async () => {
+    const { store, dispose } = await setup();
+    // (a) 还停在确认页：可以安静地收起来，她什么都没损失。
+    store.enqueue(inputA);
+    store.enqueue(inputB);
+    store.startNextQueued();
+    store.clearQueue();
+    expect(store.queue()).toEqual([]);
+    expect(store.currentRun()).toBeNull();
+    expect(opCalls("send_input")).toEqual([]);
+
+    // (b) 真的在做：不打断，她自己按「停」才算数。
+    store.enqueue(inputA);
+    store.enqueue(inputB);
+    store.startNextQueued();
+    await store.confirmRun();
+    expect(store.currentRun()?.state).toBe("running");
+    store.clearQueue();
+    expect(store.queue()).toEqual([]);
+    expect(store.currentRun()?.state).toBe("running");
+    expect(opCalls("interrupt")).toEqual([]);
+    dispose();
+  });
+
+  test("确认页上按「取消」：这件退回队里等着，不丢", async () => {
+    const { store, dispose } = await setup();
+    store.enqueue(inputA);
+    store.enqueue(inputB);
+    store.startNextQueued();
+
+    store.cancelRun();
+
+    expect(store.currentRun()).toBeNull();
+    expect(store.queue().map((item) => item.state)).toEqual(["waiting", "waiting"]);
+    // 她还能在首页把它叫回来（「去做这一件」）。
+    expect(store.startNextQueued()?.taskId).toBe(A.id);
+    expect(store.currentRun()?.state).toBe("preview");
+    dispose();
+  });
+
+  test("「先做这件」：从卡片直接进来的那件插到最前面，别人往后排", async () => {
+    const { store, dispose } = await setup();
+    store.enqueue(inputB);
+    // 她没排队，直接从卡片开了一件。
+    await store.startRun(A, ["/work/a.xlsx"], "合成一张");
+    expect(store.currentRun()?.state).toBe("preview");
+
+    store.keepStagedFirst();
+
+    expect(store.queue().map((item) => item.taskId)).toEqual([A.id, B.id]);
+    expect(store.queue().map((item) => item.state)).toEqual(["running", "waiting"]);
+    // 再按一次不会插第二遍。
+    store.keepStagedFirst();
+    expect(store.queue().filter((item) => item.taskId === A.id)).toHaveLength(1);
+    dispose();
+  });
+
+  test("做成的记成做完了，没做成/停掉的记成没做成", async () => {
+    const { store, dispose } = await setup();
+    store.enqueue(inputA);
+    store.enqueue(inputB);
+    store.enqueue(inputC);
+    store.startNextQueued();
+    await store.confirmRun();
+    await finishTurn();
+    expect(queuedTask(store, A.id)?.state).toBe("done");
+    expect(store.currentRun()?.taskId).toBe(B.id);
+
+    // 第二件失败了：下一件照样摆到确认页，不会假装它做完了。
+    await store.confirmRun();
+    emit("event", event("TurnEnd", { status: { Error: { headline: "没做成", details: [] } } }));
+    await Bun.sleep(25);
+    expect(queuedTask(store, B.id)?.state).toBe("failed");
+    expect(store.currentRun()?.state).toBe("preview");
+    expect(store.currentRun()?.taskId).toBe(C.id);
+
+    // 第三件她按了「停」：没做完就是没做完。
+    await store.confirmRun();
+    store.cancelRun();
+    await Bun.sleep(25);
+    expect(queuedTask(store, C.id)?.state).toBe("failed");
+    expect(opCalls("interrupt")).toHaveLength(1);
+    dispose();
+  });
+
+  test("坏数据：排不进去的东西一律拒绝，队列不崩", async () => {
+    const { store, dispose } = await setup();
+    type AnyInput = Parameters<Store["enqueue"]>[0];
+    expect(store.enqueue(null as unknown as AnyInput)).toBeNull();
+    expect(store.enqueue({} as unknown as AnyInput)).toBeNull();
+    expect(store.enqueue(undefined as unknown as AnyInput)).toBeNull();
+    expect(store.queue()).toEqual([]);
+
+    store.enqueue(inputA);
+    expect(store.enqueue("这不是一件活" as unknown as AnyInput)).toBeNull();
+    expect(store.queue()).toHaveLength(1);
+    expect(store.startNextQueued()?.taskId).toBe(A.id);
+    dispose();
+  });
+
+  test("队列只在内存里：重启就没了（跨重启恢复是故意不做的）", async () => {
+    installStorage();
+    const first = await setup();
+    first.store.enqueue(inputA);
+    expect(first.store.queue()).toHaveLength(1);
+    first.dispose();
+
+    const second = mountStore();
+    expect(second.store.queue()).toEqual([]);
+    second.dispose();
+  });
+});

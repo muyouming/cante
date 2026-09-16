@@ -3,8 +3,8 @@
 // 这是「文件」组里最常被问到的一件事：桌面和下载文件夹越堆越乱，但谁也不
 // 敢让程序自动整理。所以这条卡片把安全写进计划：只新建子文件夹、只把文件
 // 挪进去，不删任何东西，遇到重名先停下来问。
-import type { TaskDef } from "./index.ts";
-import { buildPrompt } from "./index.ts";
+import type { TaskDef } from "./types.ts";
+import { buildPrompt } from "./prompt.ts";
 
 const byDate: TaskDef = {
   id: "files.by-date",

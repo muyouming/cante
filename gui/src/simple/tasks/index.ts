@@ -23,13 +23,12 @@ import { SUMMARY_TASKS } from "./summary.ts";
 import { CHECK_TASKS } from "./check.ts";
 import { INVOICE_TASKS } from "./invoice.ts";
 import { ADMIN_TASKS } from "./admin.ts";
+import { VISION_TASKS } from "./vision.ts";
+import { RESEARCH_TASKS } from "./research.ts";
 
-export type TaskGroup = "表格" | "文件" | "微信" | "文书" | "资料";
-
-/** What the first step has to collect before the job can start. */
-export type TaskNeeds = "files" | "folder" | "none" | "text";
 
 import { buildPrompt } from "./prompt.ts";
+import type { TaskDef, TaskGroup, TaskNeeds } from "./types.ts";
 
 export {
   SAFETY_RULES,
@@ -40,34 +39,6 @@ export {
   userWordsBlock,
 } from "./prompt.ts";
 
-export interface TaskDef {
-  /** Stable id, e.g. "excel.merge". History and undo key off this. */
-  id: string;
-  /** Chinese card title. */
-  title: string;
-  /** One sentence used as the input's placeholder. */
-  example: string;
-  group: TaskGroup;
-  needs: TaskNeeds;
-  /** File extensions the picker offers, e.g. ["xlsx", "xls", "csv"]. */
-  accept?: string[];
-  /** What is about to happen, in Chinese, one step per line. */
-  plan: string[];
-  /**
-   * #63 — where this job is known to get things wrong, in Chinese, one concrete
-   * case per line. Shown under the plan on the confirmation page as
-   * 「这个任务可能不准的地方」.
-   *
-   * A risk has to be checkable against the user's own file ("有合并单元格时
-   * 合计可能算重"), never a generic disclaimer ("仅供参考"). The catalogue test
-   * rejects empty or filler entries.
-   */
-  risks?: string[];
-  /** The one instruction handed to the assistant. */
-  prompt(files: string[], instruction: string): string;
-  /** What the result card should make prominent. */
-  summaryHints: string[];
-}
 
 // ---------------------------------------------------------------------------
 // The run model (frozen shape — the runner and the trust layer share it)
@@ -81,11 +52,17 @@ import {
   type TaskRun,
 } from "../run.ts";
 
-export type { TaskError, TaskRun } from "../run.ts";
-export type TaskImpact = RunImpact;
-export type TaskResultFile = RunResultFile;
-export type TaskResult = RunResult;
-export type TaskState = RunState;
+export type {
+  TaskDef,
+  TaskGroup,
+  TaskError,
+  TaskImpact,
+  TaskNeeds,
+  TaskResult,
+  TaskResultFile,
+  TaskRun,
+  TaskState,
+} from "./types.ts";
 // ---------------------------------------------------------------------------
 // Prompt building blocks (shared with wechat.ts — see ./prompt.ts)
 //
@@ -114,6 +91,8 @@ export const TASKS: TaskDef[] = [
   ...CHECK_TASKS,
   ...INVOICE_TASKS,
   ...ADMIN_TASKS,
+  ...VISION_TASKS,
+  ...RESEARCH_TASKS,
   ...WECHAT_ALL_TASKS,
 ];
 

@@ -8,6 +8,7 @@
 
 /** The rules every job carries. Exported so the tests can pin the wording. */
 export const SAFETY_RULES: readonly string[] = [
+  "【说中文】给用户看的所有说明、总结和「需要你核对」都用中文写，不要用英文。",
   "【先说明再动手】先说明你打算怎么做，再动手。",
   "【不要动原文件】结果另存为新文件，不要改原文件。原来的文件只能读，不能改、不能删、不能覆盖。",
   "【只做这一件事】不要顺手做别的改动，也不要重命名原来的文件。",
@@ -87,6 +88,10 @@ export function buildPrompt(parts: {
   if (pdfHelper) {
     blocks.push("【这台电脑怎么处理 PDF】", pdfHelper, "");
   }
+  // #48 — 这个会话背后的助手能不能看图。和上面两条不同：可用、不可用都要写。
+  if (visionHelper) {
+    blocks.push("【这台电脑能不能看图】", visionHelper, "");
+  }
   blocks.push(`【做完告诉我】${parts.done}`, "", CHECK_NOTE_BLOCK);
   return blocks.join("\n");
 }
@@ -119,6 +124,24 @@ let pdfHelper: string | null = null;
 /** 设置（或清空）这台电脑处理 PDF 的说明。 */
 export function setPdfHelper(line: string | null): void {
   pdfHelper = line;
+}
+
+// ---------------------------------------------------------------------------
+// 看图能力（#48）
+// ---------------------------------------------------------------------------
+
+/**
+ * 这个会话能不能看图。默认是 null，所以没探测过时提示词的形状保持不变。
+ * 由 `simple/capabilities.ts` 在拿到会话信息时设置。
+ *
+ * 和表格/PDF 不同：看不了图时也要把这件事写进信封，助手才知道用户塞来照片时该
+ * 先停下车说明，而不是凭空编一张表。
+ */
+let visionHelper: string | null = null;
+
+/** 设置（或清空）这个会话能不能看图的说明。 */
+export function setVisionHelper(line: string | null): void {
+  visionHelper = line;
 }
 
 /**

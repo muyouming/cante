@@ -9,12 +9,15 @@
 // The screen never touches files itself: selection, the run record, the
 // snapshot/undo and the result card all come from the frozen store and the
 // trusted components. It only arranges them.
-import { For, Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { Accessor, JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
 import { isBridgeAvailable } from "../tauri.ts";
 import { PROGRESS_COPY } from "./copy.ts";
+// r13 — 排队里的事：每一件动手前还是会先停下来问她。
+import { QUEUE } from "./copy-queue.ts";
+import { jobFor, nextWaiting, positionOf, queueSummary, type QueuedJob } from "./queue.ts";
 import { formatElapsed, type RunProgressView } from "./progress.ts";
 import type { TaskDef, TaskError, TaskRun } from "./tasks/index.ts";
 import ApprovalSheet from "./ApprovalSheet.tsx";
@@ -92,12 +95,55 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
 
   const currentRun = (): TaskRun | null => (dismissed() ? null : (store.currentRun?.() ?? null));
 
+  // r13 — 队列把下一件摆到确认页时，先把上一件的结果留给她看完。
+  //
+  // 不这么做的话，后一件的确认页会直接盖在结果卡片上（确认页是整屏的），
+  // 她就会看不见上一件到底做成了什么、也没机会点「一键撤销」。所以：只要
+  // store 里还存着一件"做完了、结果没看过"的事，就先显示它。
+  const unseenResult = (): TaskRun | null => {
+    const finished = store.lastFinished?.() ?? null;
+    if (!finished) return null;
+    const current = currentRun();
+    if (current && current.id === finished.id) return null;
+    if (current && current.state === "running") return null;
+    return finished;
+  };
+  /** 屏幕上这一屏说的是哪一次：刚做完还没看的那件，或者手上这件。 */
+  const shownRun = (): TaskRun | null => unseenResult() ?? currentRun();
+
+  // 排队里有没有手里这件（按内容配对）。有，就说明它已经在最前面了。
+  // 只看还没做完的那些：她从结果卡片「再跑一次」时，内容会和已做完的那件一模一样。
+  const stagedJob = (): QueuedJob | null => {
+    const run = currentRun();
+    if (!run) return null;
+    const open = store.queue().filter((item) => item.state === "waiting" || item.state === "running");
+    return jobFor(open, {
+      taskId: run.taskId,
+      instruction: run.instruction,
+      files: run.files,
+    });
+  };
+  const queueFacts = () => queueSummary(store.queue());
+
+  // 队列把新的一件摆到确认页时（跳过、或者上一件做完了），这一屏要跟过去：
+  // 本地的 `dismissed` 不能把新摆上来的那件挡掉。
+  let followedRunId: string | null = null;
+  createEffect(() => {
+    const run = store.currentRun?.() ?? null;
+    if (!run || run.id === followedRunId) return;
+    followedRunId = run.id;
+    if (run.state === "preview" || run.state === "running") setDismissed(false);
+  });
+
   // #62 — the live checklist. Falls back to an empty plan so a store without
   // the member still renders instead of throwing.
   const progress = (): RunProgressView =>
     store.progress?.() ?? { steps: [], startedAt: null, elapsedMs: 0 };
 
   const step = createMemo<Step>(() => {
+    // 上一件的结果还没看完：先把结果给她，下一件的确认页不许盖上来。
+    const unseen = unseenResult();
+    if (unseen) return unseen.state === "failed" ? "error" : "result";
     const run = currentRun();
     if (run) {
       switch (run.state) {
@@ -268,12 +314,83 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
   }
 
   function restart(): void {
-    setDismissed(true);
     setLocalError(null);
     setInstruction("");
     setPicked([]);
     setFolder(null);
+    // 队列里还有一件停在确认页上等她：那就跟过去，不要再回到选文件那一步。
+    // 如果上一件的结果正摆在屏幕上（队列顶上来的），这个按钮的意思就是"结果
+    // 看过了，去下一件"。
+    const staged = store.currentRun?.() ?? null;
+    if (staged && (staged.state === "preview" || staged.state === "running")) {
+      if (store.lastFinished?.()) store.dismissRun();
+      setDismissed(false);
+      return;
+    }
+    setDismissed(true);
     setPhase(pickable() ? "pick" : "say");
+  }
+
+  // ---------------------------------------------------------------------
+  // r13 — 排队（一次说好几件事，一件件来）
+  // ---------------------------------------------------------------------
+
+  /** 手里这件在队列里排第几件（1 起）；不在里面就是 null。 */
+  function queuePosition(): number | null {
+    const run = currentRun();
+    if (!run) return null;
+    return positionOf(store.queue(), {
+      taskId: run.taskId,
+      instruction: run.instruction,
+      files: run.files,
+    });
+  }
+
+  /** 确认页上那一条要说的话：它排第几，或者"还没排进去"。 */
+  function queueLine(): string {
+    const position = queuePosition();
+    const remaining = queueFacts().remaining;
+    return position ? QUEUE.stripHere(position, remaining) : QUEUE.stripInsert(remaining);
+  }
+
+  /**
+   * r13 — 先把这件记下来，回去挑下一件。
+   *
+   * 排上以后**不会开始做**：轮到的每一件都还是要她在确认页上点「开始」。
+   * 这就是"一次说好几件事"要的那点准备。
+   */
+  function queueForLater(): void {
+    const text = instruction().trim();
+    if (!text) return;
+    store.enqueue({
+      taskId: props.task.id,
+      taskTitle: props.task.title,
+      plan: props.task.plan,
+      files: selection(),
+      instruction: text,
+    });
+    props.onExit?.();
+  }
+
+  /** 「先做这件」：手里这件插到最前面；已经排在最前面的就什么都不用变。 */
+  function keepThisOne(): void {
+    store.keepStagedFirst();
+  }
+
+  /**
+   * 「跳过，做下一件」。
+   *
+   * 跳过不等于取消：队里那件直接拿掉，下一件被摆到确认页（仍然要她点头）。
+   * 她是从卡片直接进来的（这件不在队里）时，只把手里这件放下，再去做队里那件。
+   */
+  function skipThisOne(): void {
+    const job = stagedJob();
+    if (job) {
+      store.removeFromQueue(job.id);
+      return;
+    }
+    store.cancelRun();
+    store.startNextQueued();
   }
 
   async function undo(run: TaskRun): Promise<void> {
@@ -311,7 +428,7 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
     <div class="flex h-full w-full flex-col overflow-hidden bg-[#0b0f14] text-slate-100">
       <header class="flex shrink-0 items-center justify-between gap-3 border-b border-slate-800 px-5 py-3">
         <div class="min-w-0">
-          <h1 class="text-[20px] font-semibold">{props.task.title}</h1>
+          <h1 class="text-[20px] font-semibold">{currentRun()?.taskTitle ?? props.task.title}</h1>
           <p class="mt-0.5 text-[16px] text-slate-400">说一句话就行，剩下的我来做</p>
         </div>
         <Show when={props.onExit}>
@@ -471,6 +588,20 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
                 {busy() ? "正在准备…" : "生成计划"}
               </button>
             </div>
+
+            {/* r13 — 她一次要办好几件（合表、查重、整理文件夹）：先把这件记下来，
+                回去挑下一件。记下来的活只会在确认页上等她，不会自己动手。 */}
+            <div class="mt-5 border-t border-slate-800 pt-4">
+              <button
+                type="button"
+                class={quietButton}
+                disabled={!instruction().trim()}
+                onClick={() => queueForLater()}
+              >
+                {QUEUE.keepForLater}
+              </button>
+              <p class="mt-2 text-[16px] leading-relaxed text-slate-400">{QUEUE.keepHint}</p>
+            </div>
           </section>
         </Show>
 
@@ -479,10 +610,15 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
         {/* The confirmation sheet owns the product's promises here: the plan, the
             estimated impact, the risks this task can hit, the dry run, and the red
             overwrite consent (issues #41, #42, #63). */}
-        <Show when={step() === "confirm"}>
-          <section class="mx-auto max-w-2xl">
-            <ConfirmSheet store={props.store} />
-          </section>
+        {/* `keyed` 是安全上的事，不是排版：队列会连着把不同的活摆到这一页上
+            （跳过、上一件做完）。换了一件就必须重新开一张确认页，否则上一件
+            勾过的"我同意直接改原来的文件"会跟到下一件上去。 */}
+        <Show when={step() === "confirm" ? currentRun() : null} keyed>
+          {(_staged) => (
+            <section class="mx-auto max-w-2xl">
+              <ConfirmSheet store={props.store} />
+            </section>
+          )}
         </Show>
 
         {/* ---- Paused for approval (#60) ---- */}
@@ -556,10 +692,23 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
         </Show>
 
         {/* ---- Result ---- */}
-        <Show when={step() === "result" ? currentRun() : null}>
+        <Show when={step() === "result" ? shownRun() : null}>
           {(run) => (
             <section class="mx-auto max-w-2xl">
               <ResultCard store={props.store} run={run()} />
+              {/* r13 — 队列已经把下一件摆到确认页上了：先把这次的结果看完。 */}
+              <Show when={unseenResult()}>
+                <div class="mt-4 rounded-2xl border border-sky-800 bg-sky-950/30 px-4 py-3">
+                  <p class="text-[16px] leading-relaxed text-sky-100">{QUEUE.resultNote}</p>
+                  <button
+                    type="button"
+                    class="mt-3 min-h-[48px] rounded-xl bg-sky-500 px-6 text-[16px] font-bold text-slate-950 hover:bg-sky-400"
+                    onClick={() => store.dismissRun()}
+                  >
+                    {QUEUE.resultNext(queueFacts().remaining)}
+                  </button>
+                </div>
+              </Show>
               <div class="mt-6 flex flex-wrap items-center gap-3">
                 <Show when={store.undoRun}>
                   <button type="button" class={quietButton} onClick={() => void undo(run())}>
@@ -580,7 +729,7 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
         </Show>
 
         {/* ---- Failure ---- */}
-        <Show when={step() === "error" ? currentRun() : null}>
+        <Show when={step() === "error" ? shownRun() : null}>
           {(run) => (
             <section class="mx-auto max-w-2xl">
               <ErrorView error={run().error ?? UNKNOWN_ERROR} />
@@ -601,6 +750,30 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
           )}
         </Show>
       </div>
+
+      {/* r13 — 排队里的事：确认页开着的时候，这一条浮在它上面。
+
+          为什么浮在上面：确认页（ConfirmSheet）是整屏的一张纸，盖住整个窗口，
+          藏在它下面的东西她根本看不见。为什么钉在右上角：那张纸的按钮在右下角，
+          底部一条横条会正好压住「开始」。右上角这块地方在纸的标题右边、头几行
+          的右边，本来就是空的，压不到任何要她读的字和要她按的按钮。
+
+          两个按钮都不动手——真的动手仍然是她在那张纸上点「开始」。后面没有排
+          别的活时这一条不出现：那时没有"下一件"可跳，按钮就是个死按钮。 */}
+      <Show when={step() === "confirm" && nextWaiting(store.queue()) !== null}>
+        <section class="fixed top-4 right-4 z-[60] w-[21rem] max-w-[calc(100vw-2rem)] rounded-2xl border-2 border-sky-600 bg-slate-900/95 px-5 py-4 shadow-2xl">
+          <h2 class="text-[20px] font-semibold text-sky-100">{QUEUE.stripTitle}</h2>
+          <p class="mt-1 text-[16px] leading-relaxed text-slate-200">{queueLine()}</p>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" class={button} onClick={() => keepThisOne()}>
+              {QUEUE.doThisOne}
+            </button>
+            <button type="button" class={quietButton} onClick={() => skipThisOne()}>
+              {QUEUE.skipThisOne}
+            </button>
+          </div>
+        </section>
+      </Show>
     </div>
   );
 }

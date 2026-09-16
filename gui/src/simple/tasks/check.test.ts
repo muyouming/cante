@@ -11,7 +11,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { CHECK_TASKS } from "./check.ts";
-import type { TaskDef } from "./index.ts";
+import type { TaskDef } from "./types.ts";
 
 /** 王姐不该在界面上看到的词（和 tasks.test.ts 同一份红线）。 */
 const JARGON = [

@@ -47,6 +47,20 @@ import {
   writeSchedules,
   type Schedule,
 } from "./simple/schedule.ts";
+// r13 — 队列的账（下一件是谁、还剩几件）在纯逻辑里，store 只负责存和推进。
+import {
+  appendJob,
+  jobFor,
+  makeJob as makeQueuedJob,
+  nextWaiting,
+  prependJob,
+  sameJob,
+  withJobState,
+  withoutJob,
+  type QueueInput,
+  type QueuedJob,
+  type QueuedState,
+} from "./simple/queue.ts";
 import {
   eventName,
   eventPayload,
@@ -164,6 +178,39 @@ export interface Store {
    * 只有真的把它排上队才记 `lastRunAt`；当前有活在跑就什么都不做。
    */
   runScheduled(id: string): Promise<void>;
+  // ---- r13 队列（一次说好几件事，一件件来） -------------------------------
+  /** 排好的活，按她说好的先后。放内存里就够：关掉程序重排一遍也只是一句话的事。 */
+  queue: Accessor<QueuedJob[]>;
+  /**
+   * 把一件活排到队尾（卡片、文件、她那句话都齐了）。
+   * 只是排上，**不会开始做**：轮到它时会先摆到确认页等她点头。
+   * 同一件事已经在排队里就不再排第二遍，返回队里那一条。
+   */
+  enqueue(input: QueueInput): QueuedJob | null;
+  /**
+   * 把一件从队里拿掉。拿掉的如果正是停在确认页那件，就是**跳过**它：
+   * 下一件会被摆到确认页（仍然要她点头才会动手）。
+   */
+  removeFromQueue(id: string): void;
+  /** 停掉剩下的。正在做的这件不打断——那是任务页自己的「停」。 */
+  clearQueue(): void;
+  /**
+   * 把排在头一件摆到确认页；手上已经有活时什么都不做，返回 null。
+   * 队列只在"上一件做完了"或者她主动点进来时才往前走，绝不自己连跑到底。
+   */
+  startNextQueued(): QueuedJob | null;
+  /**
+   * 确认页上的「先做这件」：把手里这件插到最前面，其它往后排。
+   * 它已经在队首（正常情况）时什么都不用变。
+   */
+  keepStagedFirst(): void;
+  /**
+   * 刚做完、结果还没给她看到的那一件。
+   *
+   * 队列把下一件摆到确认页的时候，她会先看到这一件的结果——不然结果卡片会
+   * 被下一件的确认页盖住，做完了什么她根本看不见。看过之后清掉（`dismissRun`）。
+   */
+  lastFinished: Accessor<TaskRun | null>;
 }
 
 /**
@@ -1044,6 +1091,10 @@ export function createStore(): Store {
     files: string[],
     instruction: string,
   ): Promise<void> {
+    // 换一件来做：上一件还停在确认页上（比如她点了「再跑一次」）就先退回队里
+    // 等着，不丢掉；上一次的结果也不该再挂在屏幕上。
+    releaseStaged();
+    setLastFinished(null);
     pendingSnapshot = null;
     setCurrentRun({
       id: newRunId(),
@@ -1092,11 +1143,23 @@ export function createStore(): Store {
       return;
     }
     pendingSnapshot = null;
+    setLastFinished(null);
+    // 停在确认页的那件退回队里等着（她在首页还能「去做这一件」），不丢。
+    releaseStaged();
     setCurrentRun(null);
     resetProgress();
   }
 
   function dismissRun(): void {
+    const finished = lastFinished();
+    const run = currentRun();
+    // 队列已经把下一件摆到确认页上了：这个「知道了」只表示上一件的结果看过了，
+    // 不能顺手把还在等她确认的那件也丢掉。
+    if (finished && (!run || run.state === "preview" || run.state === "draft")) {
+      setLastFinished(null);
+      return;
+    }
+    setLastFinished(null);
     pendingSnapshot = null;
     setCurrentRun(null);
     resetProgress();
@@ -1167,6 +1230,14 @@ export function createStore(): Store {
       markProgressFinished();
       await persistRun(next, diff, snapshot);
       await refreshRuns();
+      // r13 — 这件做完了：轮到下一件。推进只到确认页，动手仍然要她点头；
+      // 正在等她确认的下一件一旦摆上来，刚做完这件的结果就先留给她看完
+      // （`lastFinished`），不然结果卡片会被下一件的确认页盖住。
+      if (stagedQueueId) {
+        markQueued(stagedQueueId, state === "done" ? "done" : "failed");
+        stagedQueueId = null;
+      }
+      if (promoteNextQueued()) setLastFinished(next);
     } finally {
       runFinishing = false;
       // Normally the run is over and the snapshot is done with. But a reply can
@@ -1271,6 +1342,140 @@ export function createStore(): Store {
     void runScheduled(due[0]!.id);
   }
 
+  // ---- r13 队列（一次说好几件事，一件件来） -------------------------------
+  //
+  // 账在 `simple/queue.ts`（纯逻辑、可单测），这里只做三件事：存下来、记住
+  // "停在确认页的那件是队里的哪一条"（`stagedQueueId`），以及上一件真的做完
+  // 之后把下一件摆到确认页。
+  //
+  // 两条不许破的规矩：
+  //   * 摆到确认页 ≠ 开始做。任何一件动手之前都要她点「开始」。
+  //   * 不连跑：队列不会因为"还有下一件"就自己往下走；只有上一件做完了、
+  //     或者她点了「跳过」/「去做这一件」，才轮到下一件——而且仍然停在确认页。
+  //
+  // 她关掉程序这队就没了。不持久化是故意的：跨重启恢复等于"上次那几件还得
+  // 做"，而她可能早就自己在别处做完了；重排一遍比排错一遍便宜。
+  const [queue, setQueue] = createSignal<QueuedJob[]>([]);
+  const [lastFinished, setLastFinished] = createSignal<TaskRun | null>(null);
+  /** 停在确认页（或者正在做）的那件活，在队里的 id；不属于队列时是 null。 */
+  let stagedQueueId: string | null = null;
+
+  function markQueued(id: string, state: QueuedState): void {
+    setQueue((list) => withJobState(list, id, state));
+  }
+
+  /** 手上这件（停在确认页的那件）退回队里等着，不丢掉。 */
+  function releaseStaged(): void {
+    const id = stagedQueueId;
+    if (!id) return;
+    stagedQueueId = null;
+    markQueued(id, "waiting");
+  }
+
+  /**
+   * 把一件活摆到确认页。**只到确认页**：她没有点「开始」之前，什么都不会发生。
+   *
+   * 先起新的（`startRun` 会把上一件退回队里，比如她点了「再跑一次」），再认领它。
+   * 顺序反了就会把自己退回队里。
+   */
+  function stageQueued(job: QueuedJob): void {
+    void startRun(
+      { id: job.taskId, title: job.taskTitle, plan: job.plan },
+      job.files,
+      job.instruction,
+    );
+    stagedQueueId = job.id;
+    markQueued(job.id, "running");
+  }
+
+  /** 手上没有别的活时，把排在头一件摆到确认页。 */
+  function promoteNextQueued(): QueuedJob | null {
+    if (activeRun()) return null;
+    const next = nextWaiting(queue());
+    if (!next) return null;
+    stageQueued(next);
+    return next;
+  }
+
+  function enqueue(input: QueueInput): QueuedJob | null {
+    const job = makeQueuedJob(input, Date.now());
+    if (!job) return null;
+    // 同一件事（同一张卡、同一句话、同一批文件）已经在排队里，就不再排一遍：
+    // 连点两下按钮不该变成做两遍。同一张卡配不同的文件/说法是可以各排一件的。
+    const existing = queue().find(
+      (item) => (item.state === "waiting" || item.state === "running") && sameJob(item, job),
+    );
+    if (existing) return existing;
+    setQueue((list) => appendJob(list, job));
+    return job;
+  }
+
+  function removeFromQueue(id: string): void {
+    if (!queue().some((item) => item.id === id)) return;
+    setQueue((list) => withoutJob(list, id));
+    if (stagedQueueId !== id) return;
+    stagedQueueId = null;
+    const run = currentRun();
+    // 真的在做的（已经在动手了）不这样处理：那是「停」，不是「跳过」。
+    if (!run || run.state !== "preview") return;
+    // 她跳过了停在确认页的这件：把它收起来，把下一件摆上来（仍然停在确认页）。
+    setLastFinished(null);
+    pendingSnapshot = null;
+    setCurrentRun(null);
+    resetProgress();
+    promoteNextQueued();
+  }
+
+  function clearQueue(): void {
+    const run = currentRun();
+    const staged = stagedQueueId;
+    setQueue([]);
+    stagedQueueId = null;
+    // 停在确认页的那件还什么都没做，可以安静地收起来；
+    // 正在动手的那件不动——那要她自己按「停」，不能被一个按钮悄悄打断。
+    if (staged && run && run.state === "preview") {
+      pendingSnapshot = null;
+      setCurrentRun(null);
+      resetProgress();
+    }
+  }
+
+  function startNextQueued(): QueuedJob | null {
+    return promoteNextQueued();
+  }
+
+  function keepStagedFirst(): void {
+    const run = currentRun();
+    if (!run || run.state !== "preview") return;
+    // 队里已经有同一件事：把它认成"手上这件"，它本来就在最前面。
+    const open = queue().filter((item) => item.state === "waiting" || item.state === "running");
+    const already = jobFor(open, {
+      taskId: run.taskId,
+      instruction: run.instruction,
+      files: run.files,
+    });
+    if (already) {
+      stagedQueueId = already.id;
+      markQueued(already.id, "running");
+      return;
+    }
+    // 她是从卡片直接进来的：这件插到最前面，已经排好的往后排。
+    const job = makeQueuedJob(
+      {
+        taskId: run.taskId,
+        taskTitle: run.taskTitle,
+        plan: run.plan,
+        files: run.files,
+        instruction: run.instruction,
+      },
+      Date.now(),
+    );
+    if (!job) return;
+    setQueue((list) => prependJob(list, job));
+    stagedQueueId = job.id;
+    markQueued(job.id, "running");
+  }
+
   return {
     daemonStatus,
     session,
@@ -1304,7 +1509,15 @@ export function createStore(): Store {
     removeSchedule,
     setScheduleEnabled,
     runScheduled,
+    queue,
+    enqueue,
+    removeFromQueue,
+    clearQueue,
+    startNextQueued,
+    keepStagedFirst,
+    lastFinished,
   };
 }
 
 export type { TaskRun } from "./simple/run.ts";
+export type { QueuedJob, QueueInput } from "./simple/queue.ts";

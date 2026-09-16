@@ -22,7 +22,7 @@ const GROUP_ORDER: readonly TaskGroup[] = ["表格", "文件", "微信", "文书
  * 需要「看图认字」才能处理的文件类型。协议目前只能把文字交给助手，图片里的
  * 字读不出来，所以带这些后缀的任务要如实说明现在做不到。
  */
-const IMAGE_TYPES: ReadonlySet<string> = new Set([
+export const IMAGE_TYPES: ReadonlySet<string> = new Set([
   "png",
   "jpg",
   "jpeg",
@@ -66,6 +66,7 @@ const SYNONYMS: readonly (readonly string[])[] = [
   ["到期", "过期", "续签", "提醒", "合同"],
   ["接龙", "报名", "统计人数", "份数", "没交", "没报名"],
   ["盘点", "资产", "库存", "对不上"],
+  ["政策", "标准", "规定", "依据", "出处", "来源", "查一下", "资料"],
 ];
 
 /** 大小写、空格都不该影响搜索：统一成小写、去掉所有空白。 */
@@ -146,9 +147,13 @@ export function groupTasks(tasks: TaskDef[] = TASKS): Array<{ group: TaskGroup; 
  *
  * 故意不做别的限制：现有任务只要不是读图片，都返回 `null`。
  */
-export function availabilityHint(task: TaskDef): string | null {
+export function availabilityHint(task: TaskDef, canSeeImages = false): string | null {
   if (task.needs !== "files") return null;
   const accept = task.accept ?? [];
-  if (accept.some((ext) => IMAGE_TYPES.has(ext.toLowerCase()))) return LIBRARY.unavailableImage;
-  return null;
+  const needsImages = accept.some((ext) => IMAGE_TYPES.has(ext.toLowerCase()));
+  if (!needsImages) return null;
+  // 这条边界曾经是"一律做不到"（协议只承载文本、本机没有 OCR）。现在换成
+  // **取决于这个模型能不能看图**：能看图就不该再标"做不到"，看不了图才要如实说。
+  // 判断依据由调用方注入（`capabilities.ts` 的 visionAvailable），这里只做纯判断。
+  return canSeeImages ? null : LIBRARY.unavailableImage;
 }

@@ -27,6 +27,33 @@ export const PDF_COPY = {
     "这台电脑还不能直接处理 PDF。你可以先把它导出成别的格式，或者请技术同事帮忙装一次 PDF 工具。",
 } as const;
 
+/**
+ * 「这个设置能不能看图」的面向用户中文（#48）。
+ *
+ * 和表格/PDF 的缺工具不同：这里的边界不在于这台电脑装没装什么，而在于当前用的
+ * 那个设置看不看得懂照片。所以文案要给出两条她真能走的路——先把内容写下来，或者
+ * 请同事换一个能看图的设置。同样地，这是边界不是报错。
+ */
+export const VISION_COPY = {
+  /** 看不了图片时，确认页上给用户看的一句边界说明。 */
+  fallbackNote:
+    "现在这个设置看不了图片。你可以把表拍清楚，再用文字把里面的内容写给我；或者请帮你配置这台电脑的同事换一个能看图的设置。",
+} as const;
+
+/** 会被当成图片文件的扩展名。 */
+const IMAGE_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".heic",
+  ".heif",
+  ".webp",
+  ".bmp",
+  ".gif",
+  ".tif",
+  ".tiff",
+] as const;
+
 /** 会被当成 Excel 文件的扩展名。 */
 const EXCEL_EXTENSIONS = [".xlsx", ".xls"] as const;
 
@@ -50,5 +77,17 @@ export function hasPdfFile(paths: readonly string[]): boolean {
   return paths.some((path) => {
     const lowered = path.toLowerCase();
     return PDF_EXTENSIONS.some((extension) => lowered.endsWith(extension));
+  });
+}
+
+/**
+ * 选中的文件里有没有图片（照片、截图）。
+ *
+ * 只看扩展名，和上面两个同一个路子：够用，而且不会把别的文件误判成图片。
+ */
+export function hasImageFile(paths: readonly string[]): boolean {
+  return paths.some((path) => {
+    const lowered = path.toLowerCase();
+    return IMAGE_EXTENSIONS.some((extension) => lowered.endsWith(extension));
   });
 }

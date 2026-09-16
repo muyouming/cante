@@ -5,7 +5,7 @@
 //   bun test src
 import { describe, expect, test } from "bun:test";
 
-import { availabilityHint, groupTasks, searchTasks } from "./catalog.ts";
+import { IMAGE_TYPES, availabilityHint, groupTasks, searchTasks } from "./catalog.ts";
 import { LIBRARY } from "./copy-library.ts";
 import { TASKS, type TaskDef, type TaskGroup } from "./tasks/index.ts";
 
@@ -177,14 +177,25 @@ describe("分组", () => {
 });
 
 describe("诚实边界：现在能不能做", () => {
-  test("现有任务都不会被这条规则限制", () => {
-    for (const task of TASKS) expect(availabilityHint(task)).toBeNull();
+  test("能看图时，没有任何任务被标成做不到", () => {
+    // 这条边界现在取决于模型能力：能看图就把要图片的卡照常展示。
+    for (const task of TASKS) expect(availabilityHint(task, true)).toBeNull();
   });
 
-  test("需要读图片里的字时说清楚做不到", () => {
-    const task = fakeTask({ id: "photo.table", needs: "files", accept: ["png", "jpg", "jpeg"] });
-    expect(availabilityHint(task)).toBe(LIBRARY.unavailableImage);
-    expect(availabilityHint(task)).toContain("图片");
+  test("看不了图时，只有「要读图片」的任务会被如实标注", () => {
+    const photo = fakeTask({ id: "photo.table", needs: "files", accept: ["png", "jpg", "jpeg"] });
+    expect(availabilityHint(photo, false)).toBe(LIBRARY.unavailableImage);
+    expect(availabilityHint(photo, false)).toContain("图片");
+    // 同一张卡在能看图的模型上不再被标注。
+    expect(availabilityHint(photo, true)).toBeNull();
+
+    // 其余任务在任何模型上都不该被这条规则误标。
+    for (const task of TASKS) {
+      const acceptsImages = (task.accept ?? []).some((ext) => IMAGE_TYPES.has(ext.toLowerCase()));
+      if (acceptsImages) continue;
+      expect(availabilityHint(task, false)).toBeNull();
+      expect(availabilityHint(task, true)).toBeNull();
+    }
   });
 
   test("后缀的大小写不影响判断", () => {

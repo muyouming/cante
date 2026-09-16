@@ -47,6 +47,13 @@ export interface ModelSpec {
   display_name?: string | null;
   effort?: Effort | null;
   supported_efforts?: Effort[] | null;
+  /**
+   * Whether this model can take images (photos, screenshots) as input, as
+   * announced on `SessionStart`. Absent means the host did not say — which the
+   * simple surface reads as "cannot see images" (the safe direction: better to
+   * tell her up front than to let the assistant invent a table).
+   */
+  support_vision?: boolean | null;
 }
 
 export interface ProviderSpec {
