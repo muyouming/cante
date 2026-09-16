@@ -57,6 +57,39 @@ pub fn send_input(state: State<'_, Daemon>, text: String, mode: String) -> Resul
 }
 
 #[tauri::command(rename_all = "snake_case")]
+pub fn steer(state: State<'_, Daemon>, text: String) -> Result<Value, String> {
+    state.steer(&text)?;
+    Ok(json!({ "ok": true }))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn shell_input(state: State<'_, Daemon>, command: String) -> Result<Value, String> {
+    state.shell_input(&command)?;
+    Ok(json!({ "ok": true }))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn ambient_phrase(
+    state: State<'_, Daemon>,
+    draft: String,
+    request_id: u64,
+) -> Result<Value, String> {
+    state.ambient_phrase(&draft, request_id)?;
+    Ok(json!({ "ok": true }))
+}
+
+#[tauri::command(rename_all = "snake_case")]
+pub fn ambient_suggestion(
+    state: State<'_, Daemon>,
+    recent_user: String,
+    recent_agent: String,
+    request_id: u64,
+) -> Result<Value, String> {
+    state.ambient_suggestion(&recent_user, &recent_agent, request_id)?;
+    Ok(json!({ "ok": true }))
+}
+
+#[tauri::command(rename_all = "snake_case")]
 pub fn approve(
     state: State<'_, Daemon>,
     turn_id: String,

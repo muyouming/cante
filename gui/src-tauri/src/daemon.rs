@@ -216,6 +216,31 @@ impl Daemon {
         self.send_op(op).map(|_| ())
     }
 
+    /// `steer` — inject a steering message into the running turn.
+    pub fn steer(&self, text: &str) -> Result<(), String> {
+        self.send_op(steer_op(text)?).map(|_| ())
+    }
+
+    /// `shell_input` — run a shell command through the daemon.
+    pub fn shell_input(&self, command: &str) -> Result<(), String> {
+        self.send_op(shell_input_op(command)?).map(|_| ())
+    }
+
+    /// `ambient_phrase` — ask the daemon to draft a thinking phrase.
+    pub fn ambient_phrase(&self, draft: &str, request_id: u64) -> Result<(), String> {
+        self.send_op(ambient_phrase_op(draft, request_id)).map(|_| ())
+    }
+
+    /// `ambient_suggestion` — ask the daemon for a prompt suggestion.
+    pub fn ambient_suggestion(
+        &self,
+        recent_user: &str,
+        recent_agent: &str,
+        request_id: u64,
+    ) -> Result<(), String> {
+        self.send_op(ambient_suggestion_op(recent_user, recent_agent, request_id)).map(|_| ())
+    }
+
     /// `approve` — answer a `TurnPause` approval prompt.
     pub fn approve(&self, turn_id: &str, responses: Vec<Value>) -> Result<(), String> {
         if turn_id.is_empty() || responses.is_empty() {
@@ -396,6 +421,37 @@ pub struct StartSessionArgs {
     pub permission_mode: Option<String>,
     pub cwd: Option<String>,
     pub resume_session_id: Option<String>,
+}
+
+/// Build the `Steer` op. The text is trimmed; blank steering is rejected.
+pub fn steer_op(text: &str) -> Result<Value, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Err("text is required".to_string());
+    }
+    Ok(json!({ "Steer": text }))
+}
+
+/// Build the `ShellInput` op. A blank command is rejected.
+pub fn shell_input_op(command: &str) -> Result<Value, String> {
+    if command.trim().is_empty() {
+        return Err("command is required".to_string());
+    }
+    Ok(json!({ "ShellInput": command }))
+}
+
+/// Build the `AmbientPhrase` op. `req_id` is echoed back on the `Ambient` event.
+pub fn ambient_phrase_op(draft: &str, request_id: u64) -> Value {
+    json!({ "AmbientPhrase": { "draft": draft, "req_id": request_id } })
+}
+
+/// Build the `AmbientSuggestion` op. `req_id` is echoed back on the `Ambient` event.
+pub fn ambient_suggestion_op(recent_user: &str, recent_agent: &str, request_id: u64) -> Value {
+    json!({ "AmbientSuggestion": {
+        "recent_user": recent_user,
+        "recent_agent": recent_agent,
+        "req_id": request_id,
+    }})
 }
 
 /// Build the `StartSession` / `ResumeSession` op for [`StartSessionArgs`].

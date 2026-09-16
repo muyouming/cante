@@ -1,6 +1,9 @@
 //! Op payload shapes — especially the case folding the frozen frontend types
 //! need (PascalCase enum constants vs the daemon's lowercase wire enums).
-use cante_gui_lib::daemon::{start_session_op, update_session_op, StartSessionArgs};
+use cante_gui_lib::daemon::{
+    ambient_phrase_op, ambient_suggestion_op, shell_input_op, start_session_op, steer_op,
+    update_session_op, StartSessionArgs,
+};
 use serde_json::json;
 
 #[test]
@@ -64,4 +67,39 @@ fn update_session_accepts_a_model_id_or_spec() {
 #[test]
 fn update_session_rejects_an_empty_patch() {
     assert!(update_session_op(None, None, None).is_err());
+}
+
+#[test]
+fn steer_trims_and_rejects_empty() {
+    assert_eq!(steer_op("  keep going  ").unwrap(), json!({ "Steer": "keep going" }));
+    assert!(steer_op("").is_err());
+    assert!(steer_op("   \n").is_err());
+}
+
+#[test]
+fn shell_input_rejects_empty() {
+    assert_eq!(shell_input_op("ls -la").unwrap(), json!({ "ShellInput": "ls -la" }));
+    assert!(shell_input_op("").is_err());
+    assert!(shell_input_op("  ").is_err());
+}
+
+#[test]
+fn ambient_phrase_passes_req_id_as_a_number() {
+    let op = ambient_phrase_op("a draft", 7);
+    assert_eq!(op, json!({ "AmbientPhrase": { "draft": "a draft", "req_id": 7 } }));
+    assert!(op["AmbientPhrase"]["req_id"].is_number());
+}
+
+#[test]
+fn ambient_suggestion_passes_req_id_as_a_number() {
+    let op = ambient_suggestion_op("user said", "agent said", 42);
+    assert_eq!(
+        op,
+        json!({ "AmbientSuggestion": {
+            "recent_user": "user said",
+            "recent_agent": "agent said",
+            "req_id": 42,
+        }})
+    );
+    assert!(op["AmbientSuggestion"]["req_id"].is_number());
 }

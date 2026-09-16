@@ -5,7 +5,15 @@
 // command palette above the field: the store owns the query, the highlight,
 // completion, and dismissal, so the palette behaviour is unit-tested without a
 // DOM and this component only wires the keys and the rows.
-import { Show, createSignal, onMount } from "solid-js";
+//
+// While a turn is running, Enter *steers* instead of sending: the correction is
+// queued into the live turn (`store.steer`) rather than interrupting it, and the
+// field empties immediately so the user sees their line land in the transcript.
+//
+// Ambient ghost text is rendered as a separate dimmed element behind the field
+// — never as the field's value — and only while the draft is empty. Typing
+// asks the daemon for a fresh phrase at most once per `SUGGEST_MS`.
+import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
@@ -19,11 +27,14 @@ export interface ComposerProps {
 const MAX_ROWS = 6;
 const LINE = 20;
 const SLASH_LIST_ID = "cante-slash-command-list";
+/** Typing asks for a phrase at most this often (the trailing draft wins). */
+const SUGGEST_MS = 600;
 
 export default function Composer(props: ComposerProps): JSX.Element {
   const store = props.store;
   const [height, setHeight] = createSignal(40);
   let field: HTMLTextAreaElement | undefined;
+  let suggestTimer: ReturnType<typeof setTimeout> | undefined;
 
   const resize = (): void => {
     if (!field) return;
@@ -36,6 +47,44 @@ export default function Composer(props: ComposerProps): JSX.Element {
   onMount(() => {
     resize();
   });
+
+  onCleanup(() => {
+    if (suggestTimer !== undefined) clearTimeout(suggestTimer);
+  });
+
+  /** Throttled: one request per window, carrying the newest draft. */
+  const requestPhrase = (): void => {
+    if (suggestTimer !== undefined) return;
+    suggestTimer = setTimeout(() => {
+      suggestTimer = undefined;
+      const latest = store.draft();
+      if (latest.trim().length === 0) return;
+      void store.requestAmbientPhrase(latest);
+    }, SUGGEST_MS);
+  };
+
+  /**
+   * Enter (and SEND). Mid-turn this is a steering message: the daemon folds it
+   * into the running turn, so the same key corrects Cante instead of stopping
+   * it. The draft is cleared here because steering is fire-and-forget — the
+   * field must not keep text the daemon has already taken.
+   */
+  const sendDraft = (): void => {
+    const value = store.draft().trim();
+    if (!value) return;
+    if (props.busy) {
+      store.setDraft("");
+      void store.steer(value);
+      return;
+    }
+    void store.submit();
+  };
+
+  /** Shown only over an empty field: a suggestion, not the field's value. */
+  const ghost = (): string | null => {
+    if (store.draft().length > 0) return null;
+    return store.ambient()?.suggestion ?? null;
+  };
 
   const onKeyDown = (event: KeyboardEvent): void => {
     if (store.paletteVisible()) {
@@ -61,15 +110,16 @@ export default function Composer(props: ComposerProps): JSX.Element {
       }
       if (event.key === "Enter" && !event.shiftKey) {
         event.preventDefault();
-        // No match means the daemon may still own the name; send it as typed.
+        // No match means the daemon may still own the name, or (mid-turn) the
+        // text is a correction: send it as typed either way.
         if (store.paletteMatches().length > 0) void store.runPalette();
-        else void store.submit();
+        else sendDraft();
         return;
       }
     }
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void store.submit();
+      sendDraft();
       return;
     }
     if (event.key === "ArrowUp" && !event.shiftKey) {
@@ -107,37 +157,57 @@ export default function Composer(props: ComposerProps): JSX.Element {
       </Show>
 
       <div class="flex w-full items-end gap-2 px-3 py-2">
-        <textarea
-          ref={(node) => {
-            field = node ?? undefined;
-          }}
-          rows={1}
-          value={store.draft()}
-          style={{ height: `${height()}px` }}
-          spellcheck={false}
-          aria-label="Message Cante"
-          aria-autocomplete="list"
-          aria-expanded={store.paletteVisible()}
-          aria-controls={SLASH_LIST_ID}
-          aria-activedescendant={
-            store.paletteVisible() && store.paletteMatches().length > 0
-              ? `${SLASH_LIST_ID}-${store.paletteIndex()}`
-              : undefined
-          }
-          placeholder="Ask Cante…  (/  for commands)"
-          onInput={(event) => {
-            store.setDraft(event.currentTarget.value);
-            resize();
-          }}
-          onKeyDown={onKeyDown}
-          class="min-h-[38px] flex-1 resize-none rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-sky-500"
-        />
+        <div class="relative min-w-0 flex-1">
+          <textarea
+            ref={(node) => {
+              field = node ?? undefined;
+            }}
+            rows={1}
+            value={store.draft()}
+            style={{ height: `${height()}px` }}
+            spellcheck={false}
+            aria-label="Message Cante"
+            aria-autocomplete="list"
+            aria-expanded={store.paletteVisible()}
+            aria-controls={SLASH_LIST_ID}
+            aria-activedescendant={
+              store.paletteVisible() && store.paletteMatches().length > 0
+                ? `${SLASH_LIST_ID}-${store.paletteIndex()}`
+                : undefined
+            }
+            title={props.busy ? "Enter steers the running turn" : "Enter sends"}
+            placeholder={
+              ghost()
+                ? ""
+                : props.busy
+                  ? "Steer the running turn…  (Shift+Enter for a newline)"
+                  : "Ask Cante…  (/  for commands)"
+            }
+            onInput={(event) => {
+              store.setDraft(event.currentTarget.value);
+              resize();
+              requestPhrase();
+            }}
+            onKeyDown={onKeyDown}
+            class="block w-full min-h-[38px] resize-none rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:border-sky-500"
+          />
+          {/* Decorative: the suggestion is not editable and never the field's value. */}
+          <Show when={ghost()}>
+            <div
+              aria-hidden="true"
+              class="pointer-events-none absolute inset-x-3 top-2 truncate text-sm text-slate-600"
+            >
+              {ghost()}
+            </div>
+          </Show>
+        </div>
 
         <button
           type="button"
-          onClick={() => void store.submit()}
+          onClick={sendDraft}
           disabled={store.draft().trim().length === 0}
-          aria-label="Send message"
+          aria-label={props.busy ? "Steer the running turn" : "Send message"}
+          title={props.busy ? "Steer the running turn (Enter)" : "Send (Enter)"}
           class="h-[38px] w-[74px] shrink-0 rounded-md bg-sky-600 text-sm font-bold text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
         >
           SEND

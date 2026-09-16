@@ -10,9 +10,15 @@
 import { Show, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
-import type { Row } from "../rows.ts";
+import type { Row, RowKind } from "../rows.ts";
 import type { Connection } from "../store.ts";
-import { LINE_HEIGHT, columnsFor, createLayoutCache, type Line } from "../transcript.ts";
+import {
+  LINE_HEIGHT,
+  columnsFor,
+  createLayoutCache,
+  type LayoutOptions,
+  type Line,
+} from "../transcript.ts";
 import TranscriptLine from "./TranscriptLine.tsx";
 import VirtualList, {
   firstLineOfRow,
@@ -20,7 +26,52 @@ import VirtualList, {
   type VirtualListApi,
 } from "./VirtualList.tsx";
 
-const layout = createLayoutCache();
+// View density rewrites the row stream *before* layout, so the uniform-line
+// maths in `VirtualList` never changes — only `count` and the line contents do.
+export type ViewDensity = "normal" | "verbose" | "summary";
+
+/** Rows `summary` keeps: the conversation itself, plus failures. */
+const SUMMARY_KINDS: ReadonlySet<RowKind> = new Set<RowKind>(["user", "agent", "turn", "error"]);
+
+/**
+ * `normal` is the historical rendering (every row, clipped tool detail).
+ * `summary` keeps only the conversation and errors. `verbose` is normal with
+ * the per-row line and tool-output caps lifted so nothing is elided.
+ *
+ * The returned array is stable for `normal`/`verbose` (same reference), so a
+ * poll batch does not invalidate the layout cache for every row.
+ */
+export function rowsForDensity(rows: readonly Row[], density: ViewDensity): Row[] {
+  if (density !== "summary") return rows as Row[];
+  return rows.filter((row) => SUMMARY_KINDS.has(row.kind));
+}
+
+/** Large enough to admit any row the store produces (its text is clamped). */
+const VERBOSE_MAX_LINES = 100_000;
+const VERBOSE_MAX_OUTPUT_LINES = 100_000;
+
+/** Layout budget for a density; `normal`/`summary` use the defaults. */
+export function layoutOptionsForDensity(
+  columns: number,
+  monoColumns: number,
+  density: ViewDensity,
+): LayoutOptions {
+  if (density === "verbose") {
+    return {
+      columns,
+      monoColumns,
+      maxLinesPerRow: VERBOSE_MAX_LINES,
+      maxOutputLines: VERBOSE_MAX_OUTPUT_LINES,
+    };
+  }
+  return { columns, monoColumns };
+}
+
+// Two caches: the layout cache keys on the column budget only, so sharing one
+// between clipped and unclipped options would hand verbose rows the normal
+// clipping. Normal and summary can share (same options).
+const normalLayout = createLayoutCache();
+const verboseLayout = createLayoutCache();
 
 /**
  * The pill exists only when there is something to jump back to: never while
@@ -39,6 +90,14 @@ export interface TranscriptProps {
   hasSession: boolean;
   /** False in the plain-browser preview. */
   bridge: boolean;
+  /**
+   * View density from `store.viewDensity()`. Optional (and aliasable as
+   * `viewDensity`) so an App that has not wired the density control yet keeps
+   * today's rendering.
+   */
+  density?: ViewDensity;
+  /** Alias for `density`, named after the store accessor. */
+  viewDensity?: ViewDensity;
   /** Reports whether the view is following the newest line. */
   onPinnedChange?(pinned: boolean): void;
   /** Scroll handle, so the status bar can offer the same jump. */
@@ -101,10 +160,18 @@ export default function Transcript(props: TranscriptProps): JSX.Element {
     onCleanup(() => observer.disconnect());
   });
 
+  const density = (): ViewDensity => props.density ?? props.viewDensity ?? "normal";
+
+  // Density filters rows before layout, so a summary view shorter than the
+  // scroll offset is clamped by the list exactly like any other shrink.
+  const visibleRows = createMemo<Row[]>(() => rowsForDensity(props.rows, density()));
+
   const lines = createMemo<Line[]>(() => {
     const columns = columnsFor(width());
     const monoColumns = Math.max(16, columnsFor(width(), true) - 2);
-    return layout(props.rows, { columns, monoColumns });
+    const options = layoutOptionsForDensity(columns, monoColumns, density());
+    const cache = density() === "verbose" ? verboseLayout : normalLayout;
+    return cache(visibleRows(), options);
   });
 
   // The list asks for the row index at a display line and back again; both are
@@ -149,7 +216,7 @@ export default function Transcript(props: TranscriptProps): JSX.Element {
         renderRow={(index) => {
           const line = lines()[index];
           if (!line) return <div class="h-full w-full" />;
-          const row = props.rows[line.row];
+          const row = visibleRows()[line.row];
           return (
             <TranscriptLine
               line={line}

@@ -3,7 +3,7 @@
 // scrolled away from the tail it also carries the jump-back affordance, so the
 // way back is visible even after the pill scrolls out of sight.
 import { Show } from "solid-js";
-import type { JSX } from "solid-js";
+import type { Accessor, JSX } from "solid-js";
 
 import { formatTokens, type Store } from "../store.ts";
 
@@ -13,6 +13,21 @@ export interface StatusBarProps {
   following?: boolean;
   onJumpToLatest?(): void;
 }
+
+/** The ephemeral hint the daemon predicts while a turn is in flight. */
+export interface Ambient {
+  phrase: string | null;
+  suggestion: string | null;
+}
+
+const NO_AMBIENT: Ambient = { phrase: null, suggestion: null };
+
+/**
+ * Local typed view of the store member this bar reads. Optional so the bar
+ * still renders (with the generic label) before the store workstream lands
+ * `ambient()`; the public prop shape stays `{ store: Store }`.
+ */
+type AmbientStore = Store & { ambient?: Accessor<Ambient> };
 
 function statusText(status: string): string {
   switch (status) {
@@ -49,7 +64,20 @@ function statusTone(status: string): string {
 }
 
 export default function StatusBar(props: StatusBarProps): JSX.Element {
-  const store = props.store;
+  const store = props.store as AmbientStore;
+
+  /**
+   * While thinking, a predicted phrase (when the daemon has produced one)
+   * replaces the generic "thinking" label. Every other status keeps its own
+   * label, and the accessible name always reports the real turn status.
+   */
+  const statusLabel = (): string => {
+    if (store.daemonStatus() === "thinking") {
+      const phrase = store.ambient?.()?.phrase;
+      if (phrase && phrase.trim()) return phrase.trim();
+    }
+    return statusText(store.daemonStatus());
+  };
 
   const percent = (): number => {
     const context = store.context();
@@ -59,8 +87,12 @@ export default function StatusBar(props: StatusBarProps): JSX.Element {
 
   return (
     <footer class="flex h-[28px] w-full shrink-0 items-center gap-4 border-t border-slate-800 bg-[#0e141b] px-3" aria-label="Session status">
-      <span class={statusTone(store.daemonStatus())} aria-label={`Turn status: ${statusText(store.daemonStatus())}`}>
-        {statusText(store.daemonStatus())}
+      <span
+        class={`${statusTone(store.daemonStatus())} min-w-0 max-w-[240px] truncate`}
+        title={statusLabel()}
+        aria-label={`Turn status: ${statusText(store.daemonStatus())}`}
+      >
+        {statusLabel()}
       </span>
 
       <Show when={store.usage()}>
