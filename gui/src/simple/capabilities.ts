@@ -117,6 +117,7 @@ export function pdfPromptLine(cap: ToolCapability): string | null {
     "按顺序合并：cante-pdf merge 结果.pdf 第一份.pdf 第二份.pdf。",
     "抽出一段另存：cante-pdf split 文件路径 --pages 1-5 --out 结果.pdf。",
     "如果这份 PDF 没有文字层（扫描或拍照的），cante-pdf 会明确报出来。这时候先停下来告诉我需要先做文字识别，不要当成里面没有内容。",
+    "还有一种情况：cante-pdf text 会用退出码 3 并打印「警告：…文字很可能是乱码」，说明这份 PDF 的字体没有自带文字对照表（打印或导出的中文 PDF 常见）。这时候不要拿抽出来的文字下结论——先告诉用户这份大概是扫描件或字体缺文字信息，请他核对原件。",
   ].join("\n");
 }
 

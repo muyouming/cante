@@ -55,6 +55,16 @@ fn run(args: &[String]) -> Result<(), String> {
             if !trimmed.is_empty() {
                 println!("{trimmed}");
             }
+            // 抽不出来不能装作抽出来了：CID 字体没有文字对照表时，上面打出来的
+            // 其实是乱码。给助手一个明确的信号（stderr + 退出码 3），让它停下来
+            // 告诉用户"这份大概是扫描件"，而不是拿着噪声去总结原件。
+            if let Some(reason) = pdf::text_layer_risk(Path::new(file)) {
+                eprintln!("警告：{reason}");
+                eprintln!(
+                    "建议：不要拿这段文字下结论。先告诉用户这份 PDF 的文字提不出来（大概是扫描件，或字体没有带出文字信息），并请他核对原件。"
+                );
+                std::process::exit(3);
+            }
             Ok(())
         }
         "merge" => {

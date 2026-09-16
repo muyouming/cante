@@ -66,7 +66,7 @@ Tasks that need WeChat get their own screen, because that screen has a job: it e
 
 ## Spreadsheets in and out
 
-Excel files are what people actually have, so the app carries a small spreadsheet tool of its own (`cante-sheets`): it reads `.xlsx`, `.xls` and `.csv`, and writes real `.xlsx`. Its job is narrow and boring on purpose — keep what the cells meant. Dates stay dates, whole numbers do not sprout a trailing `.0`, a customer number like `00123` keeps its leading zeros, empty cells stay empty, and Chinese sheet names survive the round trip.
+Excel files are what people actually have, so the app carries a small spreadsheet tool of its own (`cante-sheets`): it reads `.xlsx`, `.xls` and `.csv`, and writes real `.xlsx`. A second one handles PDFs (`cante-pdf`): page counts, merging, splitting, and text extraction that is honest about when it cannot be trusted. Its job is narrow and boring on purpose — keep what the cells meant. Dates stay dates, whole numbers do not sprout a trailing `.0`, a customer number like `00123` keeps its leading zeros, empty cells stay empty, and Chinese sheet names survive the round trip.
 
 At the start of a session the app looks for that tool once; if it finds it, it tells the assistant where it is — in the same place it is told everything else about the job, never guessed. If it is missing, the confirmation sheet says so in the same breath as the plan, with the two honest choices: save the sheet as CSV first, or have a technical colleague install the tool once. What it never does is run for two minutes and then admit, at the end, that it could not write the file.
 
@@ -89,7 +89,7 @@ Every failure is one Chinese pair — 发生了什么, 你可以怎么做 — pl
 
 - **Screenshots and photos of tables** are not supported. The client's protocol carries text only, so an image cannot reach the model even if the model could read it, and ordinary office machines have no OCR tool. Shipping a card that made you wait and then fail would be worse than not shipping it. ([#48](https://github.com/muyouming/cante/issues/48) records both routes forward.)
 - **Attachments are paths.** You point at a file; nothing is uploaded as bytes. The tray says so rather than pretending otherwise.
-- **Scanned PDFs** are not converted silently: the run stops and asks, because the output would be gibberish. The same rule covers a PDF this machine cannot read at all — you hear about it at the confirmation step, not after waiting.
+- **Scanned PDFs** are not converted silently: the run stops and asks, because the output would be gibberish. Nor are PDFs whose fonts carry no text map — a shape common in Chinese PDFs that came out of a print or export pipeline, where the text is visibly there but the file keeps no way to recover it. Rather than handing you (or the model) a page of noise, the tool says the text is unreliable and the run stops to tell you so. The same rule covers a PDF this machine cannot read at all — you hear about it at the confirmation step, not after waiting.
 - **Spreadsheet limits that are real:** a sheet with hundreds of thousands of rows, or one that uses merged cells as headers, may need a hand-checked pass; the confirmation sheet says so before anything starts.
 - **Very large tables** (beyond a few hundred thousand rows) and heavily merged spreadsheets may need checking by hand; the confirmation sheet says so up front.
 - **The interface is Chinese only**, and the product targets Windows first.

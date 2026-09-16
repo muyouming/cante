@@ -154,6 +154,34 @@ pub fn page_count(path: &Path) -> Result<usize, PdfError> {
 /// 抽出文字。默认整份；给了页码就只抽那几页。
 ///
 /// 抽出来是空的（扫描件、照片），会返回 [`PdfError::NoText`]，不会拿空白当成功。
+/// 真实的 PDF 里有一类"抽不出来"的文件：用 CID 字体（`Type0`）却没有带
+/// `ToUnicode` 映射，常见于打印/导出流水线生成的中文 PDF。这种文件里文字
+/// 其实是在的，只是没有"字符编码 → 文字"的对照表，抽出来会是乱码。
+///
+/// 真机验证过：拉丁文用小字体写的 PDF 抽取完好（`Employee list July 2026`），
+/// 而同一条流水线出的中文 PDF 只能抽出 `2026`、`D`、`g%` 这类噪声。把噪声当
+/// 结果交给助手，它就会拿着一堆乱码去总结——比抽不出来更糟。所以这里返回
+/// **一句中文说明**，让命令行把它转成明确警告与退出码 3。
+pub fn text_layer_risk(path: &Path) -> Option<String> {
+    let document = Document::load(path).ok()?;
+    let has_unmapped_cid = document.objects.values().any(|object| {
+        let Ok(dictionary) = object.as_dict() else {
+            return false;
+        };
+        let is_cid = dictionary
+            .get(b"Subtype".as_slice())
+            .ok()
+            .and_then(|value| value.as_name().ok())
+            .map(|subtype| subtype == b"Type0".as_slice())
+            .unwrap_or(false);
+        is_cid && !dictionary.has(b"ToUnicode")
+    });
+
+    has_unmapped_cid.then(|| {
+        "这个 PDF 用的是没有自带文字对照表的中文字体，抽出来的文字很可能是乱码（打印或导出的 PDF 常见）".to_string()
+    })
+}
+
 pub fn extract_text(path: &Path, selection: Option<&PageSelection>) -> Result<String, PdfError> {
     let document = load(path)?;
     let total = document.get_pages().len();
@@ -405,6 +433,64 @@ mod tests {
         let path = dir.join("三页.pdf");
         write_text_pdf(&path, &["one", "two", "three"]);
         assert_eq!(page_count(&path).expect("count"), 3);
+    }
+
+    /// 造一份"CID 字体但没带 ToUnicode"的 PDF：真机里中文 PDF 的典型形态。
+    fn build_pdf_with_cid_font(with_tounicode: bool) -> Document {
+        let mut document = Document::with_version("1.5");
+        let pages_id = document.new_object_id();
+        let mut font = dictionary! {
+            "Type" => "Font",
+            "Subtype" => "Type0",
+            "BaseFont" => "STSong-Light",
+        };
+        if with_tounicode {
+            let cmap_id = document.add_object(Stream::new(dictionary! {}, b"/CIDInit".to_vec()));
+            font.set("ToUnicode", cmap_id);
+        }
+        let font_id = document.add_object(font);
+        let resources_id = document.add_object(dictionary! {
+            "Font" => dictionary! { "F1" => font_id },
+        });
+        let content_id = document.add_object(Stream::new(dictionary! {}, b"BT ET".to_vec()));
+        let page_id = document.add_object(dictionary! {
+            "Type" => "Page",
+            "Parent" => pages_id,
+            "Contents" => content_id,
+            "Resources" => resources_id,
+        });
+        document.objects.insert(
+            pages_id,
+            Object::Dictionary(dictionary! {
+                "Type" => "Pages",
+                "Kids" => vec![Object::Reference(page_id)],
+                "Count" => 1,
+            }),
+        );
+        let catalog_id = document.add_object(dictionary! {
+            "Type" => "Catalog",
+            "Pages" => pages_id,
+        });
+        document.trailer.set("Root", catalog_id);
+        document
+    }
+
+    #[test]
+    fn a_cid_font_without_a_text_map_is_reported_as_unreliable() {
+        let dir = TempDir::new("risk");
+        let risky = dir.join("中文打印件.pdf");
+        save(build_pdf_with_cid_font(false), &risky);
+        let reason = text_layer_risk(&risky).expect("must warn");
+        assert!(reason.contains("乱码") || reason.contains("对照表"), "reason: {reason}");
+
+        let fine = dir.join("带映射.pdf");
+        save(build_pdf_with_cid_font(true), &fine);
+        assert_eq!(text_layer_risk(&fine), None);
+
+        // 简单字体的 PDF（拉丁文那种）不告警：真机上抽取是好的。
+        let simple = dir.join("latin.pdf");
+        write_text_pdf(&simple, &["Employee list July 2026"]);
+        assert_eq!(text_layer_risk(&simple), None);
     }
 
     #[test]
