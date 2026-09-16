@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Cante desktop client"
 license = "Apache-2.0"
+# 桌面应用这个 crate 现在带三个二进制（窗口本体 + 两个给助手用的表格/PDF 工具）。
+# 有多个二进制时，tauri-bundler 必须被明确告知哪个才是应用本体，否则报
+# "failed to find main binary" —— 打包会红、而单元测试看不出来。
+default-run = "cante-gui"
 # The window/plugin/bundle sections are shared; workstream A may add entries to
 # [dependencies] but must not change [package], [lib] or [build-dependencies].
 [dependencies]
