@@ -17,6 +17,7 @@ import type { Row } from "./rows.ts";
 import { createStore, type Store } from "./store.ts";
 import { isBridgeAvailable } from "./tauri.ts";
 import { APP_NAME, COMMON, TASK_FLOW } from "./simple/copy.ts";
+import ErrorView from "./simple/ErrorView.tsx";
 import Home from "./simple/Home.tsx";
 import Wizard, { shouldShowWizard } from "./simple/Wizard.tsx";
 import type { TaskDef } from "./simple/tasks/index.ts";
@@ -113,6 +114,9 @@ function TaskSeam(props: { active: ActiveTask; onBack(): void }): JSX.Element {
 function SimpleApp(props: SimpleAppProps): JSX.Element {
   const [wizard, setWizard] = createSignal(shouldShowWizard());
   const [active, setActive] = createSignal<ActiveTask | null>(null);
+  // A browser tab can never reach the desktop host. Say so in plain Chinese
+  // (#44) instead of showing a plan that could never run.
+  const [failure, setFailure] = createSignal<unknown>(null);
 
   // Keep the bridge alive so the task flow can talk to the daemon the moment it
   // needs to; the health probe inside the wizard is independent of this.
@@ -120,14 +124,22 @@ function SimpleApp(props: SimpleAppProps): JSX.Element {
     props.store.connect();
   });
 
+  const enter = (next: ActiveTask): void => {
+    setActive(next);
+    setFailure(isBridgeAvailable() ? null : "desktop bridge unavailable");
+  };
   const pick = (task: TaskDef): void => {
-    setActive({ task, instruction: "" });
+    enter({ task, instruction: "" });
   };
   const say = (text: string): void => {
-    setActive({ task: null, instruction: text });
+    enter({ task: null, instruction: text });
   };
   const exit = (): void => {
     setActive(null);
+    setFailure(null);
+  };
+  const retry = (): void => {
+    setFailure(isBridgeAvailable() ? null : "desktop bridge unavailable");
   };
 
   return (
@@ -152,11 +164,18 @@ function SimpleApp(props: SimpleAppProps): JSX.Element {
             when={active()}
             fallback={<Home onPickTask={pick} onSubmitText={say} />}
           >
-            {(current) =>
-              props.renderTask
-                ? props.renderTask(current().task, current().instruction, exit)
-                : <TaskSeam active={current()} onBack={exit} />
-            }
+            {(current) => (
+              <Show
+                when={failure()}
+                fallback={
+                  props.renderTask
+                    ? props.renderTask(current().task, current().instruction, exit)
+                    : <TaskSeam active={current()} onBack={exit} />
+                }
+              >
+                <ErrorView error={failure()} onRetry={retry} onAlternative={exit} onBack={exit} />
+              </Show>
+            )}
           </Show>
         </Show>
       </main>
