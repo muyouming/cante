@@ -1,21 +1,26 @@
 // Cante GUI — the shell.
 //
-// Codex / Claude-Desktop shape: a session rail on the left, a streaming
-// transcript in the middle, a composer pinned to the bottom, and a status strip
-// under it. One store fed by the Tauri bridge drives every panel; keyboard
-// shortcuts live here.
+// Two faces share one store:
 //
-// Two drawers hang off this shell and are owned here so the header chips, the
-// keyboard and the panels agree on one open/closed state: the capabilities
-// panel on the right (CAPS / Esc) and the terminal along the bottom (TERM / ⌘`).
-// Both start closed. The goal bar sits between the transcript and the composer.
-import { Show, createSignal, onCleanup, onMount } from "solid-js";
+//   * simple (default) — for people who do not work in IT: a first-run wizard,
+//     big Chinese task cards, and a plain-language error view. See src/simple/.
+//   * pro — the original Codex / Claude-Desktop shape: session rail, streaming
+//     transcript, composer, drawers and keyboard shortcuts.
+//
+// The store remembers the choice in `localStorage`, so a restart lands on the
+// same face. Switching is a single, understated control in either direction.
+import { For, Show, createSignal, onCleanup, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
 import type { ReviewDecision } from "./protocol.ts";
 import type { Row } from "./rows.ts";
-import { createStore } from "./store.ts";
+import { createStore, type Store } from "./store.ts";
 import { isBridgeAvailable } from "./tauri.ts";
+import { APP_NAME, COMMON, TASK_FLOW } from "./simple/copy.ts";
+import ErrorView from "./simple/ErrorView.tsx";
+import Home from "./simple/Home.tsx";
+import Wizard, { shouldShowWizard } from "./simple/Wizard.tsx";
+import type { TaskDef } from "./simple/tasks/index.ts";
 import type { VirtualListApi } from "./components/VirtualList.tsx";
 import ApprovalPanel from "./components/ApprovalPanel.tsx";
 import CapabilitiesPanel from "./components/CapabilitiesPanel.tsx";
@@ -33,8 +38,157 @@ import Transcript from "./components/Transcript.tsx";
 /** The rail folds away below this width (contract: usable at 800×560). */
 const COMPACT_WIDTH = 900;
 
-export default function App(): JSX.Element {
-  const store = createStore();
+// ---------------------------------------------------------------------------
+// Simple mode
+// ---------------------------------------------------------------------------
+
+/** What the person asked for: a card, or a sentence typed into the box. */
+interface ActiveTask {
+  task: TaskDef | null;
+  instruction: string;
+}
+
+export interface SimpleAppProps {
+  store: Store;
+  /**
+   * The task-flow host. r5-tasks' `TaskRunner` is wired here by the integrator.
+   * Until it lands, the built-in `TaskSeam` shows a read-only preview of the
+   * chosen task's plan, so pressing a card is never a dead end.
+   */
+  renderTask?(task: TaskDef | null, instruction: string, onExit: () => void): JSX.Element;
+}
+
+/**
+ * The mount point for the task flow. Deterministic and Chinese-only: it repeats
+ * the plan the card promised and gets out of the way.
+ */
+function TaskSeam(props: { active: ActiveTask; onBack(): void }): JSX.Element {
+  return (
+    <div class="flex h-full min-h-0 items-center justify-center overflow-y-auto px-5 py-8">
+      <div class="w-full max-w-xl rounded-2xl border border-slate-700 bg-[#141b24] px-6 py-7">
+        <h1 class="text-[24px] leading-tight font-bold text-slate-100">
+          {props.active.task?.title ?? TASK_FLOW.saidTitle}
+        </h1>
+
+        <Show when={props.active.task}>
+          {(task) => (
+            <>
+              <p class="mt-2 text-[16px] text-slate-400">{task().example}</p>
+              <h2 class="mt-5 text-[20px] font-semibold text-slate-200">{TASK_FLOW.planTitle}</h2>
+              <ol class="mt-2 flex flex-col gap-2">
+                <For each={task().plan}>
+                  {(step, index) => (
+                    <li class="flex gap-3 text-[17px] leading-relaxed text-slate-300">
+                      <span class="text-slate-500">{index() + 1}.</span>
+                      <span>{step}</span>
+                    </li>
+                  )}
+                </For>
+              </ol>
+            </>
+          )}
+        </Show>
+
+        <Show when={!props.active.task}>
+          <p class="mt-3 text-[17px] leading-relaxed text-slate-300">
+            {props.active.instruction}
+          </p>
+        </Show>
+
+        <p class="mt-5 text-[16px] leading-relaxed text-slate-500">
+          {TASK_FLOW.previewNote}
+        </p>
+
+        <button
+          type="button"
+          onClick={() => props.onBack()}
+          class="mt-6 min-h-[52px] w-full rounded-xl border border-slate-700 px-6 text-[18px] text-slate-200 hover:border-slate-500"
+        >
+          {COMMON.back}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SimpleApp(props: SimpleAppProps): JSX.Element {
+  const [wizard, setWizard] = createSignal(shouldShowWizard());
+  const [active, setActive] = createSignal<ActiveTask | null>(null);
+  // A browser tab can never reach the desktop host. Say so in plain Chinese
+  // (#44) instead of showing a plan that could never run.
+  const [failure, setFailure] = createSignal<unknown>(null);
+
+  // Keep the bridge alive so the task flow can talk to the daemon the moment it
+  // needs to; the health probe inside the wizard is independent of this.
+  onMount(() => {
+    props.store.connect();
+  });
+
+  const enter = (next: ActiveTask): void => {
+    setActive(next);
+    setFailure(isBridgeAvailable() ? null : "desktop bridge unavailable");
+  };
+  const pick = (task: TaskDef): void => {
+    enter({ task, instruction: "" });
+  };
+  const say = (text: string): void => {
+    enter({ task: null, instruction: text });
+  };
+  const exit = (): void => {
+    setActive(null);
+    setFailure(null);
+  };
+  const retry = (): void => {
+    setFailure(isBridgeAvailable() ? null : "desktop bridge unavailable");
+  };
+
+  return (
+    <div class="flex h-screen w-screen flex-col overflow-hidden bg-[#0b0f14] text-slate-100">
+      <header class="flex shrink-0 items-center justify-between gap-3 px-5 py-1">
+        <span class="text-[20px] font-bold tracking-wide text-slate-200">{APP_NAME}</span>
+        <button
+          type="button"
+          onClick={() => props.store.setMode("pro")}
+          class="min-h-[44px] rounded-lg px-3 text-[16px] text-slate-500 hover:text-slate-200"
+        >
+          {COMMON.proMode}
+        </button>
+      </header>
+
+      <main class="min-h-0 flex-1">
+        <Show
+          when={!wizard()}
+          fallback={<Wizard onDone={() => setWizard(false)} />}
+        >
+          <Show
+            when={active()}
+            fallback={<Home onPickTask={pick} onSubmitText={say} />}
+          >
+            {(current) => (
+              <Show
+                when={failure()}
+                fallback={
+                  props.renderTask
+                    ? props.renderTask(current().task, current().instruction, exit)
+                    : <TaskSeam active={current()} onBack={exit} />
+                }
+              >
+                <ErrorView error={failure()} onRetry={retry} onAlternative={exit} onBack={exit} />
+              </Show>
+            )}
+          </Show>
+        </Show>
+      </main>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pro mode — the original shell, unchanged.
+// ---------------------------------------------------------------------------
+
+function ProApp(props: { store: Store }): JSX.Element {
+  const store = props.store;
   const [width, setWidth] = createSignal(typeof window === "undefined" ? 1180 : window.innerWidth);
   const [detail, setDetail] = createSignal<Row | null>(null);
   // Drawers: capabilities on the right, the terminal along the bottom.
@@ -235,6 +389,30 @@ export default function App(): JSX.Element {
           </div>
         </aside>
       </Show>
+
+      {/* Back to the simple face. Kept out of the header so the professional
+          layout is byte-for-byte what it was. */}
+      <button
+        type="button"
+        onClick={() => store.setMode("simple")}
+        title={COMMON.simpleMode}
+        class="fixed right-2 bottom-9 z-50 min-h-[44px] rounded-full border border-slate-700 bg-[#0e141b]/90 px-3 text-[16px] text-slate-400 hover:text-slate-100"
+      >
+        {COMMON.simpleMode}
+      </button>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Mode switch
+// ---------------------------------------------------------------------------
+
+export default function App(): JSX.Element {
+  const store = createStore();
+  return (
+    <Show when={store.mode() === "pro"} fallback={<SimpleApp store={store} />}>
+      <ProApp store={store} />
+    </Show>
   );
 }

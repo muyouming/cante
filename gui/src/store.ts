@@ -54,6 +54,14 @@ import {
 
 export type Connection = "connecting" | "online" | "offline";
 
+/**
+ * Which face of the app is showing. `simple` is the default — big Chinese
+ * task cards for people who do not work in IT; `pro` is the original
+ * transcript shell, kept for the people who want it. The choice survives a
+ * restart via `localStorage`.
+ */
+export type UiMode = "simple" | "pro";
+
 export type { DaemonStatus, LogEntry } from "./tauri.ts";
 // Views import their store types from here.
 export type { Row, RowKind, RowTone } from "./rows.ts";
@@ -111,6 +119,9 @@ export interface SessionOverrides {
 }
 
 export interface Store {
+  /** Which face of the app is showing (simple by default). */
+  mode: Accessor<UiMode>;
+  setMode(mode: UiMode): void;
   /** Tauri bridge reachability (not the daemon's own status). */
   connection: Accessor<Connection>;
   daemonStatus: Accessor<DaemonStatus>;
@@ -389,7 +400,29 @@ function normalizeCatalog(wire: WireCatalogProvider[] | undefined): CatalogProvi
   return providers;
 }
 
+/** Where the simple/pro choice is remembered across restarts. */
+const MODE_KEY = "cante:ui:mode";
+
+function readStoredMode(): UiMode {
+  try {
+    if (typeof localStorage === "undefined") return "simple";
+    return localStorage.getItem(MODE_KEY) === "pro" ? "pro" : "simple";
+  } catch {
+    // A webview with storage disabled still works; it just forgets the choice.
+    return "simple";
+  }
+}
+
+function persistMode(mode: UiMode): void {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(MODE_KEY, mode);
+  } catch {
+    /* keep the in-memory value */
+  }
+}
+
 export function createStore(): Store {
+  const [mode, setModeSignal] = createSignal<UiMode>(readStoredMode());
   const [connection, setConnection] = createSignal<Connection>("connecting");
   const [daemonStatus, setDaemonStatus] = createSignal<DaemonStatus>("offline");
   const [session, setSession] = createSignal<SessionInfo | null>(null);
@@ -1033,6 +1066,11 @@ export function createStore(): Store {
     setViewDensity(order[(index + 1) % order.length]!);
   }
 
+  function setMode(next: UiMode): void {
+    setModeSignal(next);
+    persistMode(next);
+  }
+
   async function startSession(overrides: SessionOverrides = {}): Promise<void> {
     lastUserText = "";
     const ok = await attempt(() => invoke("start_session", { ...overrides }));
@@ -1332,6 +1370,8 @@ export function createStore(): Store {
   }
 
   return {
+    mode,
+    setMode,
     connection,
     daemonStatus,
     session,
