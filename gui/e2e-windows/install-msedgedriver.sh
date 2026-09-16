@@ -113,9 +113,11 @@ rm -f "$ZIP"
 
 reported="$("$DRIVER" --version 2>&1 | head -n 1 | tr -d '\r')"
 printf '==> msedgedriver：%s\n' "$reported"
-reported_version="$(printf '%s' "$reported" | sed -n 's/.*\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
-if [ -n "$reported_version" ] && [ "${reported_version%%.*}" != "${target%%.*}" ]; then
-  die "驱动的主版本 ${reported_version%%.*} 和 WebView2 的 ${target%%.*} 对不上——会话会挂住，先修这个。"
+# Take the *first* dotted version in the line: a greedy sed would happily start
+# inside "152.…" and report a major of 2.
+reported_version="$(printf '%s' "$reported" | grep -oE '[0-9]+(\.[0-9]+){3}' | head -n 1 || true)"
+if [ -n "$reported_version" ] && [ "${reported_version%%.*}" != "${installed%%.*}" ]; then
+  die "驱动的主版本 ${reported_version%%.*} 和下载的 ${installed%%.*} 对不上——会话会挂住，先修这个。"
 fi
 
 # Put it on PATH for the following steps. GITHUB_PATH wants Windows paths: the
