@@ -14,6 +14,8 @@ import type { Accessor, JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
 import { isBridgeAvailable } from "../tauri.ts";
+import { PROGRESS_COPY } from "./copy.ts";
+import { formatElapsed, type RunProgressView } from "./progress.ts";
 import type { TaskDef, TaskError, TaskRun } from "./tasks/index.ts";
 import ConfirmSheet from "./ConfirmSheet.tsx";
 import ResultCard from "./ResultCard.tsx";
@@ -88,6 +90,11 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
   };
 
   const currentRun = (): TaskRun | null => (dismissed() ? null : (store.currentRun?.() ?? null));
+
+  // #62 — the live checklist. Falls back to an empty plan so a store without
+  // the member still renders instead of throwing.
+  const progress = (): RunProgressView =>
+    store.progress?.() ?? { steps: [], startedAt: null, elapsedMs: 0 };
 
   const step = createMemo<Step>(() => {
     const run = currentRun();
@@ -477,19 +484,65 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
           </section>
         </Show>
 
-        {/* ---- Running ---- */}
+        {/* ---- Running (#62) ---- */}
+        {/* She is watching a job she handed over, not reading a chat log. So
+            there is no spinner: the plan is a checklist that ticks itself off,
+            the current step is named, and the elapsed time is real. */}
         <Show when={step() === "running"}>
           <section class="mx-auto max-w-2xl">
-            <div class="flex items-center gap-3">
-              <span class="h-5 w-5 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
-              <p class="text-base text-slate-100">正在做，请不要关掉窗口…</p>
-            </div>
-            <p class="mt-3 text-sm text-slate-400">
-              已经完成 {store.steps?.() ?? 0} 步。原来的文件不会被改动，随时可以点下面的按钮停下来。
+            <h2 class="text-[20px] font-semibold text-slate-100">{PROGRESS_COPY.title}</h2>
+            <p class="mt-1 text-[16px] text-slate-400">{PROGRESS_COPY.hint}</p>
+
+            <ol class="mt-4 space-y-2">
+              <For each={progress().steps}>
+                {(item, index) => (
+                  <li
+                    class="flex items-start gap-3 rounded-xl border px-4 py-3"
+                    classList={{
+                      "border-sky-500 bg-sky-950/30": item.state === "active",
+                      "border-slate-800 bg-slate-900/40": item.state !== "active",
+                      "opacity-55": item.state === "pending",
+                    }}
+                  >
+                    <span
+                      class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[14px] font-semibold"
+                      classList={{
+                        "bg-emerald-600 text-white": item.state === "done",
+                        "bg-sky-600 text-white": item.state === "active",
+                        "bg-slate-700 text-slate-300": item.state === "pending",
+                      }}
+                      aria-hidden="true"
+                    >
+                      {item.state === "done" ? "✓" : index() + 1}
+                    </span>
+                    <p
+                      class="text-[16px] leading-relaxed"
+                      classList={{
+                        "font-semibold text-sky-100": item.state === "active",
+                        "text-slate-300": item.state === "done",
+                        "text-slate-500": item.state === "pending",
+                      }}
+                    >
+                      {item.state === "active" ? PROGRESS_COPY.doing(item.text) : item.text}
+                    </p>
+                  </li>
+                )}
+              </For>
+            </ol>
+
+            <p class="mt-4 text-[16px] text-slate-200">
+              {PROGRESS_COPY.elapsed(formatElapsed(progress().elapsedMs))}
+              <span class="ml-2 text-slate-400">{PROGRESS_COPY.keepOpen}</span>
             </p>
+            <p class="mt-2 text-[16px] text-slate-400">{PROGRESS_COPY.promise}</p>
+
             <div class="mt-6">
-              <button type="button" class={quietButton} onClick={cancel}>
-                停下来
+              <button
+                type="button"
+                class="min-h-[44px] rounded-lg border border-slate-700 px-5 text-[16px] text-slate-200 hover:border-slate-500 hover:text-slate-100"
+                onClick={cancel}
+              >
+                {PROGRESS_COPY.stop}
               </button>
             </div>
           </section>

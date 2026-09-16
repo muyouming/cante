@@ -44,6 +44,7 @@ function everyString(task: TaskDef): Array<{ where: string; text: string }> {
     { where: "example", text: task.example },
   ];
   task.plan.forEach((step, index) => out.push({ where: `plan[${index}]`, text: step }));
+  (task.risks ?? []).forEach((risk, index) => out.push({ where: `risks[${index}]`, text: risk }));
   task.summaryHints.forEach((hint, index) => out.push({ where: `summaryHints[${index}]`, text: hint }));
   return out;
 }
@@ -70,6 +71,21 @@ describe("catalogue shape", () => {
       expect(task.summaryHints.length).toBeGreaterThanOrEqual(2);
       // The last step of every plan is about the result file, never the user's.
       expect(task.plan.join("")).toMatch(/新文件|另存|不动|留着|不要动/);
+    }
+  });
+
+  test("every card admits where it can go wrong (#63)", () => {
+    // A missing or filler risk line is the failure mode this test exists for:
+    // the confirmation page would then show either nothing or a meaningless
+    // "仅供参考". Each risk has to be a sentence about a real case.
+    const FILLER = ["仅供参考", "可能有误", "如有误差", "不保证", "不一定完全准确"];
+    for (const task of TASKS) {
+      const risks = task.risks ?? [];
+      expect(risks.length).toBeGreaterThan(0);
+      for (const risk of risks) {
+        expect(risk.length).toBeGreaterThan(10);
+        for (const word of FILLER) expect(risk).not.toContain(word);
+      }
     }
   });
 
@@ -137,6 +153,8 @@ describe("the instruction handed to the assistant", () => {
       expect(prompt).toContain("【怎么做】");
       expect(prompt).toContain("【用户的原话】");
       expect(prompt).toContain("【做完告诉我】");
+      // #63 — every instruction asks for the honest self-report the result card reads back.
+      expect(prompt).toContain("【需要你核对】");
     }
     // The shared rules are exported so a copy edit cannot silently drop one.
     expect(SAFETY_RULES.join("\n")).toContain("先说明你打算怎么做，再动手");
