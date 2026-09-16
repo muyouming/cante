@@ -1,0 +1,109 @@
+// Everyday writing jobs (#53): notices, leave notes, work reports.
+//
+// These cards take no file: the user types one sentence and gets a finished
+// document. The tone is part of the product — a leave note to a manager and a
+// holiday notice to a whole company are not written the same way — so every
+// prompt asks for the tone before writing and offers a way to change it.
+import type { TaskDef } from "./index.ts";
+import { buildPrompt } from "./index.ts";
+
+/** The shared closing for the writing jobs: save a real file, not a chat reply. */
+const WRITE_HOW = [
+  "先把用户原话里已经有的信息理出来（写给谁、什么事、时间、名字、部门），缺少的关键信息先问我，不要自己编。",
+  "如果用户没有说用什么口吻，默认用正式、客气、简洁的口吻；如果用户说了（比如亲切一点、简短一点、严肃一点），按用户说的来。",
+  "写完以后，先给用户看内容，再存成文件。",
+  "存成一个新的、可以编辑的文件（Word 文档优先，存不了就存成纯文本），放在桌面上；桌面找不到就放在当前工作文件夹里。文件名用中文，一眼能看出是什么。",
+  "如果桌面或文件夹里已经有同名文件，就在后面加序号，绝对不要覆盖已有文件。",
+] as const;
+
+const notice: TaskDef = {
+  id: "doc.notice",
+  title: "写一份通知",
+  example: "写一份五一放假通知，5月1日到5月5日放假，5月6日上班",
+  group: "文书",
+  needs: "text",
+  plan: [
+    "先确认写给谁、要说清楚哪几件事、什么时候开始执行",
+    "套用通知的格式：标题、称呼、正文、落款、日期",
+    "内容另存为一个新文件，不覆盖任何已有文件",
+    "最后告诉你哪里需要自己确认或补名字",
+  ],
+  prompt(_files, instruction) {
+    return buildPrompt({
+      what: "帮用户写一份通知。",
+      files: [],
+      how: [
+        "先问我：这份通知发给谁（全体员工、某个部门、还是客户）、要通知哪几件事、从什么时候开始执行、落款写哪个部门。",
+        "套用通知的格式：第一行标题（比如「关于五一放假安排的通知」），第二行称呼，正文把要说的几件事一条一条写清楚，最后是落款部门和时间。",
+        "时间、地点、联系人这些信息，用户原话里有的就照抄，没有的用「（请填写）」留空，不要自己编一个。",
+        "正文用大白话，一条一件事，不要写成一大段；该强调的地方用一句话点出来。",
+        ...WRITE_HOW,
+      ],
+      instruction,
+      done: "写好的文件放在哪里、里面哪些地方留了「请填写」需要用户确认、想换口吻可以怎么说。",
+    });
+  },
+  summaryHints: ["写好的文件在哪个位置", "哪些地方需要你确认", "想换口吻可以怎么说"],
+};
+
+const leave: TaskDef = {
+  id: "doc.leave",
+  title: "写一张请假条",
+  example: "写一张请假条，我下周三请一天事假，带我妈去医院复查",
+  group: "文书",
+  needs: "text",
+  plan: [
+    "先确认请假人、请假时间、请假类型和原因",
+    "套用请假条的格式：称呼、事由、起止时间、请假人、日期",
+    "内容另存为一个新文件，不覆盖任何已有文件",
+    "最后告诉你哪里需要自己补名字或日期",
+  ],
+  prompt(_files, instruction) {
+    return buildPrompt({
+      what: "帮用户写一张请假条。",
+      files: [],
+      how: [
+        "先确认：请假人叫什么、向谁请（部门领导、老师）、什么时候开始请、请到什么时候、请的是什么假（事假、病假、年假）、请多久。用户原话里没有的先问我。",
+        "请假的原因可以写得客气、简短一点，不要替用户多说细节；用户原话里说得比较具体的，就按用户的原话写。",
+        "套用请假条的格式：第一行「请假条」，第二行称呼（尊敬的某某），正文写清楚请假事由和起止时间，然后是「请批准」，最后是请假人签名和日期。",
+        "日期把「下周三」这种说法换算成具体年月日；如果换算不出来，就用「（请填写）」留空，并提醒我确认。",
+        ...WRITE_HOW,
+      ],
+      instruction,
+      done: "写好的文件放在哪里、里面哪些地方留了「请填写」需要用户确认、想换口吻可以怎么说。",
+    });
+  },
+  summaryHints: ["写好的文件在哪个位置", "哪些地方是空着要你填的", "想换口吻可以怎么说"],
+};
+
+const report: TaskDef = {
+  id: "doc.report",
+  title: "写一份工作汇报",
+  example: "写一份这周的工作汇报，重点讲客服系统上线的进展和下周计划",
+  group: "文书",
+  needs: "text",
+  plan: [
+    "先把你要讲的事理成几块：做了什么、结果如何、遇到什么问题、下一步计划",
+    "按汇报的口吻写成完整段落，重要的数字和进展放在前面",
+    "内容另存为一个新文件，不覆盖任何已有文件",
+    "最后告诉你哪些地方可以再补数据",
+  ],
+  prompt(_files, instruction) {
+    return buildPrompt({
+      what: "帮用户写一份工作汇报。",
+      files: [],
+      how: [
+        "先问我：汇报给谁看（领导、部门会、还是要交上去）、这段时间主要做了哪几件事、有没有结果或数字、遇到的问题、下一步打算。用户说得少的，先问一句再写。",
+        "按四块来写：这段时间做了什么、做出的结果、遇到的问题、下一步计划。重要的进展和数字放在最前面。",
+        "写成完整的段落，不要只列几个关键词；有数字的地方照用户原话写，没有数字就不要编。",
+        "口吻要像一个靠谱的人在跟领导汇报：说自己做了什么，也说清楚哪里还需要支持；不要用夸大的词。",
+        ...WRITE_HOW,
+      ],
+      instruction,
+      done: "写好的文件放在哪里、一共分成几个部分、哪些地方可以再补数据、想换口吻可以怎么说。",
+    });
+  },
+  summaryHints: ["写好的文件在哪个位置", "一共分了几个部分", "想换口吻可以怎么说"],
+};
+
+export const DOCUMENT_TASKS: TaskDef[] = [notice, leave, report];
