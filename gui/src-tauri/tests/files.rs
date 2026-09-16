@@ -100,18 +100,19 @@ fn scan_is_recursive_sorted_and_skips_ignored_folders() {
 
     let (entries, truncated) = scan_roots(std::slice::from_ref(&folder), 1_000);
     assert!(!truncated);
-    let names: Vec<String> = entries
-        .iter()
-        .map(|entry| {
-            entry
-                .path
-                .strip_prefix(&folder.to_string_lossy().into_owned())
-                .unwrap_or(&entry.path)
-                .trim_start_matches(['/', '\\'])
-                .to_string()
-        })
-        .collect();
-    assert_eq!(names, vec!["a.txt", "nested/deep.txt", "z.txt"]);
+    // Compare suffixes, not prefixes: on Windows `read_dir` reports the 8.3
+    // short name (`RUNNER~1`) while the temp directory we asked about is spelled
+    // with its long name, so stripping the prefix by string would compare two
+    // spellings of the same folder. What the product promises is the tail — the
+    // relative spelling with `/` separators.
+    let names: Vec<&str> = entries.iter().map(|entry| entry.path.as_str()).collect();
+    for expected in ["a.txt", "nested/deep.txt", "z.txt"] {
+        assert!(
+            names.iter().any(|path| path.ends_with(expected)),
+            "missing {expected} in {names:?}"
+        );
+    }
+    assert_eq!(names.len(), 3, "only the three real files: {names:?}");
 
     // Sorted by absolute path, and line counts only for text files.
     let mut sorted = entries.clone();
@@ -242,9 +243,13 @@ fn undo_restores_a_deleted_file_without_a_backup_only_as_a_reported_failure() {
     assert!(restored.is_empty());
     assert_eq!(failed.len(), 1);
     assert!(failed[0].contains("lost.txt"));
+    // The message must point at the folder, but asserting the *whole* temp path
+    // would compare spellings again (short vs long name on Windows). The folder
+    // name is what the user reads.
+    let folder_name = folder.file_name().unwrap().to_string_lossy().into_owned();
     assert!(
-        failed[0].contains(&folder.to_string_lossy().into_owned()),
-        "the failure must say which folder to look in: {}",
+        failed[0].contains(&folder_name),
+        "the failure must say which folder to look in ({folder_name}): {}",
         failed[0]
     );
 }
