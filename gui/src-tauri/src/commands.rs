@@ -171,6 +171,15 @@ pub fn tool_capabilities() -> ToolCapabilities {
     }
 }
 
+/// #58 — 这台电脑有没有被技术同事统一设过（企业预置配置）。
+///
+/// 读 `~/.cante/admin.json`（或 `CANTE_ADMIN_CONFIG` 指向的文件）。文件不存在、
+/// 空的、坏了，一律返回 `present: false`，不让应用起不来；原因只进日志。
+#[tauri::command]
+pub fn admin_config() -> crate::admin_config::AdminConfig {
+    crate::admin_config::load()
+}
+
 #[tauri::command]
 pub fn health(state: State<'_, Daemon>) -> Result<Value, String> {
     Ok(state.health())

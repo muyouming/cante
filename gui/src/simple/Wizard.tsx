@@ -9,6 +9,7 @@ import { For, Show, createSignal, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { WIZARD, WIZARD_HEALTH } from "./copy.ts";
+import { adminConfigured, initAdminConfig } from "./admin-config.ts";
 import { invoke, isBridgeAvailable, type Health } from "../tauri.ts";
 
 /** Set once the person has finished the wizard. */
@@ -55,7 +56,9 @@ export function isProvisioned(): boolean {
 
 /** True when the first-run wizard should be shown at all. */
 export function shouldShowWizard(): boolean {
-  return !readFlag(WIZARD_DONE_KEY) && !isProvisioned();
+  // #58 — 技术同事统一设过这台电脑时，向导不该出现（配置是异步读到的，所以
+  // Wizard 挂载后还会再确认一次并立刻让位给首页）。
+  return !readFlag(WIZARD_DONE_KEY) && !isProvisioned() && !adminConfigured();
 }
 
 /** Remember that the wizard was finished, so it does not come back. */
@@ -127,6 +130,10 @@ export default function Wizard(props: WizardProps): JSX.Element {
     // A provisioned machine should never see the wizard; App already checks,
     // but a late marker (config written between render and mount) is honoured.
     if (isProvisioned()) props.onDone();
+    // #58 — 同上，管理员配置文件是异步读到的：读到 present 就立刻让位给首页。
+    void initAdminConfig().then(() => {
+      if (adminConfigured()) props.onDone();
+    });
   });
 
   return (

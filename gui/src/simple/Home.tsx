@@ -5,17 +5,24 @@
 // to the task flow (r5-tasks' TaskRunner, wired in App.tsx); a free-form
 // sentence hands the text over the same seam. Home never talks to the daemon
 // itself, so it stays renderable before anything is configured.
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createSignal, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { HOME, TASK_GROUPS, taskGroupRank } from "./copy.ts";
+import { ADMIN, adminDefaultText, adminDisabledText, adminNetworkText } from "./copy-admin.ts";
+import {
+  adminConfig,
+  disabledTaskNames,
+  initAdminConfig,
+  visibleTasks,
+} from "./admin-config.ts";
 import { SCHEDULE } from "./copy-schedule.ts";
 import { LIBRARY } from "./copy-library.ts";
 import { describe as describeSchedule } from "./schedule.ts";
 import TaskCard from "./TaskCard.tsx";
 import TaskLibrary from "./TaskLibrary.tsx";
 import type { Store } from "../store.ts";
-import { TASKS, freeTask, taskById, type TaskDef } from "./tasks/index.ts";
+import { freeTask, taskById, type TaskDef } from "./tasks/index.ts";
 
 export interface HomeProps {
   /** A card was pressed: start that task's flow. */
@@ -29,6 +36,8 @@ export interface HomeProps {
 export default function Home(props: HomeProps): JSX.Element {
   const [text, setText] = createSignal("");
   const [hint, setHint] = createSignal<string | null>(null);
+  // #58 — 「技术同事设了什么」默认收起，只有她主动点开才展开。
+  const [adminOpen, setAdminOpen] = createSignal(false);
   // #74 — the ability centre is a local overlay; the shell does not need to know.
   const [libraryOpen, setLibraryOpen] = createSignal(false);
   // The shell's store, required: a fallback here would be a second store, and a
@@ -48,11 +57,17 @@ export default function Home(props: HomeProps): JSX.Element {
     props.onPickTask(taskById(run.taskId) ?? freeTask(run.instruction));
   };
 
+  // #58 — 启动时读一次技术同事设好的配置。读到了就重画：被关掉的任务卡要消失。
+  onMount(() => {
+    void initAdminConfig();
+  });
+
   // Group the catalogue once; unknown groups fall to the end rather than
-  // disappearing, so a task with a new group is never silently lost.
+  // disappearing, so a task with a new group is never silently lost. (#58 —
+  // tasks the administrator turned off are simply absent, not greyed out.)
   const sections = (): Array<{ key: string; label: string; hint: string; tasks: TaskDef[] }> => {
     const byGroup = new Map<string, TaskDef[]>();
-    for (const task of TASKS) {
+    for (const task of visibleTasks()) {
       const list = byGroup.get(task.group) ?? [];
       list.push(task);
       byGroup.set(task.group, list);
@@ -139,7 +154,7 @@ export default function Home(props: HomeProps): JSX.Element {
               onClick={() => setLibraryOpen(true)}
               class="min-h-[52px] shrink-0 rounded-xl bg-sky-600 px-6 text-[18px] font-semibold text-white hover:bg-sky-500"
             >
-              {LIBRARY.entryButton(TASKS.length)}
+              {LIBRARY.entryButton(visibleTasks().length)}
             </button>
           </div>
 
@@ -165,6 +180,41 @@ export default function Home(props: HomeProps): JSX.Element {
               </section>
             )}
           </For>
+
+          {/* #58 — 这台电脑被技术同事统一设过时，在首页底部如实说明，且能展开看具体内容。 */}
+          <Show when={adminConfig().present}>
+            <section class="mt-7 rounded-2xl border border-slate-700 bg-[#111820] px-5 py-4">
+              <p class="text-[16px] leading-relaxed text-slate-300">{ADMIN.notice}</p>
+              <button
+                type="button"
+                onClick={() => setAdminOpen((open) => !open)}
+                aria-expanded={adminOpen()}
+                class="mt-3 min-h-[44px] rounded-xl border border-slate-600 px-5 text-[16px] font-semibold text-slate-200 hover:bg-slate-800"
+              >
+                {adminOpen() ? ADMIN.hideDetail : ADMIN.showDetail}
+              </button>
+              <Show when={adminOpen()}>
+                <dl class="mt-3 flex flex-col gap-2">
+                  <div class="flex flex-wrap items-baseline gap-x-3">
+                    <dt class="text-[16px] font-medium text-slate-400">{ADMIN.defaultLabel}</dt>
+                    <dd class="text-[16px] text-slate-200">
+                      {adminDefaultText(adminConfig().default_provider, adminConfig().default_model)}
+                    </dd>
+                  </div>
+                  <div class="flex flex-wrap items-baseline gap-x-3">
+                    <dt class="text-[16px] font-medium text-slate-400">{ADMIN.networkLabel}</dt>
+                    <dd class="text-[16px] text-slate-200">
+                      {adminNetworkText(adminConfig().allow_network)}
+                    </dd>
+                  </div>
+                  <div class="flex flex-wrap items-baseline gap-x-3">
+                    <dt class="text-[16px] font-medium text-slate-400">{ADMIN.disabledLabel}</dt>
+                    <dd class="text-[16px] text-slate-200">{adminDisabledText(disabledTaskNames())}</dd>
+                  </div>
+                </dl>
+              </Show>
+            </section>
+          </Show>
         </div>
       </div>
 
