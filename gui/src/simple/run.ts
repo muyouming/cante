@@ -401,3 +401,52 @@ export function fallbackPlan(files: readonly string[]): string[] {
     "做完告诉你结果文件放在哪里。",
   ];
 }
+
+// The canonical run record. Shared by the store (which fills it) and the task
+// catalogue (which describes how a run is produced) — one definition, so the
+// two halves cannot drift.
+export type RunState = "draft" | "preview" | "running" | "done" | "failed" | "cancelled";
+
+/** A failure in the user's language: what happened, what to do, and the detail
+ *  to hand to a technical colleague. */
+export interface TaskError {
+  /** 发生了什么 */
+  what: string;
+  /** 你可以怎么做 */
+  how: string;
+  detail: string;
+}
+
+export interface TaskRun {
+  id: string;
+  taskId: string;
+  taskTitle: string;
+  files: string[];
+  instruction: string;
+  state: RunState;
+  /** Chinese "将要做什么", one step per line, shown before anything runs. */
+  plan: string[];
+  impact: RunImpact;
+  result: RunResult | null;
+  online: boolean;
+  error: TaskError | null;
+  createdAt: number;
+  /** #41 — set only when the user ticked the red "allow overwrite" box. */
+  overwrite?: boolean;
+  /** #42 — this was a "先试跑给我看" dry run. */
+  dryRun?: boolean;
+  /** #43 — an undo has already run for this record. */
+  undone?: boolean;
+  /** #43 — paths the undo put back / could not put back (written by Rust). */
+  restored?: string[];
+  failed?: string[];
+}
+
+/** What Rust needs to put a run back; persisted with the record. */
+export interface TaskRunUndo {
+  roots: string[];
+  created: string[];
+  modified: string[];
+  deleted: string[];
+  unbacked: string[];
+}

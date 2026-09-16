@@ -15,6 +15,7 @@ import type { Accessor, JSX } from "solid-js";
 import type { Store } from "../store.ts";
 import { isBridgeAvailable } from "../tauri.ts";
 import type { TaskDef, TaskError, TaskRun } from "./tasks/index.ts";
+import ConfirmSheet from "./ConfirmSheet.tsx";
 import ResultCard from "./ResultCard.tsx";
 import ErrorView from "./ErrorView.tsx";
 
@@ -28,6 +29,8 @@ import ErrorView from "./ErrorView.tsx";
 export interface TaskRunnerProps {
   store: Store;
   task: TaskDef;
+  /** The sentence the user typed on the home screen, if that is how they got here. */
+  initialInstruction?: string;
   /** Called by 返回首页; the shell closes the runner. */
   onExit?: () => void;
 }
@@ -67,7 +70,7 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
   );
   const [picked, setPicked] = createSignal<string[]>([]);
   const [folder, setFolder] = createSignal<string | null>(null);
-  const [instruction, setInstruction] = createSignal("");
+  const [instruction, setInstruction] = createSignal(props.initialInstruction ?? "");
   const [busy, setBusy] = createSignal(false);
   const [dismissed, setDismissed] = createSignal(false);
   const [dropping, setDropping] = createSignal(false);
@@ -464,58 +467,14 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
         </Show>
 
         {/* ---- Step 3: confirm ---- */}
-        <Show when={step() === "confirm" ? currentRun() : null}>
-          {(run) => (
-            <section class="mx-auto max-w-2xl">
-              <h2 class="text-base font-semibold text-slate-100">我准备这样做</h2>
-              <ol class="mt-3 space-y-2">
-                <For each={run().plan}>
-                  {(line, index) => (
-                    <li class="flex gap-3 text-sm text-slate-200">
-                      <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-slate-800 text-xs text-slate-300">
-                        {index() + 1}
-                      </span>
-                      <span>{line}</span>
-                    </li>
-                  )}
-                </For>
-              </ol>
-
-              <div class="mt-5 rounded-lg border border-slate-800 bg-slate-900/40 px-4 py-3 text-sm">
-                <p class="text-slate-200">预计：{impactLine(run())}</p>
-                <p class="mt-1 text-xs text-slate-400">原来的文件不会被改动，结果都会存成新文件。</p>
-              </div>
-
-              <div class="mt-4 text-sm text-slate-300">
-                <p class="font-medium text-slate-200">你要做的事</p>
-                <p class="mt-1 whitespace-pre-wrap break-words text-slate-400">{run().instruction}</p>
-              </div>
-
-              <Show when={run().files.length > 0}>
-                <div class="mt-4 text-sm text-slate-300">
-                  <p class="font-medium text-slate-200">用到的文件</p>
-                  <ul class="mt-1 space-y-1">
-                    <For each={run().files}>
-                      {(path) => (
-                        <li class="truncate text-slate-400" title={path}>
-                          {nameOf(path)}
-                        </li>
-                      )}
-                    </For>
-                  </ul>
-                </div>
-              </Show>
-
-              <div class="mt-6 flex items-center gap-3">
-                <button type="button" class={button} disabled={busy()} onClick={() => void confirm()}>
-                  {busy() ? "正在开始…" : "开始"}
-                </button>
-                <button type="button" class={quietButton} onClick={cancel}>
-                  取消
-                </button>
-              </div>
-            </section>
-          )}
+        {/* ---- Confirm ---- */}
+        {/* The confirmation sheet owns the product's promises here: the plan, the
+            estimated impact, the risks this task can hit, the dry run, and the red
+            overwrite consent (issues #41, #42, #63). */}
+        <Show when={step() === "confirm"}>
+          <section class="mx-auto max-w-2xl">
+            <ConfirmSheet store={props.store} />
+          </section>
         </Show>
 
         {/* ---- Running ---- */}
@@ -540,7 +499,7 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
         <Show when={step() === "result" ? currentRun() : null}>
           {(run) => (
             <section class="mx-auto max-w-2xl">
-              <ResultCard run={run()} />
+              <ResultCard store={props.store} run={run()} />
               <div class="mt-6 flex flex-wrap items-center gap-3">
                 <Show when={store.undoRun}>
                   <button type="button" class={quietButton} onClick={() => void undo(run())}>

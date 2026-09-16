@@ -12,10 +12,13 @@ import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { fileName, folderName, onlineHint, onlineLabel } from "./run.ts";
+import type { TaskRun } from "./tasks/index.ts";
 import type { Store } from "../store.ts";
 
 export interface ResultCardProps {
   store: Store;
+  /** The run to render. Defaults to the store's current run (the shell's path). */
+  run?: TaskRun;
 }
 
 const STATE_TITLE: Record<string, string> = {
@@ -26,7 +29,7 @@ const STATE_TITLE: Record<string, string> = {
 
 export default function ResultCard(props: ResultCardProps): JSX.Element {
   const [showDetail, setShowDetail] = createSignal(false);
-  const run = () => props.store.currentRun();
+  const run = () => props.run ?? props.store.currentRun();
   const state = () => run()?.state ?? "done";
   const show = () => state() === "done" || state() === "failed" || state() === "cancelled";
   const files = () => run()?.result?.files ?? [];

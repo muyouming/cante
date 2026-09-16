@@ -10,14 +10,14 @@ export const APP_NAME = "Cante";
 
 /** Shared controls; anything with the same meaning reads the same everywhere. */
 export const COMMON = {
+  privacy: "隐私",
+  history: "历史",
   back: "返回",
   retry: "重试",
   alternative: "换个方法",
   copyDetail: "复制详情",
   copied: "已复制",
   copyFailed: "复制失败，请手动选中下面的文字复制",
-  proMode: "专业模式",
-  simpleMode: "简单模式",
   retryHint: "再试一次",
   alternativeHint: "换一种做法",
   copyHint: "把这段文字发给懂电脑的人",

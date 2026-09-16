@@ -16,6 +16,7 @@ import { For, Show, createSignal } from "solid-js";
 import type { Accessor, JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
+import ResultCard from "./ResultCard.tsx";
 import { DRAFT_SEND_NOTICE, WECHAT_READONLY_HINT, WECHAT_SAFETY_NOTICE, onlineLabel } from "./privacy.ts";
 import { WECHAT_ACCEPT, WECHAT_TASKS, type TaskDef } from "./tasks/wechat.ts";
 
@@ -112,23 +113,23 @@ export default function WechatImport(props: WechatImportProps): JSX.Element {
   return (
     <section class="flex flex-col gap-4" aria-label="微信聊天记录整理">
       <div class="rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 py-3">
-        <p class="text-sm font-bold text-amber-200">{WECHAT_SAFETY_NOTICE}</p>
-        <p class="mt-1 text-xs leading-5 text-amber-200/80">{WECHAT_READONLY_HINT}</p>
-        <p class="mt-1 text-xs leading-5 text-amber-200/80">{DRAFT_SEND_NOTICE}</p>
+        <p class="text-[18px] font-bold text-amber-200">{WECHAT_SAFETY_NOTICE}</p>
+        <p class="mt-1 text-[16px] leading-5 text-amber-200/80">{WECHAT_READONLY_HINT}</p>
+        <p class="mt-1 text-[16px] leading-5 text-amber-200/80">{DRAFT_SEND_NOTICE}</p>
       </div>
 
       <div class="flex flex-col gap-2 rounded-lg border border-slate-800 bg-[#0b0f14] p-4">
-        <span class="text-[11px] font-bold tracking-widest text-slate-500">第一步：把聊天记录变成文件</span>
-        <ol class="flex list-decimal flex-col gap-1 pl-5 text-xs leading-5 text-slate-400">
+        <span class="text-[16px] font-bold tracking-widest text-slate-500">第一步：把聊天记录变成文件</span>
+        <ol class="flex list-decimal flex-col gap-1 pl-5 text-[16px] leading-5 text-slate-400">
           <For each={EXPORT_STEPS}>{(step) => <li>{step}</li>}</For>
         </ol>
       </div>
 
       <div class="flex flex-col gap-2 rounded-lg border border-slate-800 bg-[#0b0f14] p-4">
-        <span class="text-[11px] font-bold tracking-widest text-slate-500">第二步：选文件</span>
+        <span class="text-[16px] font-bold tracking-widest text-slate-500">第二步：选文件</span>
         <button
           type="button"
-          class="self-start rounded-md border border-sky-700 bg-sky-900/40 px-3 py-1.5 text-xs font-bold text-sky-100 hover:border-sky-500 disabled:opacity-60"
+          class="min-h-[44px] self-start rounded-md border border-sky-700 bg-sky-900/40 px-3 py-1.5 text-[16px] font-bold text-sky-100 hover:border-sky-500 disabled:opacity-60"
           disabled={busy()}
           onClick={() => void chooseFiles()}
         >
@@ -136,18 +137,18 @@ export default function WechatImport(props: WechatImportProps): JSX.Element {
         </button>
         <Show
           when={files().length > 0}
-          fallback={<span class="text-xs text-slate-500">还没有选文件。</span>}
+          fallback={<span class="text-[16px] text-slate-500">还没有选文件。</span>}
         >
           <ul class="flex flex-col gap-0.5" role="list">
             <For each={files()}>
-              {(file) => <li class="truncate text-xs text-slate-300" title={file}>{file}</li>}
+              {(file) => <li class="truncate text-[16px] text-slate-300" title={file}>{file}</li>}
             </For>
           </ul>
         </Show>
       </div>
 
       <div class="flex flex-col gap-2 rounded-lg border border-slate-800 bg-[#0b0f14] p-4">
-        <span class="text-[11px] font-bold tracking-widest text-slate-500">第三步：要做哪一件事</span>
+        <span class="text-[16px] font-bold tracking-widest text-slate-500">第三步：要做哪一件事</span>
         <div class="flex flex-col gap-2" role="radiogroup" aria-label="要做哪一件事">
           <For each={WECHAT_TASKS}>
             {(item) => (
@@ -162,8 +163,8 @@ export default function WechatImport(props: WechatImportProps): JSX.Element {
                 }`}
                 onClick={() => setSelectedId(item.id)}
               >
-                <span class="text-sm text-slate-200">{item.title}</span>
-                <span class="text-[11px] leading-4 text-slate-500">{item.example}</span>
+                <span class="text-[18px] text-slate-200">{item.title}</span>
+                <span class="text-[16px] leading-4 text-slate-500">{item.example}</span>
               </button>
             )}
           </For>
@@ -172,9 +173,9 @@ export default function WechatImport(props: WechatImportProps): JSX.Element {
 
       <div class="flex flex-col gap-2 rounded-lg border border-slate-800 bg-[#0b0f14] p-4">
         <label class="flex flex-col gap-1">
-          <span class="text-[11px] font-bold tracking-widest text-slate-500">想补充的话（可不填）</span>
+          <span class="text-[16px] font-bold tracking-widest text-slate-500">想补充的话（可不填）</span>
           <textarea
-            class="min-h-[64px] resize-y rounded-md border border-slate-800 bg-[#0e141b] px-3 py-2 text-xs text-slate-200 outline-none focus:border-sky-600"
+            class="min-h-[64px] resize-y rounded-md border border-slate-800 bg-[#0e141b] px-3 py-2 text-[16px] text-slate-200 outline-none focus:border-sky-600"
             placeholder="比如：只整理要紧的事"
             value={note()}
             onInput={(event) => setNote(event.currentTarget.value)}
@@ -182,7 +183,7 @@ export default function WechatImport(props: WechatImportProps): JSX.Element {
         </label>
         <button
           type="button"
-          class="self-start rounded-md border border-emerald-700 bg-emerald-900/40 px-4 py-1.5 text-xs font-bold text-emerald-100 hover:border-emerald-500 disabled:opacity-60"
+          class="min-h-[44px] self-start rounded-md border border-emerald-700 bg-emerald-900/40 px-4 py-1.5 text-[16px] font-bold text-emerald-100 hover:border-emerald-500 disabled:opacity-60"
           disabled={busy()}
           onClick={() => void start()}
         >
@@ -191,14 +192,14 @@ export default function WechatImport(props: WechatImportProps): JSX.Element {
       </div>
 
       <Show when={problem()}>
-        <div class="rounded-md border border-red-800 bg-red-950/40 px-3 py-2 text-xs leading-5 text-red-200" role="alert">
+        <div class="rounded-md border border-red-800 bg-red-950/40 px-3 py-2 text-[16px] leading-5 text-red-200" role="alert">
           {problem()}
         </div>
       </Show>
 
       <Show when={run()}>
         {(current) => (
-          <div class="rounded-md border border-slate-800 bg-[#0e141b] px-3 py-2 text-xs text-slate-400" role="status">
+          <div class="rounded-md border border-slate-800 bg-[#0e141b] px-3 py-2 text-[16px] text-slate-400" role="status">
             正在处理：{current().taskTitle}（{onlineLabel(current().online)}）
             <Show when={!current().online}>
               <span class="text-slate-500">，内容没有离开这台电脑。</span>
@@ -207,7 +208,11 @@ export default function WechatImport(props: WechatImportProps): JSX.Element {
         )}
       </Show>
 
-      <p class="text-[11px] leading-5 text-slate-500">
+      <Show when={run() && ["done", "failed", "cancelled"].includes(run()!.state)}>
+        <ResultCard store={props.store} />
+      </Show>
+
+      <p class="text-[16px] leading-6 text-slate-500">
         整理结果里的草稿可以一键复制。{DRAFT_SEND_NOTICE}
       </p>
     </section>

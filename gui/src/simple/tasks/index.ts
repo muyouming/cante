@@ -15,11 +15,23 @@
 import { EXCEL_TASKS } from "./excel.ts";
 import { FILE_TASKS } from "./files.ts";
 import { DOCUMENT_TASKS } from "./document.ts";
+import { WECHAT_TASKS } from "./wechat.ts";
 
 export type TaskGroup = "表格" | "文件" | "微信" | "文书" | "资料";
 
 /** What the first step has to collect before the job can start. */
 export type TaskNeeds = "files" | "folder" | "none" | "text";
+
+import { buildPrompt } from "./prompt.ts";
+
+export {
+  SAFETY_RULES,
+  buildPrompt,
+  filesBlock,
+  folderBlock,
+  safetyBlock,
+  userWordsBlock,
+} from "./prompt.ts";
 
 export interface TaskDef {
   /** Stable id, e.g. "excel.merge". History and undo key off this. */
@@ -44,132 +56,25 @@ export interface TaskDef {
 // The run model (frozen shape — the runner and the trust layer share it)
 // ---------------------------------------------------------------------------
 
-export interface TaskImpact {
-  created: number;
-  modified: number;
-  deleted: number;
-  messages: number;
-}
+import {
+  type RunImpact,
+  type RunResult,
+  type RunResultFile,
+  type RunState,
+  type TaskRun,
+} from "../run.ts";
 
-export interface TaskResultFile {
-  path: string;
-  summary: string;
-}
-
-export interface TaskResult {
-  files: TaskResultFile[];
-  summary: string;
-}
-
-export interface TaskError {
-  /** 发生了什么 */
-  what: string;
-  /** 你可以怎么做 */
-  how: string;
-  detail: string;
-}
-
-export type TaskState = "draft" | "preview" | "running" | "done" | "failed" | "cancelled";
-
-export interface TaskRun {
-  id: string;
-  taskId: string;
-  taskTitle: string;
-  files: string[];
-  instruction: string;
-  state: TaskState;
-  plan: string[];
-  impact: TaskImpact;
-  result: TaskResult | null;
-  online: boolean;
-  error: TaskError | null;
-  createdAt: number;
-}
-
+export type { TaskError, TaskRun } from "../run.ts";
+export type TaskImpact = RunImpact;
+export type TaskResultFile = RunResultFile;
+export type TaskResult = RunResult;
+export type TaskState = RunState;
 // ---------------------------------------------------------------------------
-// Prompt building blocks
+// Prompt building blocks (shared with wechat.ts — see ./prompt.ts)
 //
 // Every task starts from these, so the two promises we make to users — "tell me
 // what you are about to do first" and "your originals are never touched" — are
 // in every single instruction, not just the ones we remembered to write out.
-// ---------------------------------------------------------------------------
-
-/** The rules every job carries. Exported so the tests can pin the wording. */
-export const SAFETY_RULES: readonly string[] = [
-  "【先说明再动手】先说明你打算怎么做，再动手。",
-  "【不要动原文件】结果另存为新文件，不要改原文件。原来的文件只能读，不能改、不能删、不能覆盖。",
-  "【只做这一件事】不要顺手做别的改动，也不要重命名原来的文件。",
-  "【看不懂就先停】遇到打不开、对不上、拿不准的地方，先停下来把情况说清楚，不要自己猜着做。",
-];
-
-/** "【要处理的文件】（只读）" plus a numbered list. */
-export function filesBlock(files: string[]): string {
-  if (files.length === 0) {
-    return "【要处理的文件】\n这次没有选文件，内容全部来自用户的原话。\n";
-  }
-  const lines = [`【要处理的文件】（只读，一共 ${files.length} 个，按这个顺序）`];
-  files.forEach((path, index) => lines.push(`${index + 1}. ${path}`));
-  return `${lines.join("\n")}\n`;
-}
-
-/** The folder variant, used by the tidy-up jobs. */
-export function folderBlock(folder: string): string {
-  return [
-    "【要整理的文件夹】（只读）",
-    folder,
-    "这个文件夹里的东西不是都要动：按下面的做法只处理说到的那些，其它的原样留着。",
-    "",
-  ].join("\n");
-}
-
-/** The user's own words, which always outrank our wording. */
-export function userWordsBlock(instruction: string): string {
-  const said = instruction.trim() || "（用户没有补充，按上面的做法做）";
-  return [
-    "【用户的原话】",
-    said,
-    "",
-    "如果用户的原话和上面的做法有冲突，以用户的原话为准；拿不准就先问一句。",
-    "",
-  ].join("\n");
-}
-
-/**
- * The shared rule list, optionally with one task-specific exception. The
- * exception never removes a rule — it only adds one.
- */
-export function safetyBlock(extra?: string): string {
-  const rules = extra ? [...SAFETY_RULES, `【这个任务的补充】${extra}`] : [...SAFETY_RULES];
-  return `${rules.map((rule) => `- ${rule}`).join("\n")}\n`;
-}
-
-/** Assemble one prompt from its parts, in a fixed order. */
-export function buildPrompt(parts: {
-  what: string;
-  files?: string[];
-  folder?: string;
-  how: string[];
-  extraRule?: string;
-  instruction: string;
-  done: string;
-}): string {
-  const blocks: string[] = [`【要做的事】${parts.what}`, ""];
-  if (parts.folder) blocks.push(folderBlock(parts.folder));
-  else blocks.push(filesBlock(parts.files ?? []));
-  blocks.push(
-    "【怎么做】",
-    ...parts.how.map((step, index) => `${index + 1}. ${step}`),
-    "",
-    "【必须守住的规矩】",
-    safetyBlock(parts.extraRule).trimEnd(),
-    "",
-    userWordsBlock(parts.instruction).trimEnd(),
-    "",
-    `【做完告诉我】${parts.done}`,
-  );
-  return blocks.join("\n");
-}
-
 // ---------------------------------------------------------------------------
 // The catalogue
 // ---------------------------------------------------------------------------
@@ -182,7 +87,7 @@ export function buildPrompt(parts: {
  * `[...EXCEL_TASKS, ...FILE_TASKS, ...DOCUMENT_TASKS, ...WECHAT_TASKS]` — so
  * the home screen and history pick the WeChat cards up automatically.
  */
-export const TASKS: TaskDef[] = [...EXCEL_TASKS, ...FILE_TASKS, ...DOCUMENT_TASKS];
+export const TASKS: TaskDef[] = [...EXCEL_TASKS, ...FILE_TASKS, ...DOCUMENT_TASKS, ...WECHAT_TASKS];
 
 /** Look up one card by id (history, retry, and the runner all need it). */
 export function taskById(id: string): TaskDef | undefined {
@@ -199,6 +104,43 @@ export function taskById(id: string): TaskDef | undefined {
  */
 export function instructionFor(taskId: string, files: string[], instruction: string): string | null {
   return taskById(taskId)?.prompt(files, instruction) ?? null;
+}
+
+/**
+ * The "直接说一句话" path: what the user typed *is* the task.
+ *
+ * It still needs files, because in this product a sentence like "把这几张表弄一下"
+ * always refers to something on disk — the pick step is where she says what.
+ * Document-only wishes have their own cards under 文书.
+ */
+export function freeTask(instruction: string): TaskDef {
+  const what = instruction.trim() || "用户还没有说清楚要做什么；先问清楚再动手。";
+  return {
+    id: "free.text",
+    title: "直接说一件事",
+    example: "把这几张表弄成一张 / 把这个文件夹整理一下",
+    group: "文书",
+    needs: "files",
+    plan: [
+      "先读懂你要的是什么，把打算怎么做说给你听",
+      "按你说的去做",
+      "结果另存为新文件，原来的文件一动不动",
+      "做完告诉你文件在哪里",
+    ],
+    prompt(files: string[], extra: string): string {
+      return buildPrompt({
+        what,
+        files,
+        how: [
+          "先说明你打算怎么做，再动手",
+          "结果另存为新文件；原来的文件只能读，不能改、不能删、不能覆盖",
+        ],
+        instruction: extra,
+        done: "用一句中文告诉我做完了什么、结果文件在哪里、有没有需要我核对的地方",
+      });
+    },
+    summaryHints: ["做了什么", "结果文件在哪里"],
+  };
 }
 
 /** The groups that actually have a card, in display order. */

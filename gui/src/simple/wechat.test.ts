@@ -75,7 +75,8 @@ describe("the prompts hold the line", () => {
   });
 
   test("an empty file list still produces a readable instruction", () => {
-    expect(wechatTableTask.prompt([], "")).toContain("（没有选择文件）");
+    // The shared envelope owns this wording now (tasks/prompt.ts).
+    expect(wechatTableTask.prompt([], "")).toContain("没有选文件");
   });
 });
 

@@ -30,8 +30,11 @@ import {
   runIsOnline,
   type RunImpact,
   type RunResult,
+  type RunState,
   type SnapshotDiff,
   type SnapshotEntry,
+  type TaskRun,
+  type TaskRunUndo,
 } from "./simple/run.ts";
 import {
   EFFORTS,
@@ -131,42 +134,6 @@ export type { PrivacyState } from "./simple/privacy.ts";
 // #41–#43 — one job a simple-mode user handed over, and how to undo it.
 // The shape is frozen; `gui/src/simple/tasks/index.ts` mirrors it.
 // ---------------------------------------------------------------------------
-
-export type RunState = "draft" | "preview" | "running" | "done" | "failed" | "cancelled";
-
-export interface TaskRun {
-  id: string;
-  taskId: string;
-  taskTitle: string;
-  files: string[];
-  instruction: string;
-  state: RunState;
-  /** Chinese "将要做什么", one step per line, shown before anything runs. */
-  plan: string[];
-  impact: RunImpact;
-  result: RunResult | null;
-  online: boolean;
-  error: { what: string; how: string; detail: string } | null;
-  createdAt: number;
-  /** #41 — set only when the user ticked the red "allow overwrite" box. */
-  overwrite?: boolean;
-  /** #42 — this was a "先试跑给我看" dry run. */
-  dryRun?: boolean;
-  /** #43 — an undo has already run for this record. */
-  undone?: boolean;
-  /** #43 — paths the undo put back / could not put back (written by Rust). */
-  restored?: string[];
-  failed?: string[];
-}
-
-/** What Rust needs to put a run back; persisted with the record. */
-export interface TaskRunUndo {
-  roots: string[];
-  created: string[];
-  modified: string[];
-  deleted: string[];
-  unbacked: string[];
-}
 
 export interface SessionOverrides {
   model?: string;
@@ -1506,6 +1473,8 @@ export function createStore(): Store {
         ? "已打开「只在本机处理」：内容不会离开这台电脑，联网搜索也已关闭。"
         : "已关闭「只在本机处理」：整理内容时会联网，内容会发给帮你整理的服务方。",
     );
+  }
+
   // ---- files and trust (#41–#43) ------------------------------------------
 
   /** Chinese detail for a bridge/file failure; never leaks the English banner. */
@@ -1846,3 +1815,4 @@ export function createStore(): Store {
 
 // Re-exported so views do not need to reach into protocol.ts for copy.
 export { EFFORTS, PERMISSION_MODES, formatTokens };
+export type { RunState, TaskRun, TaskRunUndo } from "./simple/run.ts";
