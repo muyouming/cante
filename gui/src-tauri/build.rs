@@ -1,25 +1,26 @@
 // Cargo build script for the Tauri shell.
 //
-// Besides running `tauri-build`, it makes sure the resource the release bundle
-// expects — `target/release/cante-sheets` — exists *before* `tauri-build`
-// validates `bundle.resources`. `cante-sheets` is an ordinary `[[bin]]` target,
-// so it is only produced *after* this script runs; without the placeholder a
-// bare `cargo test` (and the very first release build) would fail with
-// `resource path target/release/cante-sheets doesn't exist`. Cargo overwrites
-// the placeholder with the real binary later in the same invocation, so the
-// bundled app still ships the real tool.
-use std::path::PathBuf;
+// Besides running `tauri-build`, it makes sure the resources the release bundle
+// expects — `target/release/cante-sheets` and `target/release/cante-pdf` — exist
+// *before* `tauri-build` validates `bundle.resources`. Both are ordinary
+// `[[bin]]` targets, so they are only produced *after* this script runs;
+// without the placeholders a bare `cargo test` (and the very first release
+// build) would fail with `resource path target/release/<name> doesn't exist`.
+// Cargo overwrites each placeholder with the real binary later in the same
+// invocation, so the bundled app still ships the real tools.
+use std::path::Path;
 
 fn main() {
-    seed_sheet_placeholder();
+    seed_placeholder("cante-sheets");
+    seed_placeholder("cante-pdf");
     tauri_build::build()
 }
 
-fn seed_sheet_placeholder() {
+fn seed_placeholder(name: &str) {
     let Ok(manifest) = std::env::var("CARGO_MANIFEST_DIR") else {
         return;
     };
-    let path = PathBuf::from(manifest).join("target").join("release").join("cante-sheets");
+    let path = Path::new(&manifest).join("target").join("release").join(name);
     if path.exists() {
         return;
     }

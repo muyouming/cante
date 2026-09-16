@@ -21,7 +21,7 @@ import ErrorView from "./simple/ErrorView.tsx";
 import Home from "./simple/Home.tsx";
 import Wizard, { shouldShowWizard } from "./simple/Wizard.tsx";
 import { freeTask, type TaskDef } from "./simple/tasks/index.ts";
-import { initSheetCapability } from "./simple/capabilities.ts";
+import { initCapabilities } from "./simple/capabilities.ts";
 import History from "./simple/History.tsx";
 import PrivacyPanel from "./simple/PrivacyPanel.tsx";
 import TaskRunner from "./simple/TaskRunner.tsx";
@@ -116,8 +116,8 @@ function SimpleApp(props: SimpleAppProps): JSX.Element {
   // needs to; the health probe inside the wizard is independent of this.
   onMount(() => {
     props.store.connect();
-    // #75 — 启动时问一次这台电脑能不能读写表格；不阻塞渲染。
-    void initSheetCapability();
+    // #75/#50 — 启动时问一次这台电脑能做什么（表格、PDF）；不阻塞渲染。
+    void initCapabilities();
   });
 
   const enter = (next: ActiveTask): void => {

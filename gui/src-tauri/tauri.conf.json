@@ -40,7 +40,8 @@
     "copyright": "Copyright © 2026 Antigma Labs",
     "licenseFile": "../../LICENSE",
     "resources": {
-      "target/release/cante-sheets": "cante-sheets"
+      "target/release/cante-sheets": "cante-sheets",
+      "target/release/cante-pdf": "cante-pdf"
     },
     "macOS": {
       "minimumSystemVersion": "11.0"

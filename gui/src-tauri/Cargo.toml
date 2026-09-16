@@ -23,10 +23,19 @@ serde_json = "1"
 # Rust, so the shipped `cante-sheets` helper needs no interpreter or Office.
 calamine = "0.36"
 rust_xlsxwriter = "0.99"
+# PDF read/write for simple mode's #50 jobs (page count, text, merge, split).
+# lopdf is pure Rust: no pdfium, no system PDF library, no interpreter — so the
+# shipped `cante-pdf` helper works on every machine the app bundles for.
+# Default features (chrono/rayon) are off; we only need the core object model.
+lopdf = { version = "0.45", default-features = false }
 
 [[bin]]
 name = "cante-sheets"
 path = "src/bin/cante-sheets.rs"
+
+[[bin]]
+name = "cante-pdf"
+path = "src/bin/cante-pdf.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
