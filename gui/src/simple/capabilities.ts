@@ -10,7 +10,8 @@
 //   * 不可用时给确认页一段中性说明，让用户知道这是边界，不是错误。
 import { invoke } from "../tauri.ts";
 import type { SessionInfo } from "../protocol.ts";
-import { PDF_COPY, SHEET_COPY, VISION_COPY } from "./copy-capability.ts";
+import { FORMAT_COPY, PDF_COPY, SHEET_COPY, VISION_COPY } from "./copy-capability.ts";
+import type { SelectionVerdict } from "./format-check.ts";
 import { setPdfHelper, setSheetHelper, setVisionHelper } from "./tasks/prompt.ts";
 
 export interface ToolCapability {
@@ -107,6 +108,10 @@ export function sheetPromptLine(cap: ToolCapability): string | null {
     "一次 cante-sheets write 只写出一张表，写出的新文件里也只有这一张表；它不会往已有文件里追加表，也不会改动已有文件。要合成两张表就给两个不同名字的新文件，或者把内容并到同一张表里再写。",
     "表名要用中文或普通文字：不能是空的，不能超过 31 个字，也不能带 \\ / ? * [ ] : 这些符号。",
     "结果文件要用它写成 .xlsx，不要因为缺少别的工具就改成别的格式。",
+    // #88 — 读不了的格式要在最后一步之前说清楚，而不是跑了一会儿才报「读不了」。
+    // 这些是文件**本身**的格式（WPS / 苹果自己的），装了工具也读不了；所以规矩是
+    // 「说清楚 + 跳过 + 继续做能读的」，既不许硬试，也不许因此把整件事停下。
+    "如果用户交来的文件是 .et / .ett / .wps / .dps（WPS 自己的格式），或者 .pages / .numbers（苹果的格式），这些都是我读不了的：不要反复重试，也不要把整件事停下。先用一句中文说明这是 WPS（或苹果）自己的格式、请用户把它另存为 Excel 文件（.xlsx）或 Word 文件（.docx）再交给我，然后跳过这几份，把其余能读的文件做完；最后写清跳过了哪几份。",
   ].join("\n");
 }
 
@@ -128,6 +133,30 @@ export function pdfPromptLine(cap: ToolCapability): string | null {
     "如果这份 PDF 没有文字层（扫描或拍照的），cante-pdf 会明确报出来。这时候先停下来告诉我需要先做文字识别，不要当成里面没有内容。",
     "还有一种情况：cante-pdf text 会用退出码 3 并打印「警告：…文字很可能是乱码」，说明这份 PDF 的字体没有自带文字对照表（打印或导出的中文 PDF 常见）。这时候不要拿抽出来的文字下结论——先告诉用户这份大概是扫描件或字体缺文字信息，请他核对原件。",
   ].join("\n");
+}
+
+/**
+ * #88 — 选中的文件里有我读不了的格式时，给用户看的那句话，否则 null。
+ *
+ * 和 {@link sheetFallbackNote} 是两件事：那句说的是这台电脑缺工具（环境问题，
+ * 装了就能读），这句说的是文件本身是 WPS / 苹果自己的格式（装了什么工具都
+ * 读不了，但文件是好的）。所以两句话不重复，可以同时出现。
+ */
+export function formatAdviceNote(verdict: SelectionVerdict): string | null {
+  return verdict.kind === "ok" ? null : verdict.advice;
+}
+
+/**
+ * #88 — 一个都读不了时，开始按钮旁边解释「为什么现在别开始」，否则 null。
+ *
+ * 不是错误：文件是好的，只是要她先另存一份。所以措辞里没有「失败」「错误」，
+ * 语气也和边界说明一致。
+ */
+export function formatStartBlockNote(verdict: SelectionVerdict): string | null {
+  if (verdict.kind === "convert-first" || verdict.kind === "mixed-nothing-readable") {
+    return FORMAT_COPY.startBlocked;
+  }
+  return null;
 }
 
 /**

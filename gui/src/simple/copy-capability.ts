@@ -54,6 +54,37 @@ const IMAGE_EXTENSIONS = [
   ".tiff",
 ] as const;
 
+/**
+ * 「王姐交来的文件，我读不了」怎么告诉她（#88）。
+ *
+ * 和上面 SHEET_COPY.fallbackNote 是**两件事**，别混：
+ *   * fallbackNote 说的是这台电脑还没装工具——环境问题，装了就能读；
+ *   * 这里说的是文件本身是 WPS / 苹果自己的格式——装了什么工具都读不了，
+ *     但文件是好的，她今天在 WPS 里「另存为」一下就能继续。
+ *
+ * 所以这里不重复缺工具那句话，而是给一个她能立刻做完的动作（另存为），
+ * 并且全程不说「失败」「错误」：这不是出错，是一个边界。
+ */
+export const FORMAT_COPY = {
+  /** 一个都读不了时，那个醒目方框的标题。 */
+  heading: "这几份文件我打不开",
+  /** 全是 WPS 自己的格式：给一步就能做完的另存为。 */
+  wpsConvertAdvice:
+    "这是 WPS 自己保存的文件，不是 Excel 或 Word 文件，我打不开。请在 WPS 里打开它，点「另存为」，选「Excel 文件（.xlsx）」「Word 文件（.docx）」或「PowerPoint 文件（.pptx）」，再把新文件交给我就行。",
+  /** 全是苹果自己的格式：同样是一步导出。 */
+  appleConvertAdvice:
+    "这是苹果电脑上的 Pages 或 Numbers 文件，我打不开。请在 Pages 或 Numbers 里打开它，点「导出」，导出成「Word 文件（.docx）」或「Excel 文件（.xlsx）」，再把新文件交给我就行。",
+  /** 全读不了，而且 WPS 的和苹果的混在一起：给不出一条统一的另存为。 */
+  mixedConvertAdvice:
+    "这些文件我一种也打不开：WPS 自己的格式和苹果自己的格式，我都读不了。请把它们各自打开，WPS 的点「另存为」、苹果的点「导出」，都存成 Excel 文件（.xlsx）或 Word 文件（.docx），再把新文件交给我。",
+  /** 混着能读的文件：说清会跳过哪几份、其余照做。 */
+  skipSomeAdvice:
+    "这几份我读不了，会先跳过，其余的照做；做完会告诉你跳过了哪几份。",
+  /** 一个都读不了时，开始按钮旁边那句「为什么现在别开始」。 */
+  startBlocked:
+    "先别开始：这几份文件我打不开，现在开始也拿不到结果。先按上面的办法另存一份，再交给我。",
+} as const;
+
 /** 会被当成 Excel 文件的扩展名。 */
 const EXCEL_EXTENSIONS = [".xlsx", ".xls"] as const;
 

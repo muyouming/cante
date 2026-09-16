@@ -4,6 +4,7 @@
 //! the contract table. Each op-sending command returns `{ "ok": true }`.
 
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde_json::{json, Value};
 use tauri::State;
@@ -19,6 +20,9 @@ const PDF_BIN_NAME: &str = if cfg!(windows) { "cante-pdf.exe" } else { "cante-pd
 /// per tool; the frontend puts these straight on screen.
 const SHEET_UNAVAILABLE_WHY: &str = "这台电脑还没有表格读写工具。";
 const PDF_UNAVAILABLE_WHY: &str = "这台电脑还没有处理 PDF 的工具。";
+
+/// 表格工具在、但这次没读出内容时的兜底说明（工具自己一般会给出更具体的中文）。
+const SHEET_READ_FAILED_WHY: &str = "这个表格没能读出来。";
 
 /// Whether this computer can run one helper, and where that helper lives.
 /// Serialized straight to the frontend; `why` is Chinese meant for the user.
@@ -169,6 +173,69 @@ pub fn tool_capabilities() -> ToolCapabilities {
             path_var.as_deref(),
         ),
     }
+}
+
+/// 读回一个结果表的内容，走的是应用自带的 `cante-sheets read`。
+///
+/// `tool` 是前端从 `sheet_capability` / `tool_capabilities` 拿到的工具位置（和
+/// 探测用的是同一个），`path` 是结果文件，`sheet` 是可选的表名。
+///
+/// 失败时**绝不返回空表**：空表和「这张表本来就是空的」长得一模一样，而界面必须
+/// 能分清「读不出来」和「没有内容可贴」。所以没有工具、工具跑不起来、退出码非 0，
+/// 一律返回一句中文错误。
+///
+/// 纯函数：工具位置和文件位置都由参数传入，`cargo test` 可以拿真实的 `cante-sheets`
+/// 和真实的 .xlsx 直接跑。
+pub fn read_sheet_rows(
+    tool: &str,
+    path: &str,
+    sheet: Option<&str>,
+) -> Result<Vec<Vec<String>>, String> {
+    let tool = tool.trim();
+    if tool.is_empty() {
+        return Err(SHEET_UNAVAILABLE_WHY.to_string());
+    }
+
+    let mut command = Command::new(tool);
+    command.arg("read").arg(path);
+    if let Some(name) = sheet.map(str::trim).filter(|name| !name.is_empty()) {
+        command.arg("--sheet").arg(name);
+    }
+
+    // 工具不在（被删了、路径过时了）时，把操作系统的话换成用户看得懂的一句。
+    let output = command.output().map_err(|_| SHEET_UNAVAILABLE_WHY.to_string())?;
+    if !output.status.success() {
+        // cante-sheets 的错误都是中文，直接端给用户；真的没有说明时才兜底。
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let message = stderr.trim();
+        return Err(if message.is_empty() {
+            SHEET_READ_FAILED_WHY.to_string()
+        } else {
+            message.to_string()
+        });
+    }
+
+    // `cante-sheets read` 输出的是标准 CSV：逗号、引号、格子里的换行都已经转义，
+    // 所以这里按 CSV 解析回去，格子的内容不会被拆错。
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(crate::sheets::csv_to_rows(&stdout))
+}
+
+/// 界面上的「复制成微信能贴的文字」用它把结果表读出来。
+///
+/// 读文件要走子进程，放到阻塞线程池里做，别卡住界面。
+#[tauri::command(rename_all = "snake_case")]
+pub async fn read_result_sheet(
+    tool: String,
+    path: String,
+    sheet: Option<String>,
+) -> Result<Value, String> {
+    let rows = tauri::async_runtime::spawn_blocking(move || {
+        read_sheet_rows(&tool, &path, sheet.as_deref())
+    })
+    .await
+    .map_err(|error| format!("读取表格时出了点问题：{error}"))??;
+    Ok(json!({ "rows": rows }))
 }
 
 /// #58 — 这台电脑有没有被技术同事统一设过（企业预置配置）。
@@ -520,5 +587,25 @@ mod tests {
     fn a_blank_pdf_env_var_is_ignored() {
         let cap = resolve_pdf_bin(Some("   "), None, None, Some("/definitely/not/here"));
         assert!(!cap.available);
+    }
+
+    // -----------------------------------------------------------------------
+    // 读结果表：失败必须说人话，绝不假装「表是空的」。
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn no_tool_is_an_error_not_an_empty_table() {
+        let error = read_sheet_rows("", "/tmp/结果.xlsx", None).expect_err("没有工具必须报错");
+        assert!(error.contains("表格"), "应是中文说明：{error}");
+        assert!(!error.contains("cante-sheets"), "不该把工具名端给用户：{error}");
+        assert!(!error.contains("路径"), "黑名单词不能进用户文案：{error}");
+    }
+
+    #[test]
+    fn a_tool_that_cannot_start_is_an_error() {
+        let error = read_sheet_rows("/definitely/not/here/cante-sheets", "/tmp/结果.xlsx", None)
+            .expect_err("工具跑不起来必须报错");
+        assert!(!error.is_empty());
+        assert!(!error.contains("路径"), "黑名单词不能进用户文案：{error}");
     }
 }
