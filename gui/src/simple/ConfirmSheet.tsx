@@ -76,7 +76,7 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
           </header>
 
           <div class="flex-1 overflow-y-auto px-6 py-5">
-            <h3 class="text-base font-semibold text-slate-200">它打算这样做</h3>
+            <h3 class="text-[20px] font-semibold text-slate-200">它打算这样做</h3>
             <ol class="mt-2 space-y-2">
               <For each={run()?.plan ?? []}>
                 {(step, index) => (
@@ -91,7 +91,7 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
             </ol>
 
             <Show when={taskRisks().length > 0}>
-              <h3 class="mt-6 text-base font-semibold text-slate-200">{TRUST.limitsTitle}</h3>
+              <h3 class="mt-6 text-[20px] font-semibold text-slate-200">{TRUST.limitsTitle}</h3>
               <ul class="mt-2 space-y-1.5">
                 <For each={taskRisks()}>
                   {(risk) => (
@@ -134,7 +134,7 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
               )}
             </Show>
 
-            <h3 class="mt-6 text-base font-semibold text-slate-200">
+            <h3 class="mt-6 text-[20px] font-semibold text-slate-200">
               要处理的文件（{files().length} 个）
             </h3>
             <Show
@@ -168,7 +168,7 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
               </p>
             </Show>
 
-            <h3 class="mt-6 text-base font-semibold text-slate-200">会影响什么</h3>
+            <h3 class="mt-6 text-[20px] font-semibold text-slate-200">会影响什么</h3>
             <div class="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <For each={risks()}>
                 {(risk) => (
