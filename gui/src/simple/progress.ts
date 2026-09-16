@@ -367,12 +367,3 @@ export function formatElapsed(ms: number): string {
  * INTEGRATION: these belong in `simple/copy.ts` next to the other surfaces;
  * they live here for now because this workstream owns only this module.
  */
-export const PROGRESS_COPY = {
-  title: "正在做这些事",
-  hint: "按顺序一步步来，做完一步打一个勾。",
-  doing: (text: string) => `正在做：${text}`,
-  elapsed: (time: string) => `已经用了 ${time}`,
-  promise: "原来的文件不会被改动，随时可以点下面的按钮停下来。",
-  stop: "停下来",
-  keepOpen: "请不要关掉窗口。",
-} as const;

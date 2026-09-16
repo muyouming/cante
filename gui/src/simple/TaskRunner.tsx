@@ -14,7 +14,8 @@ import type { Accessor, JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
 import { isBridgeAvailable } from "../tauri.ts";
-import { PROGRESS_COPY, formatElapsed, type RunProgressView } from "./progress.ts";
+import { PROGRESS_COPY } from "./copy.ts";
+import { formatElapsed, type RunProgressView } from "./progress.ts";
 import type { TaskDef, TaskError, TaskRun } from "./tasks/index.ts";
 import ConfirmSheet from "./ConfirmSheet.tsx";
 import ResultCard from "./ResultCard.tsx";

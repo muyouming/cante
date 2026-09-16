@@ -342,3 +342,14 @@ export function evidenceLine(runs: number, ok: number): string {
   if (ok <= 0) return `${base}，都还没做成。`;
   return `${base}，其中 ${ok} 次做成了。`;
 }
+
+// 运行中进度清单的文案（#62）。放在这里，和其他面向用户的文案一起校对。
+export const PROGRESS_COPY = {
+  title: "正在做这些事",
+  hint: "按顺序一步步来，做完一步打一个勾。",
+  doing: (text: string) => `正在做：${text}`,
+  elapsed: (time: string) => `已经用了 ${time}`,
+  promise: "原来的文件不会被改动，随时可以点下面的按钮停下来。",
+  stop: "停下来",
+  keepOpen: "请不要关掉窗口。",
+} as const;
