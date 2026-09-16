@@ -8,12 +8,20 @@
 //
 // The safe choice is the default: the focus ring starts on 取消, and the
 // overwrite checkbox is off and marked "不推荐".
-import { For, Show, createSignal } from "solid-js";
+import { For, Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { TRUST, evidenceLine } from "./copy.ts";
-import { sheetCapability, sheetFallbackNote, pdfCapability, pdfFallbackNote } from "./capabilities.ts";
-import { hasExcelFile, hasPdfFile } from "./copy-capability.ts";
+import {
+  pdfCapability,
+  pdfFallbackNote,
+  sheetCapability,
+  sheetFallbackNote,
+  syncVisionForPrompt,
+  visionAvailable,
+  visionFallbackNote,
+} from "./capabilities.ts";
+import { hasExcelFile, hasImageFile, hasPdfFile } from "./copy-capability.ts";
 import { evidenceFor, failureFor } from "./evidence.ts";
 import { fileName, folderName, hasActiveRisk, planRisks } from "./run.ts";
 import { risksForTask } from "./tasks/index.ts";
@@ -44,6 +52,13 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   const showSheetFallback = () => hasExcelFile(files()) && !sheetCapability().available;
   // #50 — 同上，选中的是 PDF 而这台电脑还处理不了。
   const showPdfFallback = () => hasPdfFile(files()) && !pdfCapability().available;
+  // #48 — 选中的是图片，而当前这个设置看不了图。这是边界，不是错误。
+  const showVisionFallback = () => hasImageFile(files()) && !visionAvailable(props.store.session());
+  // #48 — 会话信息可能比首屏晚到；每变一次就把「能不能看图」同步进提示词信封，
+  // 这样确认时拼出的指令里一定带着这条。
+  createEffect(() => {
+    syncVisionForPrompt(props.store.session());
+  });
   // #63 — the job's own known limits, straight from its card definition.
   const taskRisks = () => risksForTask(run()?.taskId ?? "");
   // #64 — what this computer's own history says, or nothing at all.
@@ -173,6 +188,12 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
             <Show when={showPdfFallback()}>
               <p class="mt-3 rounded-xl border border-slate-600 bg-slate-800/50 px-3 py-2 text-[16px] leading-relaxed text-slate-100">
                 {pdfFallbackNote(pdfCapability())}
+              </p>
+            </Show>
+
+            <Show when={showVisionFallback()}>
+              <p class="mt-3 rounded-xl border border-slate-600 bg-slate-800/50 px-3 py-2 text-[16px] leading-relaxed text-slate-100">
+                {visionFallbackNote(visionAvailable(props.store.session()))}
               </p>
             </Show>
 
