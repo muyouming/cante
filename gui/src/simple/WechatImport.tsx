@@ -17,6 +17,7 @@ import type { Accessor, JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
 import ResultCard from "./ResultCard.tsx";
+import { WECHAT_UI } from "./copy.ts";
 import { DRAFT_SEND_NOTICE, WECHAT_READONLY_HINT, WECHAT_SAFETY_NOTICE, onlineLabel } from "./privacy.ts";
 import { WECHAT_ACCEPT, WECHAT_TASKS, type TaskDef } from "./tasks/wechat.ts";
 
@@ -43,10 +44,11 @@ type WechatStore = Store & {
   currentRun?: Accessor<WechatRunView | null>;
 };
 
+// 电脑版微信的实际做法，一步一句，她照着点就能做完。
 const EXPORT_STEPS = [
-  "在电脑版微信里找到要整理的那个聊天。",
-  "把要整理的聊天内容导出，或者选中后复制到一个新文件里（记事本、表格、网页文件都行）。",
-  "保存好这个文件，记住它在哪个文件夹，然后在下面把它选进来。",
+  "打开电脑版微信，找到要整理的那个聊天。",
+  "把要整理的消息选中（从第一条按住鼠标拖到最后一条），点右键选「复制」。",
+  "打开电脑上的「记事本」，粘贴进去，再点「文件」→「另存为」，记下保存到哪个文件夹。",
 ];
 
 /** The extensions a WeChat export can have, unioned with each task's list. */
@@ -113,20 +115,20 @@ export default function WechatImport(props: WechatImportProps): JSX.Element {
   return (
     <section class="flex flex-col gap-4" aria-label="微信聊天记录整理">
       <div class="rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 py-3">
-        <p class="text-[18px] font-bold text-amber-200">{WECHAT_SAFETY_NOTICE}</p>
-        <p class="mt-1 text-[16px] leading-5 text-amber-200/80">{WECHAT_READONLY_HINT}</p>
-        <p class="mt-1 text-[16px] leading-5 text-amber-200/80">{DRAFT_SEND_NOTICE}</p>
+        <h2 class="text-[20px] font-bold text-amber-200">{WECHAT_UI.noSend}</h2>
+        <p class="mt-1 text-[16px] leading-5 text-amber-200/80">{WECHAT_SAFETY_NOTICE}{WECHAT_READONLY_HINT}</p>
+        <p class="mt-1 text-[16px] leading-5 text-amber-200/80">{WECHAT_UI.noSendHint}{DRAFT_SEND_NOTICE}</p>
       </div>
 
       <div class="flex flex-col gap-2 rounded-lg border border-slate-800 bg-[#0b0f14] p-4">
-        <span class="text-[16px] font-bold tracking-widest text-slate-500">第一步：把聊天记录变成文件</span>
+        <h3 class="text-[20px] font-bold tracking-widest text-slate-500">第一步：把聊天记录变成文件</h3>
         <ol class="flex list-decimal flex-col gap-1 pl-5 text-[16px] leading-5 text-slate-400">
           <For each={EXPORT_STEPS}>{(step) => <li>{step}</li>}</For>
         </ol>
       </div>
 
       <div class="flex flex-col gap-2 rounded-lg border border-slate-800 bg-[#0b0f14] p-4">
-        <span class="text-[16px] font-bold tracking-widest text-slate-500">第二步：选文件</span>
+        <h3 class="text-[20px] font-bold tracking-widest text-slate-500">第二步：选文件</h3>
         <button
           type="button"
           class="min-h-[44px] self-start rounded-md border border-sky-700 bg-sky-900/40 px-3 py-1.5 text-[16px] font-bold text-sky-100 hover:border-sky-500 disabled:opacity-60"
@@ -148,7 +150,7 @@ export default function WechatImport(props: WechatImportProps): JSX.Element {
       </div>
 
       <div class="flex flex-col gap-2 rounded-lg border border-slate-800 bg-[#0b0f14] p-4">
-        <span class="text-[16px] font-bold tracking-widest text-slate-500">第三步：要做哪一件事</span>
+        <h3 class="text-[20px] font-bold tracking-widest text-slate-500">第三步：要做哪一件事</h3>
         <div class="flex flex-col gap-2" role="radiogroup" aria-label="要做哪一件事">
           <For each={WECHAT_TASKS}>
             {(item) => (
@@ -163,7 +165,7 @@ export default function WechatImport(props: WechatImportProps): JSX.Element {
                 }`}
                 onClick={() => setSelectedId(item.id)}
               >
-                <span class="text-[18px] text-slate-200">{item.title}</span>
+                <span class="text-[20px] text-slate-200">{item.title}</span>
                 <span class="text-[16px] leading-4 text-slate-500">{item.example}</span>
               </button>
             )}

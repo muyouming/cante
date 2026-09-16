@@ -1,20 +1,16 @@
 // App state for the Cante desktop GUI.
 //
-// Live events arrive on `cante://event`; `events_since` hydrates the transcript
+// Live events arrive on `cante://event`; `events_since` hydrates the row stream
 // from the Rust ring on launch and reconciles it periodically so a missed push
 // (or a webview reload) cannot desync the view. Every batch is folded into the
 // signals below by one reducer — the same shape the reverted bridge used.
+//
+// This store is the simple surface's only state. The pro shell (palette, model
+// picker, density, capability panel, goal bar, terminal, catalogs) is gone; the
+// remaining members are the task/run flow, the safety record and the daemon
+// mirror that reducer keeps.
 import { batch, createSignal, onCleanup, type Accessor } from "solid-js";
 
-import {
-  allCommands,
-  builtinCommand,
-  filterCommands,
-  parseSlash,
-  slashPaletteQuery,
-  type ClientAction,
-  type Command,
-} from "./commands.ts";
 import type { Row, RowTone } from "./rows.ts";
 import { persistLocalOnly, readLocalOnly, type PrivacyState } from "./simple/privacy.ts";
 import {
@@ -36,14 +32,14 @@ import {
   newRunId,
   normalizeEntries,
   runIsOnline,
-  type RunImpact,
-  type RunResult,
-  type RunState,
   type SnapshotDiff,
   type SnapshotEntry,
   type TaskRun,
   type TaskRunUndo,
 } from "./simple/run.ts";
+// 卡片提示词（`instructionFor`）：卡片里写好的步骤与安全规矩必须真的发出去，
+// 见 `composedInstruction`。曾经因为漏了这条导入路径，卡片的规矩从未到达助手。
+import { instructionFor } from "./simple/tasks/index.ts";
 import {
   dueSchedules,
   newScheduleId,
@@ -52,23 +48,18 @@ import {
   type Schedule,
 } from "./simple/schedule.ts";
 import {
-  EFFORTS,
-  PERMISSION_MODES,
   eventName,
   eventPayload,
   formatTokens,
   readTurnEnd,
   textOf,
   toolResultText,
-  type ContextWindow,
-  type Effort,
   type EventMsg,
   type PendingApproval,
   type PermissionMode,
   type ReviewDecision,
   type SessionInfo,
   type TurnEndStatus,
-  type Usage,
 } from "./protocol.ts";
 import {
   BridgeUnavailable,
@@ -77,72 +68,18 @@ import {
   isBridgeAvailable,
   onCanteEvent,
   onCanteExit,
-  onCanteLog,
   onCanteState,
   type BridgeState,
-  type CatalogProvider as WireCatalogProvider,
   type DaemonStatus,
-  type LogEntry,
   type ToolDecision,
   type UnlistenFn,
 } from "./tauri.ts";
 
-export type Connection = "connecting" | "online" | "offline";
-
 /**
- * Which face of the app is showing. `simple` is the default — big Chinese
- * task cards for people who do not work in IT; `pro` is the original
- * transcript shell, kept for the people who want it. The choice survives a
- * restart via `localStorage`.
+ * The bridge's reachability. The pro transcript view is gone; this type stays
+ * only because `components/Transcript.tsx` still imports it.
  */
-export type UiMode = "simple" | "pro";
-
-export type { DaemonStatus, LogEntry } from "./tauri.ts";
-// Views import their store types from here.
-export type { Row, RowKind, RowTone } from "./rows.ts";
-
-export interface CatalogModel {
-  id: string;
-  display_name: string;
-  efforts: Effort[];
-}
-
-export interface CatalogProvider {
-  id: string;
-  display_name: string;
-  models: CatalogModel[];
-}
-
-/** How much detail the transcript renders for each row. */
-export type ViewDensity = "normal" | "verbose" | "summary";
-
-/** The session's extension surface, reduced to what the panel renders. */
-export interface Capabilities {
-  mcpServers: Array<{ name: string; tools: number }>;
-  skills: Array<{ name: string; description: string }>;
-  subagents: Array<{ name: string; description: string }>;
-}
-
-/** One `!command` run, mirrored from `Evt::ShellOutput`. */
-export interface TerminalEntry {
-  id: string;
-  command: string;
-  stdout: string;
-  stderr: string;
-  exitCode: number | null;
-}
-
-/** The off-critical-path "thinking phrase" / next-prompt hint. */
-export interface AmbientState {
-  phrase: string | null;
-  suggestion: string | null;
-}
-
-/** The goal loop as the bar needs it: the condition plus the daemon's note. */
-export interface GoalState {
-  condition: string | null;
-  note: string | null;
-}
+export type Connection = "connecting" | "online" | "offline";
 
 export type { PrivacyState } from "./simple/privacy.ts";
 // ---------------------------------------------------------------------------
@@ -150,101 +87,30 @@ export type { PrivacyState } from "./simple/privacy.ts";
 // The shape is frozen; `gui/src/simple/tasks/index.ts` mirrors it.
 // ---------------------------------------------------------------------------
 
+/** The only session override the simple flow uses: open cante in `Auto`. */
 export interface SessionOverrides {
-  model?: string;
-  provider?: string;
-  effort?: Effort;
   permission_mode?: PermissionMode;
-  cwd?: string;
-  resume_session_id?: string;
 }
 
 export interface Store {
-  /** Which face of the app is showing (simple by default). */
-  mode: Accessor<UiMode>;
-  setMode(mode: UiMode): void;
-  /** Tauri bridge reachability (not the daemon's own status). */
-  connection: Accessor<Connection>;
   daemonStatus: Accessor<DaemonStatus>;
   session: Accessor<SessionInfo | null>;
   approval: Accessor<PendingApproval | null>;
+  /**
+   * The row stream. The pro transcript view is gone, but two consumers keep
+   * this alive: `simple/evidence.ts` reads the last assistant row for the
+   * #63「需要你核对」paragraph and the r7 question-ending check. Nothing else
+   * reads rows, so the reducer stays only because those two promises do.
+   */
   rows: Accessor<Row[]>;
-  usage: Accessor<Usage | null>;
-  context: Accessor<ContextWindow | null>;
   steps: Accessor<number>;
   /** #62 — the plan as a live checklist while a job runs, plus its clock. */
   progress: Accessor<RunProgressView>;
   notice: Accessor<string | null>;
-  logs: Accessor<LogEntry[]>;
-  catalog: Accessor<CatalogProvider[]>;
-  canteVersion: Accessor<string | null>;
-  workspace: Accessor<string>;
-  /** Built-in commands plus the session's skills. */
-  commands: Accessor<Command[]>;
-  draft: Accessor<string>;
-  history: Accessor<string[]>;
-  pickerOpen: Accessor<boolean>;
-  paletteOpen: Accessor<boolean>;
-  /** Slash palette: live filtering while a `/command` name is being typed. */
-  paletteVisible: Accessor<boolean>;
-  paletteQuery: Accessor<string>;
-  paletteMatches: Accessor<Command[]>;
-  paletteIndex: Accessor<number>;
-  movePalette(delta: number): void;
-  selectPalette(index: number): void;
-  /** Complete the highlighted name into the draft without running it (Tab). */
-  completePalette(): void;
-  /** Run the highlighted command, falling back to the first match (Enter). */
-  runPalette(): Promise<void>;
-  /** Run one palette row, consuming the draft (click). */
-  runPaletteCommand(command: Command | undefined): Promise<void>;
-  /** Hide the slash palette without discarding the draft (Esc). */
-  dismissPalette(): void;
   connect(): void;
   startSession(overrides?: SessionOverrides): Promise<void>;
-  send(text: string, mode?: "prompt" | "steer" | "shell"): Promise<void>;
   interrupt(): Promise<void>;
   respond(decisions: ReviewDecision[], message?: string): Promise<void>;
-  setEffort(effort: Effort): Promise<void>;
-  setPermissionMode(mode: PermissionMode): Promise<void>;
-  setModel(provider: string, model: string): Promise<void>;
-  setCwd(cwd: string): Promise<void>;
-  setDraft(value: string): void;
-  /** Send a prompt, or run a `/command` when the text starts with a slash. */
-  submit(text?: string): Promise<void>;
-  /** Run a command picked from the palette. */
-  runCommand(command: Command): Promise<void>;
-  historyPrev(): void;
-  historyNext(): void;
-  openPicker(): void;
-  closePicker(): void;
-  openPalette(): void;
-  closePalette(): void;
-  cycleEffort(): Promise<void>;
-  cyclePermission(): Promise<void>;
-  compact(instructions?: string): Promise<void>;
-  requestContextReport(): Promise<void>;
-  loadCatalog(): Promise<void>;
-  clearTranscript(): void;
-  /** normal -> verbose -> summary -> normal. */
-  viewDensity: Accessor<ViewDensity>;
-  cycleDensity(): void;
-  /** Skills / subagents / MCP servers from `Evt::ExtensionRefreshed`. */
-  capabilities: Accessor<Capabilities>;
-  ambient: Accessor<AmbientState>;
-  /** Send user text mid-turn (`Op::Steer`). */
-  steer(text: string): Promise<void>;
-  /** Run a shell command without starting a turn (`Op::ShellInput`). */
-  runShell(command: string): Promise<void>;
-  terminal: Accessor<TerminalEntry[]>;
-  clearTerminal(): void;
-  /** Goal-loop condition and the daemon's last `🎯` Info note. */
-  goal: Accessor<GoalState>;
-  setGoal(condition: string): Promise<void>;
-  clearGoal(): Promise<void>;
-  requestGoalStatus(): Promise<void>;
-  /** Best-effort spinner phrase for the in-progress draft. */
-  requestAmbientPhrase(draft: string): Promise<void>;
   // ---- privacy (r5-privacy) -----------------------------------------------
   /** What may leave this computer, and who receives it. */
   privacy: Accessor<PrivacyState>;
@@ -260,8 +126,7 @@ export interface Store {
   revealPath(path: string): Promise<void>;
   /** The run waiting on the confirmation sheet (or the finished one on screen). */
   currentRun: Accessor<TaskRun | null>;
-  /** Finished runs, newest first, restored from disk on launch.
-   *  (Kept separate from `history`, which is the composer's prompt history.) */
+  /** Finished runs, newest first, restored from disk on launch. */
   runs: Accessor<TaskRun[]>;
   /** Stage a run and open the confirmation sheet. Nothing runs until `confirmRun`. */
   startRun(
@@ -302,10 +167,11 @@ export interface Store {
 }
 
 /**
- * The frozen bridge gained `steer` / `shell_input` / `ambient_*` after
- * `tauri.ts` was last generated. Keep `invoke`'s typed map for the original
- * commands and widen only for the new ops, so a rename in the map still fails
- * `tsc` while these forward to the snake_case wire names.
+ * The frozen bridge gained the file/trust ops (`pick_files`, `pick_folder`,
+ * `open_path`, `reveal_path`, `begin_run`, `snapshot_paths`, `run_log`,
+ * `save_run`, `undo_run`) after `tauri.ts` was last generated. Keep `invoke`'s
+ * typed map for the original commands and widen only for those ops, so a rename
+ * in the map still fails `tsc` while these forward to the snake_case wire names.
  */
 type OpInvoke = (name: string, args?: Record<string, unknown>) => Promise<unknown>;
 const invokeOp = invoke as unknown as OpInvoke;
@@ -313,14 +179,8 @@ const invokeOp = invoke as unknown as OpInvoke;
 const MAX_ROWS = 400;
 const MAX_ROW_TEXT = 8_000;
 const MAX_TOOL_DETAIL = 4_000;
-const MAX_LOGS = 200;
-const MAX_HISTORY = 50;
 /** Run-log cap in the UI; Rust keeps its own, larger cap on disk. */
 const MAX_HISTORY_RUNS = 200;
-const MAX_TERMINAL = 50;
-const MAX_TERMINAL_TEXT = 8_000;
-/** The daemon prefixes goal confirmations/status with the target emoji. */
-const GOAL_EMOJI = "🎯";
 const MAX_SEEN = 8_192;
 const RECONCILE_MS = 2_000;
 const PING_MS = 4_000;
@@ -380,53 +240,6 @@ function normalizeApproval(value: unknown): PendingApproval | null {
   };
 }
 
-/**
- * `Evt::ExtensionRefreshed` -> the panel's shape. Skills carry a description;
- * MCP servers collapse to a name plus how many tools were discovered (an
- * array on the wire, empty for a server that failed to connect).
- */
-function normalizeCapabilities(payload: unknown): Capabilities {
-  const record = (payload && typeof payload === "object" ? payload : {}) as Record<string, unknown>;
-
-  const named = (raw: unknown): { name: string; description: string } | null => {
-    if (typeof raw === "string") return raw ? { name: raw, description: "" } : null;
-    if (!raw || typeof raw !== "object") return null;
-    const item = raw as Record<string, unknown>;
-    const name = typeof item.name === "string" ? item.name : "";
-    if (!name) return null;
-    return { name, description: typeof item.description === "string" ? item.description : "" };
-  };
-
-  const skills: Capabilities["skills"] = [];
-  for (const raw of Array.isArray(record.skills) ? record.skills : []) {
-    const entry = named(raw);
-    if (entry) skills.push(entry);
-  }
-
-  const subagents: Capabilities["subagents"] = [];
-  for (const raw of Array.isArray(record.subagents) ? record.subagents : []) {
-    const entry = named(raw);
-    if (entry) subagents.push(entry);
-  }
-
-  const mcpServers: Capabilities["mcpServers"] = [];
-  for (const raw of Array.isArray(record.mcp_servers) ? record.mcp_servers : []) {
-    if (!raw || typeof raw !== "object") continue;
-    const item = raw as Record<string, unknown>;
-    const name = typeof item.name === "string" ? item.name : "";
-    if (!name) continue;
-    const tools = item.tools;
-    const count = Array.isArray(tools)
-      ? tools.length
-      : typeof tools === "number" && Number.isFinite(tools)
-        ? tools
-        : 0;
-    mcpServers.push({ name, tools: count });
-  }
-
-  return { mcpServers, skills, subagents };
-}
-
 function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -461,11 +274,6 @@ function toneForStatus(status: string): RowTone {
   }
 }
 
-export function modelLabel(session: SessionInfo | null): string {
-  if (!session) return "—";
-  return session.model?.display_name || session.model?.id || "—";
-}
-
 export function providerLabel(session: SessionInfo | null): string {
   if (!session) return "—";
   return session.provider?.display_name || session.provider?.id || "—";
@@ -478,76 +286,13 @@ function describe(error: unknown): string {
   return errorText(error);
 }
 
-function normalizeCatalog(wire: WireCatalogProvider[] | undefined): CatalogProvider[] {
-  const providers: CatalogProvider[] = [];
-  for (const entry of wire ?? []) {
-    const record = (entry ?? {}) as WireCatalogProvider;
-    const models: CatalogModel[] = [];
-    for (const item of record.models ?? []) {
-      const id = String(item?.id ?? "");
-      if (!id) continue;
-      models.push({
-        id,
-        display_name: String(item.display_name || id),
-        efforts: Array.isArray(item.supported_efforts) ? (item.supported_efforts as Effort[]) : [],
-      });
-    }
-    providers.push({
-      id: String(record.id ?? ""),
-      display_name: String(record.display_name || record.id || ""),
-      models,
-    });
-  }
-  return providers;
-}
-
-/** Where the simple/pro choice is remembered across restarts. */
-const MODE_KEY = "cante:ui:mode";
-
-function readStoredMode(): UiMode {
-  try {
-    if (typeof localStorage === "undefined") return "simple";
-    return localStorage.getItem(MODE_KEY) === "pro" ? "pro" : "simple";
-  } catch {
-    // A webview with storage disabled still works; it just forgets the choice.
-    return "simple";
-  }
-}
-
-function persistMode(mode: UiMode): void {
-  try {
-    if (typeof localStorage !== "undefined") localStorage.setItem(MODE_KEY, mode);
-  } catch {
-    /* keep the in-memory value */
-  }
-}
-
 export function createStore(): Store {
-  const [mode, setModeSignal] = createSignal<UiMode>(readStoredMode());
-  const [connection, setConnection] = createSignal<Connection>("connecting");
   const [daemonStatus, setDaemonStatus] = createSignal<DaemonStatus>("offline");
   const [session, setSession] = createSignal<SessionInfo | null>(null);
   const [approval, setApproval] = createSignal<PendingApproval | null>(null);
   const [rows, setRows] = createSignal<Row[]>([]);
-  const [usage, setUsage] = createSignal<Usage | null>(null);
-  const [context, setContext] = createSignal<ContextWindow | null>(null);
   const [steps, setSteps] = createSignal(0);
   const [notice, setNotice] = createSignal<string | null>(null);
-  const [logs, setLogs] = createSignal<LogEntry[]>([]);
-  const [catalog, setCatalog] = createSignal<CatalogProvider[]>([]);
-  const [canteVersion, setCanteVersion] = createSignal<string | null>(null);
-  const [workspace, setWorkspace] = createSignal("");
-  const [draft, setDraftSignal] = createSignal("");
-  const [history, setHistory] = createSignal<string[]>([]);
-  const [pickerOpen, setPickerOpen] = createSignal(false);
-  const [paletteOpen, setPaletteOpen] = createSignal(false);
-  const [paletteDismissed, setPaletteDismissed] = createSignal(false);
-  const [paletteCursor, setPaletteCursor] = createSignal(0);
-  const [viewDensity, setViewDensity] = createSignal<ViewDensity>("normal");
-  const [capabilities, setCapabilities] = createSignal<Capabilities>({ mcpServers: [], skills: [], subagents: [] });
-  const [ambient, setAmbient] = createSignal<AmbientState>({ phrase: null, suggestion: null });
-  const [goal, setGoalState] = createSignal<GoalState>({ condition: null, note: null });
-  const [terminal, setTerminal] = createSignal<TerminalEntry[]>([]);
   const [localOnly, setLocalOnlySignal] = createSignal<boolean>(readLocalOnly());
   const [currentRun, setCurrentRun] = createSignal<TaskRun | null>(null);
   const [runs, setRuns] = createSignal<TaskRun[]>([]);
@@ -568,50 +313,9 @@ export function createStore(): Store {
   let pendingSnapshot: { before: SnapshotEntry[]; roots: string[]; unbacked: string[] } | null = null;
   let runFinishing = false;
 
-  // Plain accessors rather than `createMemo`s: `bun test` resolves Solid's
-  // server build, where a memo is computed once and never re-runs. These must
-  // recompute from the draft on every read, and in the browser they still track
-  // inside JSX because each read touches the underlying signals directly.
-  function commands(): Command[] {
-    return allCommands(session()?.skills ?? []);
-  }
-
-  // The slash palette is a pure projection of the draft: `/` or `/comp` keeps
-  // it open with a live `filterCommands` query, a space after the name (or a
-  // non-slash draft) hides it, and Esc hides it until the next keystroke.
-  function paletteQuery(): string {
-    return slashPaletteQuery(draft()) ?? "";
-  }
-  function paletteVisible(): boolean {
-    return slashPaletteQuery(draft()) !== null && !paletteDismissed();
-  }
-  function paletteMatches(): Command[] {
-    return paletteVisible() ? filterCommands(commands(), paletteQuery()) : [];
-  }
-  function paletteIndex(): number {
-    const count = paletteMatches().length;
-    if (count === 0) return 0;
-    return Math.max(0, Math.min(paletteCursor(), count - 1));
-  }
-
-  let historyCursor: number | null = null;
-  let historyDraft = "";
   let rowSeq = 0;
-  let terminalSeq = 0;
   let lastUserText = "";
-  let lastUserPrompt = "";
-  let lastAgentText = "";
   const toolRows = new Map<string, string>();
-
-  // ---- ambient requests ---------------------------------------------------
-  // `req_id`s are monotonic per kind; a reply older than the newest request is
-  // dropped. The suggestion also carries the turn it was requested in, so a
-  // reply that lands after the next turn started is discarded.
-  let phraseReqId = 0;
-  let suggestionReqId = 0;
-  let turnSeq = 0;
-  let suggestionPending = false;
-  let suggestionTurn: number | null = null;
 
   // ---- bridge lifecycle ---------------------------------------------------
 
@@ -663,7 +367,6 @@ export function createStore(): Store {
     unlisteners = await Promise.all([
       onCanteEvent(handleEvent),
       onCanteState(handleState),
-      onCanteLog(handleLog),
       onCanteExit(handleExit),
     ]);
     if (disposed) {
@@ -688,7 +391,6 @@ export function createStore(): Store {
         for (const message of response.events) applyEvent(message);
         applyState(response.state);
         cursor = response.cursor;
-        setConnection("online");
       });
     } catch (error) {
       // The reconcile loop and the health probe keep retrying; the banner tells
@@ -718,10 +420,8 @@ export function createStore(): Store {
         for (const message of response.events) applyEvent(message);
         applyState(response.state);
         cursor = response.cursor;
-        setConnection("online");
       });
     } catch (error) {
-      if (!disposed) setConnection("offline");
       if (!disposed) setNotice(`events: ${describe(error)}`);
     }
   }
@@ -732,9 +432,6 @@ export function createStore(): Store {
       const health = await invoke("health");
       if (disposed) return;
       batch(() => {
-        setConnection("online");
-        setCanteVersion(health.cante);
-        if (health.cwd) setWorkspace(health.cwd);
         if (health.status) setDaemonStatus(health.status);
       });
       // A reachable host with no session yet: open one.
@@ -750,7 +447,6 @@ export function createStore(): Store {
       }
     } catch {
       if (disposed) return;
-      setConnection("offline");
       if (!isBridgeAvailable()) {
         setNotice("desktop bridge unavailable — open the Cante desktop app");
       }
@@ -771,14 +467,6 @@ export function createStore(): Store {
   function handleState(state: BridgeState): void {
     if (disposed || !state) return;
     batch(() => applyState(state));
-  }
-
-  function handleLog(entry: LogEntry): void {
-    if (disposed || !entry) return;
-    setLogs((list) => {
-      const next = [...list, entry];
-      return next.length > MAX_LOGS ? next.slice(next.length - MAX_LOGS) : next;
-    });
   }
 
   function handleExit(payload: { code: number | null }): void {
@@ -819,8 +507,6 @@ export function createStore(): Store {
     if (state.status) setDaemonStatus(state.status);
     if (state.session !== undefined) setSession(state.session ?? null);
     if (state.pending_approval !== undefined) setApproval(normalizeApproval(state.pending_approval));
-    if (state.cante !== undefined) setCanteVersion(state.cante);
-    if (state.cwd) setWorkspace(state.cwd);
   }
 
   function transition(name: string, event: unknown): void {
@@ -834,11 +520,6 @@ export function createStore(): Store {
         return;
       }
       case "TurnStart":
-        turnSeq += 1;
-        // A suggestion for the previous turn is stale now; free the slot so
-        // the next TurnEnd can ask again (the old reply is dropped below).
-        suggestionPending = false;
-        suggestionTurn = null;
         setDaemonStatus("thinking");
         return;
       case "Thinking":
@@ -886,7 +567,6 @@ export function createStore(): Store {
         if (text && text !== lastUserText) {
           setRows(pushRow({ id: `u${++rowSeq}`, kind: "user", label: "you", text: clampText(text, MAX_ROW_TEXT), detail: "", tone: "accent", streaming: false, time: at }));
         }
-        if (text) lastUserPrompt = text;
         lastUserText = "";
         return;
       }
@@ -894,8 +574,6 @@ export function createStore(): Store {
       case "AgentMessage": {
         const delta = name === "MessageDelta";
         const text = textOf(event, name);
-        if (delta) lastAgentText = clampText(lastAgentText + text, MAX_ROW_TEXT);
-        else if (text) lastAgentText = text;
         // #62 — only the finished message is folded in: a plan that arrives in
         // streaming pieces would otherwise look like a sequence of steps.
         if (!delta && text) noteAssistantProgress(text);
@@ -982,7 +660,6 @@ export function createStore(): Store {
             ? textOf(event, "Info")
             : String(payload?.header ?? payload?.detail ?? "");
         if (!text) return;
-        if (text.startsWith(GOAL_EMOJI)) setGoalState((state) => ({ ...state, note: text }));
         setRows(pushRow({ id: `i${++rowSeq}`, kind: "info", label: "info", text: clampText(text, MAX_ROW_TEXT), detail: "", tone: "muted", streaming: false, time: at }));
         return;
       }
@@ -994,64 +671,9 @@ export function createStore(): Store {
         setRows(pushRow({ id: `i${++rowSeq}`, kind: "info", label: "compact", text: summary ? "history compacted" : "compaction failed; history unchanged", detail: summary ? clampText(summary, 240) : "", tone: "muted", streaming: false, time: at }));
         return;
       }
-      case "ExtensionRefreshed": {
-        setCapabilities(normalizeCapabilities(eventPayload(event, "ExtensionRefreshed")));
-        return;
-      }
-      case "ShellOutput": {
-        const payload = eventPayload<{ command?: unknown; stdout?: unknown; stderr?: unknown; exit_code?: unknown }>(event, "ShellOutput");
-        const exitCode = typeof payload?.exit_code === "number" && Number.isFinite(payload.exit_code) ? payload.exit_code : null;
-        const entry: TerminalEntry = {
-          id: `sh${++terminalSeq}`,
-          command: typeof payload?.command === "string" ? payload.command : "",
-          stdout: clampText(typeof payload?.stdout === "string" ? payload.stdout : "", MAX_TERMINAL_TEXT),
-          stderr: clampText(typeof payload?.stderr === "string" ? payload.stderr : "", MAX_TERMINAL_TEXT),
-          exitCode,
-        };
-        setTerminal((list) => {
-          const next = [...list, entry];
-          return next.length > MAX_TERMINAL ? next.slice(next.length - MAX_TERMINAL) : next;
-        });
-        return;
-      }
-      case "Ambient": {
-        const payload = eventPayload<{ kind?: unknown; req_id?: unknown; text?: unknown }>(event, "Ambient");
-        const kind = typeof payload?.kind === "string" ? payload.kind : "";
-        const reqId = safeCount(payload?.req_id, 0);
-        const text = typeof payload?.text === "string" ? payload.text : "";
-        if (kind === "ThinkingPhrase") {
-          if (reqId < phraseReqId) return;
-          phraseReqId = Math.max(phraseReqId, reqId);
-          setAmbient((state) => ({ ...state, phrase: text }));
-          return;
-        }
-        if (kind === "PromptSuggestion") {
-          // A reply that outlived its turn is stale even when the id is current.
-          if (suggestionTurn === null || suggestionTurn !== turnSeq) {
-            suggestionPending = false;
-            return;
-          }
-          if (reqId < suggestionReqId) {
-            suggestionPending = false;
-            return;
-          }
-          suggestionReqId = Math.max(suggestionReqId, reqId);
-          suggestionPending = false;
-          suggestionTurn = null;
-          setAmbient((state) => ({ ...state, suggestion: text }));
-          return;
-        }
-        return;
-      }
       case "ContextReport": {
         const report = eventPayload<Record<string, number>>(event, "ContextReport");
         if (!report) return;
-        if (Number.isFinite(Number(report.used_tokens)) || Number.isFinite(Number(report.limit_tokens))) {
-          setContext({
-            used_tokens: Number(report.used_tokens ?? 0),
-            limit_tokens: Number(report.limit_tokens ?? 0),
-          });
-        }
         const parts = [
           `system ${formatTokens(Number(report.system_prompt_tokens ?? 0))}`,
           `tools ${formatTokens(Number(report.system_tools_tokens ?? 0))}`,
@@ -1061,12 +683,6 @@ export function createStore(): Store {
           `messages ${formatTokens(Number(report.messages_tokens ?? 0))}`,
         ];
         setRows(pushRow({ id: `i${++rowSeq}`, kind: "info", label: "context", text: `window ${formatTokens(Number(report.used_tokens ?? 0))} of ${formatTokens(Number(report.limit_tokens ?? 0))}`, detail: parts.join(" · "), tone: "muted", streaming: false, time: at }));
-        return;
-      }
-      case "UsageUpdate": {
-        const payload = eventPayload<{ usage?: Usage; context?: ContextWindow }>(event, "UsageUpdate");
-        if (payload?.usage) setUsage(payload.usage);
-        if (payload?.context) setContext(payload.context);
         return;
       }
       case "TurnPause": {
@@ -1106,7 +722,6 @@ export function createStore(): Store {
           setRows(pushRow({ id: `r${++rowSeq}`, kind: "turn", label: "failed", text: clampText(reason.headline, MAX_ROW_TEXT), detail: clampText(reason.details.join(" · "), MAX_TOOL_DETAIL), tone: "error", streaming: false, time: at }));
           setNotice(reason.headline);
         }
-        maybeRequestSuggestion();
         // #41/#43 — close out a simple-mode run with its own before/after diff.
         if (currentRun()?.state === "running") {
           if (reason.kind === "ok") void finishRun("done");
@@ -1140,110 +755,10 @@ export function createStore(): Store {
     }
   }
 
-  /** Off-critical-path ops (ambient predictions) must never raise a notice. */
-  async function bestEffort(fn: () => Promise<unknown>): Promise<boolean> {
-    try {
-      await fn();
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  async function steer(text: string): Promise<void> {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    await attempt(() => invokeOp("steer", { text: trimmed }));
-  }
-
-  async function runShell(command: string): Promise<void> {
-    const trimmed = command.trim();
-    if (!trimmed) return;
-    await attempt(() => invokeOp("shell_input", { command: trimmed }));
-  }
-
-  function clearTerminal(): void {
-    setTerminal([]);
-  }
-
-  async function requestAmbientPhrase(draft: string): Promise<void> {
-    phraseReqId += 1;
-    const requestId = phraseReqId;
-    await bestEffort(() => invokeOp("ambient_phrase", { draft, request_id: requestId }));
-  }
-
-  /**
-   * After a turn ends, suggest what to ask next from the exchange just
-   * completed. At most one request is in flight; the reply is tied to the
-   * turn, so one that arrives after a newer turn started is discarded.
-   */
-  function maybeRequestSuggestion(): void {
-    if (suggestionPending) return;
-    if (!lastUserPrompt || !lastAgentText) return;
-    suggestionPending = true;
-    suggestionReqId += 1;
-    suggestionTurn = turnSeq;
-    const requestId = suggestionReqId;
-    const user = lastUserPrompt;
-    const agent = lastAgentText;
-    void bestEffort(() =>
-      invokeOp("ambient_suggestion", { recent_user: user, recent_agent: agent, request_id: requestId }),
-    ).then((ok) => {
-      // A failed send leaves nothing outstanding; the next TurnEnd may retry.
-      if (!ok) suggestionPending = false;
-    });
-  }
-
-  async function setGoal(condition: string): Promise<void> {
-    const trimmed = condition.trim();
-    const ok = await attempt(() => invoke("goal", { command: "Set", condition: trimmed }));
-    if (ok) setGoalState({ condition: trimmed, note: null });
-  }
-
-  async function clearGoal(): Promise<void> {
-    const ok = await attempt(() => invoke("goal", { command: "Clear" }));
-    if (ok) setGoalState({ condition: null, note: null });
-  }
-
-  async function requestGoalStatus(): Promise<void> {
-    await attempt(() => invoke("goal", { command: "Status" }));
-  }
-
-  function cycleDensity(): void {
-    const order: readonly ViewDensity[] = ["normal", "verbose", "summary"];
-    const index = order.indexOf(viewDensity());
-    setViewDensity(order[(index + 1) % order.length]!);
-  }
-
-  function setMode(next: UiMode): void {
-    setModeSignal(next);
-    persistMode(next);
-  }
-
   async function startSession(overrides: SessionOverrides = {}): Promise<void> {
     lastUserText = "";
     const ok = await attempt(() => invoke("start_session", { ...overrides }));
     if (ok) setNotice("starting session…");
-  }
-
-  async function send(text: string, mode: "prompt" | "steer" | "shell" = "prompt"): Promise<void> {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    if (mode === "prompt") {
-      lastUserText = trimmed;
-      lastUserPrompt = trimmed;
-      setRows(pushRow({
-        id: `u${++rowSeq}`,
-        kind: "user",
-        label: "you",
-        text: clampText(trimmed, MAX_ROW_TEXT),
-        detail: "",
-        tone: "accent",
-        streaming: false,
-        time: nowLabel(),
-      }));
-    }
-    await attempt(() => invoke("send_input", { text: trimmed, mode }));
   }
 
   async function interrupt(): Promise<void> {
@@ -1267,255 +782,6 @@ export function createStore(): Store {
     if (responses.length === 0) return;
     const ok = await attempt(() => invoke("approve", { turn_id: pending.turn_id, responses }));
     if (ok) setApproval(null);
-  }
-
-  async function setEffort(effort: Effort): Promise<void> {
-    const current = session();
-    if (!current) return;
-    await attempt(() => invoke("update_session", { model: { id: current.model.id, effort } }));
-  }
-
-  async function setPermissionMode(mode: PermissionMode): Promise<void> {
-    await attempt(() => invoke("update_session", { permission_mode: mode }));
-  }
-
-  async function setModel(provider: string, model: string): Promise<void> {
-    const current = session();
-    await attempt(() => invoke("start_session", {
-      provider,
-      model,
-      effort: current?.model?.effort ?? undefined,
-      permission_mode: current?.permission_mode ?? undefined,
-    }));
-  }
-
-  async function setCwd(cwd: string): Promise<void> {
-    const ok = await attempt(() => invoke("set_cwd", { cwd }));
-    if (ok) setWorkspace(cwd);
-  }
-
-  async function compact(instructions?: string): Promise<void> {
-    await attempt(() => invoke("compact", instructions ? { instructions } : {}));
-  }
-
-  async function requestContextReport(): Promise<void> {
-    await attempt(() => invoke("context_report"));
-  }
-
-  // ---- input: draft, history, commands ------------------------------------
-
-  function setDraft(value: string): void {
-    historyCursor = null;
-    setDraftSignal(value);
-    // A fresh edit reopens a dismissed palette and re-ranks the highlight.
-    setPaletteDismissed(false);
-    setPaletteCursor(0);
-  }
-
-  function pushHistory(text: string): void {
-    historyCursor = null;
-    setHistory((list) => {
-      const next = list[list.length - 1] === text ? list : [...list, text];
-      return next.length > MAX_HISTORY ? next.slice(next.length - MAX_HISTORY) : next;
-    });
-  }
-
-  /** ↑ through previously sent prompts; the in-progress draft is restored. */
-  function historyPrev(): void {
-    const list = history();
-    if (list.length === 0) return;
-    if (historyCursor === null) {
-      historyDraft = draft();
-      historyCursor = list.length;
-    }
-    historyCursor = Math.max(0, historyCursor - 1);
-    setDraftSignal(list[historyCursor]!);
-  }
-
-  function historyNext(): void {
-    const list = history();
-    if (historyCursor === null) return;
-    if (historyCursor >= list.length - 1) {
-      historyCursor = null;
-      setDraftSignal(historyDraft);
-      return;
-    }
-    historyCursor += 1;
-    setDraftSignal(list[historyCursor]!);
-  }
-
-  async function cycleEffort(): Promise<void> {
-    const current = session()?.model?.effort ?? "Medium";
-    const index = EFFORTS.indexOf(current);
-    await setEffort(EFFORTS[(index + 1) % EFFORTS.length]!);
-  }
-
-  async function cyclePermission(): Promise<void> {
-    const current = session()?.permission_mode ?? "Strict";
-    const index = PERMISSION_MODES.indexOf(current);
-    await setPermissionMode(PERMISSION_MODES[(index + 1) % PERMISSION_MODES.length]!);
-  }
-
-  /** Commands the GUI runs itself; everything else is a daemon `SlashCommand`. */
-  async function runClient(action: ClientAction, args = ""): Promise<void> {
-    switch (action) {
-      case "new-session":
-        clearTranscript();
-        await startSession();
-        return;
-      case "clear-view":
-        clearTranscript();
-        return;
-      case "model":
-        setPickerOpen(true);
-        return;
-      case "effort":
-        await cycleEffort();
-        return;
-      case "permissions":
-        await cyclePermission();
-        return;
-      case "compact":
-        await compact();
-        return;
-      case "context":
-        await requestContextReport();
-        return;
-      case "interrupt":
-        await interrupt();
-        return;
-      case "goal":
-        if (args) await setGoal(args);
-        else await requestGoalStatus();
-        return;
-      case "goal-clear":
-        await clearGoal();
-        return;
-      default:
-        return;
-    }
-  }
-
-  /** Dispatch `/<name> <args>` — locally when built in, otherwise to the daemon. */
-  async function runCommandByName(name: string, args: string): Promise<void> {
-    const builtin = builtinCommand(name);
-    if (builtin?.client) {
-      // An argument-taking command with nothing typed yet: prefill and let the
-      // user finish in the composer rather than guessing.
-      if (builtin.prefill !== undefined && !args) {
-        setDraftSignal(`/${name} `);
-        return;
-      }
-      await runClient(builtin.client, args);
-      return;
-    }
-    await attempt(() => invoke("slash", { name, args }));
-  }
-
-  async function submit(text?: string): Promise<void> {
-    const value = (text ?? draft()).trim();
-    if (!value) return;
-    historyCursor = null;
-    setDraftSignal("");
-    const slash = parseSlash(value);
-    if (slash) {
-      await runCommandByName(slash.name, slash.args);
-      return;
-    }
-    pushHistory(value);
-    await send(value);
-  }
-
-  async function runCommand(command: Command): Promise<void> {
-    setPaletteOpen(false);
-    if (command.prefill !== undefined) {
-      setDraftSignal(`/${command.name} `);
-      return;
-    }
-    if (command.client) {
-      await runClient(command.client);
-      return;
-    }
-    await attempt(() => invoke("slash", { name: command.name, args: "" }));
-  }
-
-  async function loadCatalog(): Promise<void> {
-    try {
-      const response = await invoke("catalog");
-      setCatalog(normalizeCatalog(response.providers));
-      setNotice(null);
-    } catch (error) {
-      setNotice(`catalog: ${describe(error)}`);
-    }
-  }
-
-  function openPicker(): void {
-    setPickerOpen(true);
-  }
-
-  function closePicker(): void {
-    setPickerOpen(false);
-  }
-
-  function openPalette(): void {
-    setPaletteOpen(true);
-  }
-
-  function closePalette(): void {
-    setPaletteOpen(false);
-  }
-
-  // ---- slash palette (draft-driven) ---------------------------------------
-
-  function movePalette(delta: number): void {
-    const count = paletteMatches().length;
-    if (count === 0) {
-      setPaletteCursor(0);
-      return;
-    }
-    setPaletteCursor(Math.max(0, Math.min(count - 1, paletteIndex() + delta)));
-  }
-
-  function selectPalette(index: number): void {
-    const count = paletteMatches().length;
-    if (count === 0) {
-      setPaletteCursor(0);
-      return;
-    }
-    setPaletteCursor(Math.max(0, Math.min(count - 1, index)));
-  }
-
-  function completePalette(): void {
-    const command = paletteMatches()[paletteIndex()];
-    if (!command) return;
-    // Completing inserts `/name ` and stops there; the trailing space closes
-    // the palette so Enter afterwards is a plain submit of the command.
-    setDraft(`/${command.name} `);
-  }
-
-  async function runPaletteCommand(command: Command | undefined): Promise<void> {
-    if (!command) return;
-    setDraftSignal("");
-    setPaletteDismissed(false);
-    setPaletteCursor(0);
-    await runCommand(command);
-  }
-
-  async function runPalette(): Promise<void> {
-    const matches = paletteMatches();
-    await runPaletteCommand(matches[paletteIndex()] ?? matches[0]);
-  }
-
-  function dismissPalette(): void {
-    setPaletteDismissed(true);
-  }
-
-  function clearTranscript(): void {
-    toolRows.clear();
-    setRows([]);
-    setUsage(null);
-    setContext(null);
-    setSteps(0);
   }
 
   // ---- #62 — what the running screen shows --------------------------------
@@ -1707,6 +973,22 @@ export function createStore(): Store {
     }
   }
 
+  /**
+   * 真正发出去的指令 = **卡片里写好的提示词** + 用户那一句话。
+   *
+   * 这是一条曾经断掉的线：卡片（`tasks/*.ts`）里写满了"以第一张表的列名为准""原表
+   * 一张都不要动""结果另存新文件"这类规矩，`instructionFor()` 会把它们拼成完整指令，
+   * 但生产路径只发了用户那句话——也就是说**卡片的规矩从来没到过助手那里**，界面上
+   * 承诺的安全动作全靠运气。（真机上发现：我的验收脚本用的是 `task.prompt()`，所以
+   * 一直看着像对的。）
+   *
+   * 找不到卡片（历史记录里的旧任务、或者"直接说一件事"的自由任务）就退回原话。
+   */
+  function composedInstruction(run: TaskRun): string {
+    const composed = instructionFor(run.taskId, run.files, run.instruction);
+    return composed && composed.trim().length > 0 ? composed : run.instruction;
+  }
+
   async function sendRunInstruction(text: string): Promise<void> {
     // A run can start before the host has finished opening its session (the
     // health probe and the first task run on different clocks). Open one with
@@ -1787,7 +1069,8 @@ export function createStore(): Store {
     setCurrentRun(next);
     markProgressRunning();
     await beginSnapshot(next);
-    await sendRunInstruction(allowOverwrite ? run.instruction + OVERWRITE_CONSENT : run.instruction);
+    const instruction = composedInstruction(run);
+    await sendRunInstruction(allowOverwrite ? instruction + OVERWRITE_CONSENT : instruction);
   }
 
   async function dryRun(): Promise<void> {
@@ -1797,7 +1080,7 @@ export function createStore(): Store {
     setCurrentRun(next);
     markProgressRunning();
     await beginSnapshot(next);
-    await sendRunInstruction(dryRunInstruction(run.instruction));
+    await sendRunInstruction(dryRunInstruction(composedInstruction(run)));
   }
 
   function cancelRun(): void {
@@ -1989,74 +1272,17 @@ export function createStore(): Store {
   }
 
   return {
-    mode,
-    setMode,
-    connection,
     daemonStatus,
     session,
     approval,
     rows,
-    usage,
-    context,
     steps,
     progress,
     notice,
-    logs,
-    catalog,
-    canteVersion,
-    workspace,
-    commands,
-    draft,
-    history,
-    pickerOpen,
-    paletteOpen,
-    paletteVisible,
-    paletteQuery,
-    paletteMatches,
-    paletteIndex,
     connect,
     startSession,
-    send,
     interrupt,
     respond,
-    setEffort,
-    setPermissionMode,
-    setModel,
-    setCwd,
-    setDraft,
-    submit,
-    runCommand,
-    movePalette,
-    selectPalette,
-    completePalette,
-    runPalette,
-    runPaletteCommand,
-    dismissPalette,
-    historyPrev,
-    historyNext,
-    openPicker,
-    closePicker,
-    openPalette,
-    closePalette,
-    cycleEffort,
-    cyclePermission,
-    compact,
-    requestContextReport,
-    loadCatalog,
-    clearTranscript,
-    viewDensity,
-    cycleDensity,
-    capabilities,
-    ambient,
-    steer,
-    runShell,
-    terminal,
-    clearTerminal,
-    goal,
-    setGoal,
-    clearGoal,
-    requestGoalStatus,
-    requestAmbientPhrase,
     privacy,
     setLocalOnly,
     pickFiles,
@@ -2081,7 +1307,4 @@ export function createStore(): Store {
   };
 }
 
-// Re-exported so views do not need to reach into protocol.ts for copy.
-export { EFFORTS, PERMISSION_MODES, formatTokens };
-export type { RunState, TaskRun, TaskRunUndo } from "./simple/run.ts";
-export type { ProgressStep, RunProgressView } from "./simple/progress.ts";
+export type { TaskRun } from "./simple/run.ts";

@@ -277,3 +277,95 @@ describe("the curated cards (#74)", () => {
     expect(prompt).toContain("来自：");
   });
 });
+
+// ---------------------------------------------------------------------------
+// r10 — 两族护城河任务（文件批处理、微信）真机跑过之后补的钉子。
+//
+// 下面每一条都对应一次真机观察：不是「按理应该这样」，而是「真机上就是这样
+// 偏了一次，不能再偏回去」。真机记录见本轮提交说明。
+// ---------------------------------------------------------------------------
+
+describe("真机验过的两族任务（r10）", () => {
+  const R10_CARDS = [
+    "files.rename",
+    "files.archive",
+    "files.dupes",
+    "pdf.merge",
+    "pdf.split",
+    "pdf.toword",
+    "wechat.table",
+    "wechat.draft",
+    "wechat.batch",
+  ];
+
+  test("这九张卡都在目录里，而且每一张都写了风险", () => {
+    for (const id of R10_CARDS) {
+      const task = taskById(id);
+      expect(task).toBeDefined();
+      expect((task!.risks ?? []).length).toBeGreaterThan(0);
+    }
+  });
+
+  test("微信三张卡都把结果放在聊天记录旁边，而且全程只读", () => {
+    for (const id of ["wechat.table", "wechat.draft", "wechat.batch"]) {
+      const prompt = taskById(id)!.prompt(["/示例/聊天记录.txt"], "按我说的做");
+      // 真机上没写去处时，助手自己造了一个 out 文件夹，她找不到。
+      expect(prompt).toContain("结果文件放在聊天记录那个文件的旁边");
+      expect(prompt).toContain("不要发送任何消息");
+      expect(prompt).toContain("不要登录微信");
+      expect(prompt).toContain("不要改、不要删、不要覆盖");
+    }
+  });
+
+  test("微信草稿的两张卡都写明发送由用户自己完成", () => {
+    for (const id of ["wechat.draft", "wechat.batch"]) {
+      const prompt = taskById(id)!.prompt(["/示例/聊天记录.txt"], "");
+      expect(prompt).toContain("发送动作始终由你完成");
+    }
+  });
+
+  test("微信整理卡要求把接龙拆成一人一行（真机上这是最容易漏的一步）", () => {
+    const prompt = taskById("wechat.table")!.prompt(["/示例/聊天记录.txt"], "");
+    expect(prompt).toContain("接龙");
+    expect(prompt).toContain("每人一行");
+    expect(taskById("wechat.table")!.risks!.join("")).toContain("接龙");
+  });
+
+  test("处理 PDF 的卡都说明了抽出来的文字可能是乱码", () => {
+    // 真机上这台电脑的 PDF 工具对某些中文 PDF 会安静地吐出乱码（退出码 0，
+    // 不是文档里说的 3），所以卡片本身必须要求助手把读不成句子的输出当成读不出来。
+    for (const id of ["pdf.split", "pdf.toword"]) {
+      const prompt = taskById(id)!.prompt(["/示例/材料.pdf"], "");
+      expect(prompt).toContain("乱码");
+    }
+  });
+
+  test("整理文件夹的卡：冲突不覆盖，子文件夹里的文件也会被挪出来", () => {
+    const archive = taskById("files.archive")!;
+    const risks = archive.risks!.join("");
+    expect(risks).toContain("同名");
+    expect(risks).toContain("子文件夹");
+    const prompt = archive.prompt(["/示例/文件夹"], "");
+    expect(prompt).toContain("不要覆盖");
+    expect(prompt).toContain("子文件夹");
+  });
+
+  test("改名卡把序号顺序写成了风险（真机上这个顺序是助手自己定的）", () => {
+    const risks = taskById("files.rename")!.risks!.join("");
+    expect(risks).toContain("顺序");
+    expect(risks).toContain("序号");
+  });
+
+  test("会挪文件的卡和计划里承诺的一致：重名加序号，绝不覆盖", () => {
+    for (const id of ["files.rename", "files.archive"]) {
+      expect(taskById(id)!.plan.join("")).toContain("绝不覆盖");
+    }
+  });
+
+  test("微信界面那句「我不会替你发消息」放在 copy 模块里", async () => {
+    const screen = await Bun.file(`${import.meta.dir}/../WechatImport.tsx`).text();
+    expect(screen).toContain("WECHAT_UI");
+    const copyModule = await Bun.file(`${import.meta.dir}/../copy.ts`).text();
+    expect(copyModule).toContain("我不会替你发消息");
+  });
+});
