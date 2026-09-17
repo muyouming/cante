@@ -23,6 +23,21 @@ describe("explainError", () => {
     expect(explainError("401 Unauthorized: invalid api key").what).toBe(ERRORS.authWhat);
   });
 
+  test("动手的组件真正报的那句 Connection error. 也归到「连不上网」", () => {
+    // 真机验过：断网时 cante-bridge 的 headline 就是 Connection error.（没有
+    // details）。字典只认 ECONNREFUSED / connection refused 时，出错页的提示框
+    // 不会亮，她也就看不到「可能是网络断了」这句话。
+    const human = explainError("Connection error.");
+    expect(human.what).toBe(ERRORS.networkWhat);
+    expect(human.how).toBe(ERRORS.networkHow);
+    expect(human.detail).toBe("Connection error.");
+  });
+
+  test("那张提示框里的话不点名一个屏幕上没有的按钮", () => {
+    // 出错页上那个按钮叫「再试一次」；写死「重试」她按图索骥也找不到。
+    expect(ERRORS.networkHow).not.toContain("「重试」");
+  });
+
   test("the desktop-bridge message is explained for a browser preview", () => {
     expect(explainError("desktop bridge unavailable").what).toBe(ERRORS.bridgeWhat);
   });

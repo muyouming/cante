@@ -79,6 +79,18 @@ describe("actionsFor：常见失败各给一条能走的路", () => {
     ]);
   });
 
+  test("动手的组件说 Connection error.：同样是没联网，不给「重新选文件」", () => {
+    // 真机验过的那一串：断网时 cante-bridge 报的就是这一句（没有 details）。
+    // 旧写法只认 connection refused，于是她拿到的是「重新选一次文件」——
+    // 网络断了和她的文件没有一点关系。
+    const offline = actionsFor(err("Connection error."));
+    expect(kinds(offline)).toEqual(["retry", "copy-detail"]);
+    expect(offline[0]?.label).toContain("再试");
+    expect(kinds(offline)).not.toContain("pick-files");
+    // 那条 why 要把「网络」说出来，不然她不知道等一下是为了什么。
+    expect(offline[0]?.why).toContain("网络");
+  });
+
   test("她说「我拿不准」：回一句话，而不是重跑", () => {
     const unsure = actionsFor(err("我拿不准该核哪一列，需要你确认"));
     expect(unsure[0]?.kind).toBe("explain-in-words");
@@ -135,6 +147,14 @@ describe("actionsFor：可核对的原因（cause）也参与判断", () => {
     const missing = actionsFor(runFailure("ENOENT: no such file or directory"));
     expect(missing[0]?.kind).toBe("pick-files");
     expect(missing[0]?.label).toContain("选");
+  });
+
+  test("cause 说连不上服务方：过一会儿再试，不给「重新选文件」", () => {
+    // 出错页上真正会给她的形状：what/how 是 store 的兜底两句，原文只在 cause。
+    const offline = actionsFor(runFailure("Connection error."));
+    expect(kinds(offline)).toEqual(["retry", "copy-detail"]);
+    expect(offline[0]?.label).toContain("再试");
+    expect(kinds(offline)).not.toContain("pick-files");
   });
 
   test("cause 说没有权限：另存到能写的位置", () => {

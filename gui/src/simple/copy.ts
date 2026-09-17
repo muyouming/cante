@@ -149,7 +149,9 @@ export const ERRORS = {
   timeoutWhat: "处理的时间太长，等不到结果了。",
   timeoutHow: "点「重试」再来一次；如果还是不行，少选几个文件，或者点「换个方法」。",
   networkWhat: "连不上网上的服务，可能是网络断了，或者公司的网络挡住了。",
-  networkHow: "先用浏览器看看能不能打开网页，确认网络正常后，再点「重试」。",
+  // 这句会在出错页的提示框里、也可能在别处单独出现，所以不点名某个按钮——
+  // 出错页上那个按钮叫「再试一次」，写死「重试」她就找不到它了。
+  networkHow: "先用浏览器看看能不能打开网页；网络正常了，再试一次。",
   authWhat: "账号还没配置好，暂时用不了需要联网的功能。",
   authHow:
     "请找配置这台电脑的同事或管理员帮你配好账号，然后点「重试」。这期间可以先用不需要联网的功能。",
@@ -254,7 +256,11 @@ const DICTIONARY: readonly ErrorRule[] = [
     how: ERRORS.stoppedHow,
   },
   {
-    test: /\b(ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT)\b|connection refused|network (is )?unreachable|fetch failed|socket hang ?up|dns|getaddrinfo|offline|网络|连不上/i,
+    // 「连接不上」的原文不止一种写法。最要紧的一条是动手的组件真正报出来的
+    // 那一句：断网时它给的是 headline=Connection error.（没有 details），
+    // 既不带 ECONNREFUSED 也不说 connection refused——只认旧那几串的话，
+    // 她看到的就只剩「这件事没有做完」加一句「重新选一次文件」。（真机验过）
+    test: /\b(ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT)\b|connection (refused|error|failed|reset)|cannot connect|can.?t connect|failed to connect|unable to connect|connect error|network (is )?unreachable|network error|no internet|fetch failed|socket hang ?up|dns|getaddrinfo|offline|网络|连不上/i,
     what: ERRORS.networkWhat,
     how: ERRORS.networkHow,
   },
