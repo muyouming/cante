@@ -711,6 +711,81 @@ describe("replyToRun", () => {
 
 // ---------------------------------------------------------------------------
 
+describe("失败记录：可核对的原因不能被洗掉（r17）", () => {
+  const TASK = {
+    id: "excel.merge",
+    title: "把几张表合成一张",
+    plan: ["打开这几张表", "合成一张新表"],
+  };
+
+  /** 一件活真的跑起来，再用守护进程给的失败收尾。 */
+  async function runThenFail(store: Store, payload: unknown): Promise<void> {
+    await store.startRun(TASK, ["/work/报表.xlsx"], "把这两张表合成一张");
+    await store.confirmRun();
+    emit("event", event("TurnEnd", { status: payload }));
+    await Bun.sleep(25);
+  }
+
+  test("系统原话留在 cause 里，给用户看的两句仍是平实中文", async () => {
+    const { store, dispose } = await setup();
+    await runThenFail(store, {
+      Error: { headline: "EBUSY: resource busy or locked", details: ["open 'C:\\报表.xlsx'"] },
+    });
+
+    const run = store.currentRun();
+    expect(run?.state).toBe("failed");
+    const error = run?.error as {
+      what: string;
+      how: string;
+      detail: string;
+      cause?: string;
+    } | null;
+
+    // 可核对的原因一份不少：标题和底下的原文都在 cause 里。
+    expect(error?.cause).toContain("EBUSY: resource busy or locked");
+    expect(error?.cause).toContain("报表.xlsx");
+    // detail 仍是给技术同事的那一份。
+    expect(error?.detail).toBe(error?.cause);
+    // 给用户看的两句是平实中文，不得出现英文错误码 / 文件名后缀。
+    expect(error?.what).toBe("这件事没有做完。");
+    expect(error?.how).toContain("原来的文件都还在");
+    expect(error?.what).not.toContain("EBUSY");
+    expect(error?.how).not.toContain("EBUSY");
+    expect(error?.how).not.toContain("xlsx");
+    dispose();
+  });
+
+  test("试跑失败时 what 说的是试跑，cause 照样留着", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/报表.xlsx"], "把这两张表合成一张");
+    await store.dryRun();
+    emit(
+      "event",
+      event("TurnEnd", { status: { Error: { headline: "ENOENT: no such file", details: [] } } }),
+    );
+    await Bun.sleep(25);
+
+    const error = store.currentRun()?.error as { what: string; cause?: string } | null;
+    expect(error?.what).toBe("这次试跑没能做完。");
+    expect(error?.cause).toBe("ENOENT: no such file");
+    dispose();
+  });
+
+  test("守护进程直接报错那条路也一样：cause 是它给的原话", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/报表.xlsx"], "把这两张表合成一张");
+    await store.confirmRun();
+    emit("event", event("Error", "os error 13: Permission denied"));
+    await Bun.sleep(25);
+
+    const error = store.currentRun()?.error as { what: string; cause?: string } | null;
+    expect(store.currentRun()?.state).toBe("failed");
+    expect(error?.cause).toContain("Permission denied");
+    expect(error?.what).not.toContain("Permission");
+    dispose();
+  });
+});
+
 describe("#55 定时/重复任务", () => {
   const TASK = {
     id: "excel.merge",

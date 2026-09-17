@@ -106,6 +106,16 @@ Two bundles per release, both unsigned for now:
 
 WebView2 is installed by the bundle when the machine does not already have it (Windows 11 ships it). The app is not code-signed yet, so macOS Gatekeeper and Windows SmartScreen both warn on first launch and stop warning afterwards.
 
+### On Windows, read this first
+
+What the bundle above installs is the **interface**. The part that actually does the work — the assistant runtime — currently ships from upstream for **macOS and Linux only**; there is no native Windows build of it ([#103](https://github.com/muyouming/cante/issues/103)). So on a Windows machine today, the window opens and then cannot start a session.
+
+We would rather say that here than let you find out after installing:
+
+- **The wizard's second step checks for it** and, when it is missing, says so in plain Chinese, tells you who can fix it (the technical colleague who set up the machine), and gives you a 「复制详情」 button with the facts to hand over.
+- **A technical colleague can make it work today** by running that component inside WSL (Ubuntu) and pointing the app at it — the exact steps live in [`gui/DEVELOPING-WINDOWS.md`](https://github.com/muyouming/cante/blob/main/gui/DEVELOPING-WINDOWS.md). This is a reasonable thing for IT to set up once; it is not something we would ask the person using the app to do.
+- **We are deciding how to close this properly** (wait for an upstream Windows build, or run the work natively) in #103. Until then, the Windows build is honest about being incomplete rather than quietly useless.
+
 ## For developers
 
 The client is a Tauri 2 shell around `cante serve`, with a Vite + SolidJS + Tailwind front end. The Rust side owns the daemon process; the front end is plain TypeScript, which is why the task catalogue, the run model and the progress folding all unit-test without a window.

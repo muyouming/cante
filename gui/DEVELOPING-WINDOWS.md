@@ -118,3 +118,206 @@ Apple Silicon 只能虚拟化**同架构**的客户机，所以跑的是 **Windo
   中文输出撞 cp1252、`CHROME` 默认是 macOS 路径）；`scripts/windows/*.ps1` 必须存成 **UTF-8 with BOM**，
   否则 Windows PowerShell 5.1 按 GBK 解析，中文直接报语法错。
 - 下一步最要紧的一条：**给一个从当前 main 打出来的 Windows 包**，否则后面所有体验类结论都在测旧产品。
+
+## 办法四（步骤最多，所以放在最后）：在远程 Windows 服务器上跑真机任务普查
+
+前面三个办法看的是**界面**；这个办法跑的是**任务**：把 `gui/scripts/sweep/` 那套
+普查（用产品真实的 `instructionFor` 指令驱动真守护进程、自动应答审批、把产出读
+回来核对、生成 `report.md`）搬到真 Windows 上跑，再把结果打成一个 zip 拷回来。
+这是把"20 多张卡只在 macOS 上验过"这个缺口补上最快的一条路——不需要重建机器，
+一台能 RDP 的服务器就够。
+
+普查的用法与设计在 `gui/scripts/sweep/README.md`；这一节只讲**怎么在一台干净的
+Windows 服务器上把它跑起来、结果怎么拿回来、以及它验不了什么**。
+
+### 前置条件
+
+| 项 | 要求 | 说明 |
+| --- | --- | --- |
+| Windows 版本 | Windows 10 1809+ / 11；Server 2019+ | 只影响 WebView2 与安装包，普查本身要求不高 |
+| **WebView2 运行时** | **必须有** | Win11 与较新的 Win10 自带；**Windows Server 默认没有**。我们安装包会去下载它，但要联网；离线机器要先手动装 |
+| 管理员权限 | 装应用要，跑普查不要 | 静默安装与装 WebView2 需要；普查只用当前用户目录 |
+| Python | **3.10+** | 普查脚本是 Python（只用标准库，不用装包） |
+| bun | 必须有 | 提示词一律由产品自己的 `prompts.ts` 生成，不能用别的方式代替 |
+| Rust / cargo | **不需要** | 核验产出用的 `cante-sheets` / `cante-pdf` 由安装包带来，不在服务器上编译 |
+| 仓库 | 可读即可，不必可写 | 仓库只读时用 `--work` 把工作目录指到别处（见下） |
+
+WebView2 单独装（任选一种）：
+
+```powershell
+winget install Microsoft.EdgeWebView2Runtime
+# 或者从 https://developer.microsoft.com/microsoft-edge/webview2/ 下 Evergreen Bootstrapper
+```
+
+### 三条命令的完整流程
+
+**1) 装应用**（管理员 PowerShell；`/S` 是静默安装，去掉就是双击那种向导）：
+
+```powershell
+.\Cante_x.y.z_x64-setup.exe /S
+# 装完确认三个可执行文件在（守护进程 + 两个核验工具）：
+Get-ChildItem $env:LOCALAPPDATA -Recurse -Filter cante-sheets.exe -ErrorAction SilentlyContinue |
+  Select-Object -First 3 FullName
+```
+
+Tauri 的 NSIS 默认装到 `%LOCALAPPDATA%\Cante`（也可能在 `%LOCALAPPDATA%\Programs\Cante`
+或 `%PROGRAMFILES%\Cante`）；上面那条命令就是用来确认实际位置的。
+
+**2) 设模型端点**（只活在这个 PowerShell 窗口里，不写进任何文件）：
+
+```powershell
+$env:OPENAI_COMPATIBLE_BASE_URL = "https://你的网关/v1"
+$env:OPENAI_COMPATIBLE_API_KEY  = "sk-…"
+# 找不到守护进程时，脚本的报错会告诉你要设哪几个变量；一般是这个：
+$env:CANTE_BIN = "$env:LOCALAPPDATA\Cante\ante.exe"
+# 两个核验工具也可以单独指（带空格的路径不用加引号也行，脚本用列表参数调用）：
+# $env:CANTE_SHEETS_BIN = "$env:LOCALAPPDATA\Cante\cante-sheets.exe"
+# $env:CANTE_PDF_BIN    = "$env:LOCALAPPDATA\Cante\cante-pdf.exe"
+```
+
+**3) 跑普查**（Windows 上没有 bash，用 PowerShell 入口；参数与退出码原样转发）：
+
+```powershell
+cd <仓库>
+powershell -ExecutionPolicy Bypass -File gui\scripts\task-sweep.ps1 --list
+powershell -ExecutionPolicy Bypass -File gui\scripts\task-sweep.ps1 excel.diff
+powershell -ExecutionPolicy Bypass -File gui\scripts\task-sweep.ps1 excel.merge excel.tidy
+powershell -ExecutionPolicy Bypass -File gui\scripts\task-sweep.ps1 pdf
+powershell -ExecutionPolicy Bypass -File gui\scripts\task-sweep.ps1 --work "$env:TEMP\cante-sweep" --zip
+```
+
+* `--list`：看全部卡片（带场景的会显示成 `excel.merge[列名一致]`）。
+* 只跑几张卡：把卡片 id 写在后面（`excel.diff`）；只跑一类：给整类前缀
+  （`excel` / `files` / `pdf` / `doc` / `wechat`）。
+* 跑多久：正常一张卡 **30–60 秒**，慢模型实测到过 850 秒。所以有两个旋钮：
+  `--timeout`（默认 1800 秒，安全上限，别调小）与 `--stall-timeout`（默认 300 秒，
+  这么久一个事件都没有才算「卡住」）。报告里「卡住」与「超时到顶」是两类不同结论。
+* 仓库只读 / 不想写进仓库：`--work "$env:TEMP\cante-sweep"`。报告开头的
+  「这次是怎么跑的」一节会写明实际用的路径。
+* 环境变量在 PowerShell 里想临时用一次也行：
+  `$env:SWEEP_TIMEOUT = "900"`。
+
+### 结果怎么拿回来
+
+跑完控制台会打印一行「结果包：`C:\…\cante-sweep-<时间>.zip`」。包里有：
+
+| 位置 | 内容 |
+| --- | --- |
+| `report.md` | 一张卡一行的结论（通过 / 停下问问题 / 失败），失败带可操作证据 |
+| `work/` | 每张卡的输入副本、产出、`sweep-events.jsonl` 原始事件日志 |
+| `app-logs/` | `%USERPROFILE%\.ante\logs` 里最近 7 天的应用日志 |
+| `ZIP-说明.txt` | 这个包是怎么跑出来的、哪些文件因为含密钥没进包 |
+
+把**这一个 zip** 拷回开发机就够（报告 + 证据 + 日志都在里面）。没打包的话，至少
+拷 `report.md` 与 `work\results.json`（用 `--work` 改过目录时，报告开头写着实际路径）。
+
+**密钥不会进包**：环境变量里像密钥的值（`*_API_KEY` / `*TOKEN*` / `*SECRET*` …）
+会从文本文件里擦成 `<已隐藏的密钥>`，命中的二进制文件整个不打包，
+`settings.json` / `catalog.json` / `*.env` / `*.pem` / `*.key` 直接排除；包里的
+路径也已把真实家目录敏化成 `<用户>` / `~`。
+
+### 说清局限：这些必须人坐在 RDP 里手验
+
+普查能答的是「任务与产出」：真实的提示词发下去会怎样、计划/风险提示写得对不对、
+产出格式对不对、原件有没有被改坏。下面这些**自动化覆盖不到，必须人按上面
+「每次要在 Windows 上过一遍的清单」那 8 条手验**：
+
+1. **原生文件对话框**（清单第 4 条）——RDP 里也是真窗口，只能人点；中文/空格路径、
+   结果落在原文件旁边也得人看。
+2. **未签名提示 / 杀软**（第 2 条）——跟安装包签名和机器策略有关，脚本给不出
+   「王姐会看到什么」这种第一印象。
+3. **控制台黑窗闪不闪**（第 3 条）——普查自己用 `CREATE_NO_WINDOW` 把子进程窗口藏了，
+   所以它**不能**当这条的证据。
+4. **微信 PC + 中文输入法**（第 7 条）——要在 RDP 里装真微信、切真输入法，人自己敲。
+5. **WPS 的 `.et`**（第 6 条）——要装真 WPS，才能验那句「这是 WPS 自己的格式」
+   的提示落不落得地。
+6. **手感**（第 8 条）——RDP 的延迟会污染判断，别在 RDP 里给「卡不卡」下结论。
+7. **字体与排版**（第 1 条）——普查不看界面，一条渲染问题都发现不了。
+
+还有一条要说在明处：**RDP 会话里的普查本身没人验过**。如果同一张卡在 Windows 上
+的结论与 macOS 上明显不同（比如从「通过」变「失败」），先怀疑环境（驱动器盘符、
+路径长度、编码、WebView2 版本、有没有装 WPS/微信），再怀疑模型与提示词。
+
+## 用 WSL 跑真实端到端验收
+
+上面那份清单能证明"装得上、起得来、点得动"，但证明不了**真跑一张卡真的做完了事**。
+这一节专门解决它：让 Windows 上的应用连上一个**真的守护进程**，把一张卡从头跑到尾。
+
+### 为什么只能这样
+
+上游的 `cante`/`ante` **只有 Linux 与 macOS 构建**（官方 README 说 Windows 建议用 WSL）。
+Windows 上没有原生守护进程，应用就会去找 `cante`（`CANTE_BIN` 或 PATH），找不到就没有会话——
+这正是 `gui/README.md` 里写的"没有守护进程"那一类故障。所以唯一可行的路是：
+
+**守护进程跑在 WSL 里，Windows 上的应用用 `CANTE_BIN` 指过去。**
+
+WSL 里的 Linux 能访问局域网网关（上游二进制里本来就要连那个模型端点），这条路我们已经在
+Windows 11 + WSL（Ubuntu）上确认过能起来。
+
+### 三步
+
+1. **在 WSL 里装好 Linux 版 `ante`**（一次就够，之后可重复运行）：
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File gui\scripts\windows\wsl-ante-setup.ps1
+   ```
+
+   脚本会下载并解包到 WSL 里的 `~/cante-bin/`，跑 `ante --version` 和 `ante --help` 自检，
+   最后**打印出该设的 `CANTE_BIN` 值**。默认版本是 `0.preview.99`，可以 `-Version nightly` 换。
+
+2. **把打印出来的值设成 `CANTE_BIN`**。它长这样：
+
+   ```
+   wsl.exe -e /home/<你的用户>/cante-bin/ante serve
+   ```
+
+   只对当前窗口生效（验收最省事）：
+
+   ```powershell
+   $env:CANTE_BIN = "wsl.exe -e /home/<你的用户>/cante-bin/ante serve"
+   ```
+
+   或设成用户级（之后新开的窗口都带上，**要重新登录**才会传给开始菜单启动的程序）：
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable("CANTE_BIN", "wsl.exe -e /home/<你的用户>/cante-bin/ante serve", "User")
+   ```
+
+3. **从带了这个变量的窗口启动应用**，走一遍要验收的卡：
+
+   ```powershell
+   & "$env:LOCALAPPDATA\Cante\Cante.exe"     # 换成实际安装位置
+   ```
+
+   应用把 `CANTE_BIN` 当"命令"看，不是当路径：它认得这条里已经写好的 `serve`，不会再自己补一个
+   （所以不会变成 `ante serve serve`）。这条规则有测试：`gui/src-tauri/tests/binary_spec.rs`。
+
+### 怎么确认真的连上了（别只看窗口在不在）
+
+| 看什么 | 通过的标准 |
+| --- | --- |
+| WSL 里 | `wsl.exe -e /home/<用户>/cante-bin/ante --version` 打印出版本号（脚本已经替你跑过） |
+| 应用首次检查 | 过程走完、进到"准备好了"，**不是**"干活需要的组件还没装好"——后者说明版本探测没到位 |
+| 供应商列表 | 能列出来。这份列表来自 `ante catalog`，列得出来就说明应用真的在跟 WSL 里那个二进制说话 |
+| 真跑一张卡 | 挑一张**只读、不依赖 Windows 专有工具**的卡（例如合并两张表），能出结果文件、能在资源管理器里看到 |
+| 日志 | 应用里没有出现"组件没装好"这类提示，也没有意外的守护进程退出（`cante://exit`）；stdout 里没有一堆非 JSON 行 |
+
+一条卡跑完**至少留 1800 秒**（慢模型实测 850 秒；超时设 600 会把成功误判成失败）。
+
+### 明确的限制（这些是"我们验收的临时办法"，不是产品方案）
+
+- **这不是交付给用户的方案**。王姐不会装 WSL，也不该需要。它只是我们自己的验收手段；
+  用户机器上"没有守护进程"这件事仍然要靠安装包和面向用户的说明去解决，这条临时的路替代不了它。
+- **路径映射**：应用选出来的是 Windows 路径（`C:\Users\...\表.xlsx`），而 Linux 侧看到的是
+  `/mnt/c/Users/.../表.xlsx`。模型得自己把这层对上。**验收时要专门看这一条**：如果它说找不到文件，
+  那是路径映射的问题，不是"卡本身不行"——记下来，这需要另一张单子去改桥接层。
+- **性能不是真机结论**：虚拟机/WSL 上的耗时不能当作画像机（16GB 无独显）的体感。
+- **`bash -lc '……'` 那种写法别用**：作为 `CANTE_BIN` 它能起来，但应用的 `--version` / `catalog`
+  探测没法插到那段命令里（整串就是命令本身），首次检查会以为组件没装。用上面打印的那种简单写法。
+- **SSH 会话里看不到窗口**：从 SSH 起的 GUI 没有交互桌面，截图是空的。要看窗口必须走 **RDP**，
+  或把进程挂到已登录的会话上。
+
+### 这条路什么时候算"验收过"
+
+一份能让别人复核的最小证据：`ante --version` 的输出、应用里那张"准备好了"的截图（或供应商列表）、
+**一张卡的结果文件**（含文件路径和内容），以及跑这一轮的 `CANTE_BIN` 原文。缺哪一样都算没跑。

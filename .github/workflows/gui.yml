@@ -24,6 +24,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      # The cheapest gate goes first: this repository is public, and a key or a
+      # machine home directory that reaches the history cannot be washed out
+      # afterwards. The script only reads `git ls-files`, so it looks at the
+      # tracked sources — not the build output — and answers in a few seconds.
+      # Same step in both jobs: a secret does not care which OS compiled it.
+      - name: Secret scan (keys, private IPs, machine home directories)
+        run: bash gui/scripts/secret-scan.sh
+
       - uses: oven-sh/setup-bun@v2
 
       # Tauri 2 renders in WebKitGTK on Linux and the webkit2gtk crate links
@@ -67,6 +76,11 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+
+      # Same first gate as the Linux job — see the comment there.
+      - name: Secret scan (keys, private IPs, machine home directories)
+        run: bash gui/scripts/secret-scan.sh
+
       - uses: oven-sh/setup-bun@v2
       - uses: actions-rust-lang/setup-rust-toolchain@v2.0.0
         with:
@@ -79,3 +93,69 @@ jobs:
       # `CANTE_BIN="bun <script>"` because Windows has no shebang handling.
       - name: Run the app's e2e gate
         run: bash gui/scripts/e2e.sh
+
+      # --- The one thing this job never did: open the window ------------------
+      #
+      # Everything above compiles and unit-tests on Windows without ever showing
+      # a window, and `scripts/dom-smoke.sh` (macOS only) renders the frontend in
+      # Chrome. Neither says anything about WebView2, which is the runtime the
+      # product actually ships into. These steps build the app without bundling
+      # and drive the real window through `tauri-driver` + Edge WebDriver.
+      #
+      # Deliberately NOT part of `scripts/e2e.sh`: that script is also the local
+      # macOS gate, and macOS has no native WebDriver for WKWebView. See
+      # gui/e2e-windows/ and the section in gui/README.md.
+      - name: Install tauri-driver
+        run: cargo install tauri-driver --locked
+
+      # Edge and the WebView2 runtime are upgraded together with the runner
+      # image, so the driver version is resolved at run time: a pinned one stops
+      # matching, and the failure mode is a *hung* session rather than an error.
+      # The step prints the three versions it saw. `tauri-driver` finds
+      # `msedgedriver.exe` through the PATH this step exports.
+      - name: Install the matching msedgedriver
+        run: bash gui/e2e-windows/install-msedgedriver.sh
+
+      - name: Build the app for the smoke test (debug, no bundle)
+        working-directory: gui
+        run: bunx tauri build --debug --no-bundle
+
+      # De-elevated on purpose. WebView2 runtime 150+ ignores `WEBVIEW2_*`
+      # environment variables when the host process runs elevated
+      # (MicrosoftEdge/WebView2Feedback#5645), and msedgedriver passes the remote
+      # debugging port through exactly that variable. The runner's process *is*
+      # elevated, so without this the session dies after 60s with
+      # "DevToolsActivePort file doesn't exist" — reproduced here, and documented
+      # upstream in tauri-apps/wry#1782, whose maintainers publish this gsudo
+      # recipe for GitHub Actions. `icacls` is what lets the medium-integrity
+      # process keep reading the workspace and writing the screenshots.
+      - name: UI smoke test (real WebView2 window, de-elevated)
+        shell: pwsh
+        run: |
+          winget install --id gerardog.gsudo --exact --accept-source-agreements --accept-package-agreements --disable-interactivity
+          icacls "$env:GITHUB_WORKSPACE" /grant "Everyone:(OI)(CI)F" | Out-Null
+          # gsudo ships as an MSI, so it is not in this shell's PATH yet; look in
+          # the places the installer and winget put it.
+          $gsudo = (Get-Command gsudo -ErrorAction SilentlyContinue).Source
+          if (-not $gsudo) {
+            $gsudo = (Get-ChildItem "$env:ProgramFiles\gsudo", "$env:LOCALAPPDATA\Microsoft\WinGet" -Recurse -Filter gsudo.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          }
+          if (-not $gsudo) { throw "gsudo was not found after winget install" }
+          Write-Host "==> gsudo: $gsudo"
+          # Absolute paths: the script finds the binary, the driver and its own
+          # artifact folder from its own location, so the cwd can be anything.
+          & $gsudo --integrity Medium node "$env:GITHUB_WORKSPACE\gui\e2e-windows\smoke.mjs"
+          exit $LASTEXITCODE
+
+      # The diagnosis when something goes wrong: a screenshot, the rendered text
+      # and the page HTML, next to the tauri-driver log in the step output.
+      # Uploaded on every run on purpose — the screenshots are also how a human
+      # sees what the real WebView2 actually painted, on a green run too.
+      - name: Upload the UI smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-ui-smoke
+          path: gui/e2e-windows/artifacts/**
+          if-no-files-found: ignore
+          retention-days: 7

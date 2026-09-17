@@ -8,8 +8,10 @@
 import { For, Show, createSignal, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
-import { WIZARD, WIZARD_HEALTH } from "./copy.ts";
+import { COMMON, WIZARD, WIZARD_HEALTH } from "./copy.ts";
 import { adminConfigured, initAdminConfig } from "./admin-config.ts";
+import { copyDaemonDetails, daemonNotice, probeDaemon } from "./daemon.ts";
+import type { DaemonCapability } from "./daemon.ts";
 import { invoke, isBridgeAvailable, type Health } from "../tauri.ts";
 
 /** Set once the person has finished the wizard. */
@@ -81,22 +83,38 @@ export default function Wizard(props: WizardProps): JSX.Element {
   const [health, setHealth] = createSignal<Health | null>(null);
   const [bridgeMissing, setBridgeMissing] = createSignal(false);
   const [failed, setFailed] = createSignal(false);
+  // #103 — 这台电脑有没有那个真正干活的组件。null 是「没问出答案」（探测失败 /
+  // 浏览器预览），不是「缺组件」；只有明确的「不在」才显示那一节。
+  const [daemon, setDaemon] = createSignal<DaemonCapability | null>(null);
+  const [daemonCopied, setDaemonCopied] = createSignal(false);
+  const [daemonCopyFailed, setDaemonCopyFailed] = createSignal(false);
 
   const stepIndex = (): number => STEPS.indexOf(step());
   const ready = (): boolean =>
     !bridgeMissing() && !failed() && health()?.ok === true && !!health()?.cante;
 
+  const notice = (): ReturnType<typeof daemonNotice> => daemonNotice(daemon());
+
   const problem = (): string => {
     if (bridgeMissing()) return WIZARD_HEALTH.bridge;
     const result = health();
-    if (result && (!result.ok || !result.cante)) return WIZARD_HEALTH.engine;
+    if (result && (!result.ok || !result.cante)) return notice()?.what ?? WIZARD_HEALTH.engine;
     return WIZARD_HEALTH.unknown;
   };
+
+  async function onCopyDaemon(): Promise<void> {
+    const ok = await copyDaemonDetails(daemon());
+    setDaemonCopied(ok);
+    setDaemonCopyFailed(!ok);
+  }
 
   async function runCheck(): Promise<void> {
     setChecking(true);
     setFailed(false);
     setBridgeMissing(false);
+    setDaemon(null);
+    setDaemonCopied(false);
+    setDaemonCopyFailed(false);
     if (!isBridgeAvailable()) {
       // Plain browser preview: there is no desktop host to reach.
       setHealth(null);
@@ -108,6 +126,8 @@ export default function Wizard(props: WizardProps): JSX.Element {
       const result = await invoke("health");
       setHealth(result);
       if (result.ok && result.cante) markWizardDone();
+      // 能力探测单独走一条，它只回答「组件在不在」；问不到就当没答案。
+      setDaemon(await probeDaemon());
     } catch {
       setHealth(null);
       setFailed(true);
@@ -197,11 +217,43 @@ export default function Wizard(props: WizardProps): JSX.Element {
             </Show>
 
             <Show when={!checking() && !ready()}>
-              <p class="mt-4 text-[20px] font-semibold text-amber-400">{WIZARD.notReadyTitle}</p>
-              <p class="mt-2 text-[17px] leading-relaxed text-slate-300">
-                {problem()}
-                <Show when={bridgeMissing()}> {WIZARD.notReadyBody}</Show>
-              </p>
+              <Show
+                when={notice()}
+                fallback={
+                  <>
+                    <p class="mt-4 text-[20px] font-semibold text-amber-400">
+                      {WIZARD.notReadyTitle}
+                    </p>
+                    <p class="mt-2 text-[17px] leading-relaxed text-slate-300">
+                      {problem()}
+                      <Show when={bridgeMissing()}> {WIZARD.notReadyBody}</Show>
+                    </p>
+                  </>
+                }
+              >
+                {(section) => (
+                  <>
+                    <p class="mt-4 text-[20px] font-semibold text-amber-400">{section().title}</p>
+                    <p class="mt-2 text-[17px] leading-relaxed text-slate-300">{section().what}</p>
+                    <p class="mt-2 text-[17px] leading-relaxed text-slate-300">{section().body}</p>
+                    <p class="mt-2 text-[17px] leading-relaxed text-slate-300">
+                      {section().action}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => void onCopyDaemon()}
+                      class="mt-4 min-h-[48px] w-full rounded-xl border border-slate-700 px-6 text-[17px] text-slate-200 hover:border-slate-500"
+                    >
+                      {daemonCopied() ? COMMON.copied : section().copyLabel}
+                    </button>
+                    <Show when={daemonCopyFailed()}>
+                      <p class="mt-2 text-[16px] text-amber-400" role="alert">
+                        {section().copyFailed}
+                      </p>
+                    </Show>
+                  </>
+                )}
+              </Show>
               <button
                 type="button"
                 onClick={() => void runCheck()}

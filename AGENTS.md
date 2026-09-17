@@ -48,6 +48,22 @@ Cante 是一个给**中国非 IT 办公用户**（画像：王姐，45 岁，行
 
 **超时要设够**：单卡/单轮至少 **1800 秒**（慢模型实测 850 秒；设 600 会把成功误判成失败）。网关并发别贪多——并发过高会被断连，每次重连多等 60 秒。
 
+**但你自己跑的每条可能变慢的命令，必须带超时**——这条是真金白银换来的：一次远程会话里，
+一条用 WindowsInstaller COM 查 MSI 表的脚本跑了 20 分钟、烧掉 967 秒 CPU，**把那个 agent 的
+整轮堵死**（它在等一个永远不返回的命令，而外面看起来只是"没动静"）。
+
+```powershell
+# PowerShell：把活儿放进 Job 等，超时就停掉并如实报告"超时"
+$j = Start-Job { ... }; if (Wait-Job $j -Timeout 60) { Receive-Job $j } else { Stop-Job $j; "超时：60 秒没跑完" }
+```
+```bash
+# bash / python 同理
+timeout 60 <命令>            # bash
+result = subprocess.run(..., timeout=60)   # python
+```
+
+报告里 **"超时" 与 "确认没有" 必须分开写**——把"没等到结果"写成"没有"，是我们最怕的那种错。
+
 ## 6. Windows 的特殊事实（很重要）
 
 - 上游 `cante`/`ante` **只有 macOS 与 Linux 构建**（官方 README：Windows 建议用 WSL）。所以**Windows 原生跑不了真实任务**：应用会去找 `cante`（`CANTE_BIN` 或 PATH），找不到就没有会话。

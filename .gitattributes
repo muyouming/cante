@@ -1,3 +1,9 @@
 # Docusaurus content is documentation, not implementation code.
 docs-site/docs/** linguist-documentation=true
 docs-site/i18n/** linguist-documentation=true
+
+# 文本文件在仓库里一律用 LF，检出到哪台机器都一样。
+# 为什么：Windows 的检出默认会把换行变成 CRLF，而跨平台测试要解析仓库里的文件
+# （例如 fixture-parity 测试读 CONTRACT.md 的围栏代码块），`` 会让解析对不上——
+# 真发生过一次：macOS 与 Linux 全绿，Windows 上那条测试直接报"找不到围栏块"。
+* text=auto eol=lf
