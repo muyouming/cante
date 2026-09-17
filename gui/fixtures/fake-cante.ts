@@ -8,16 +8,23 @@
 // Scripted by op:
 //   StartSession     -> SessionStart (+ FAKE_CANTE_SEED=1: a seeded transcript)
 //   UserInput        -> TurnStart … approval TurnPause (turn_1)
-//   ApprovalResponse -> TurnResume, ToolEnd, UsageUpdate, TurnEnd (Completed)
+//   ApprovalResponse -> TurnResume, one ToolEnd per parked call, UsageUpdate,
+//                       TurnEnd (Completed). Each call's ToolEnd status follows
+//                       its own decision: accepted -> Completed, denied -> Denied
+//                       with no ToolStart after the resume (the call never ran).
 //   Goal             -> Info
 //   Interrupt        -> TurnEnd (Interrupted)
 //   Shutdown         -> Goodbye, then exit 0
 //
 // Env knobs:
-//   FAKE_CANTE_SLOW_DELTAS=1  split the delta run across a tick, no TurnStart,
-//                             to prove the bridge's quiet-window coalescing.
-//   FAKE_CANTE_SEED=1         on StartSession, emit a finished exchange plus a
-//                             pending approval, so the window opens populated.
+//   FAKE_CANTE_SLOW_DELTAS=1   split the delta run across a tick, no TurnStart,
+//                              to prove the bridge's quiet-window coalescing.
+//   FAKE_CANTE_SEED=1          on StartSession, emit a finished exchange plus a
+//                              pending approval, so the window opens populated.
+//   FAKE_CANTE_APPROVAL_BATCH  how many calls the scripted turn parks on (real
+//                              cante pauses a whole batch at once; default 1).
+//   FAKE_CANTE_TURN_ERROR=1    make UserInput fail mid-turn: an Error event
+//                              followed by a non-Completed TurnEnd.
 export {};
 
 let eventSeq = 0;
@@ -41,6 +48,36 @@ const SESSION = {
   skills: [],
   subagents: [],
 };
+
+/** A call the scripted turn parks on. `args` is echoed verbatim. */
+interface ParkedTool {
+  id: string;
+  name: string;
+  args: unknown;
+}
+
+/** The calls the last UserInput parked on; ApprovalResponse closes exactly these. */
+let parkedTools: ParkedTool[] = [];
+
+/**
+ * The scripted batch, sized by FAKE_CANTE_APPROVAL_BATCH.
+ *
+ * Real cante holds a whole batch of calls and asks about them at once, so the
+ * approval card has to render more than one row. The knob keeps the default
+ * single-call script intact and lets a test ask for the batch; the catalogue is
+ * fixed so ids stay stable and an out-of-range value clamps to a real script.
+ */
+function approvalBatch(): ParkedTool[] {
+  const parsed = Number.parseInt(process.env.FAKE_CANTE_APPROVAL_BATCH ?? "1", 10);
+  const size = Number.isFinite(parsed) && parsed >= 1 ? Math.min(parsed, 4) : 1;
+  const script: ParkedTool[] = [
+    { id: "tool_1", name: "Bash", args: { command: "ls" } },
+    { id: "tool_2", name: "Write", args: { path: "merged-result.xlsx" } },
+    { id: "tool_3", name: "Edit", args: { file_path: "report.xlsx" } },
+    { id: "tool_4", name: "Read", args: { file_path: "roster.xlsx" } },
+  ];
+  return script.slice(0, size);
+}
 
 // A short, already-finished turn followed by a turn parked on approval. Every
 // event below is a shape real cante emits (see `Evt` in protocol-shape).
@@ -71,6 +108,7 @@ function seedTranscript(parent: string): void {
   emit({ TurnStart: { turn_id: "turn_seed_2" } }, parent);
   emit({ AgentMessage: "I would like to write the missing README." }, parent);
   emit({ ToolStart: { id: "tool_seed_2", name: "Write", args: { path: "gui/README.md", content: "…" } } }, parent);
+  parkedTools = [{ id: "tool_seed_2", name: "Write", args: { path: "gui/README.md" } }];
   emit(
     {
       TurnPause: {
@@ -116,6 +154,31 @@ function handle(op: unknown, id: string): void {
   }
   if ("UserInput" in record) {
     const turn_id = "turn_1";
+    // Mid-turn failure: real cante reports the cause once as `Error`, then
+    // closes the turn with a non-Completed status the error page reads.
+    if (process.env.FAKE_CANTE_TURN_ERROR === "1") {
+      emit({ TurnStart: { turn_id } }, id);
+      emit({ MessageDelta: "starting the job" }, id);
+      emit({ AgentMessage: "starting the job" }, id);
+      emit({ Error: "provider error: HTTP 429 Too Many Requests" }, id);
+      emit(
+        {
+          TurnEnd: {
+            turn_id,
+            status: {
+              Error: {
+                kind: "rate_limited",
+                headline: "rate limited",
+                details: ["HTTP 429 Too Many Requests", "the gateway asked us to slow down"],
+              },
+            },
+            steps: 1,
+          },
+        },
+        id,
+      );
+      return;
+    }
     // Slow mode splits the delta run across a tick so tests can prove the
     // bridge's quiet window coalesces it instead of returning token by token.
     if (process.env.FAKE_CANTE_SLOW_DELTAS === "1") {
@@ -135,13 +198,21 @@ function handle(op: unknown, id: string): void {
     emit({ MessageDelta: "hello " }, id);
     emit({ MessageDelta: "world" }, id);
     emit({ AgentMessage: "hello world" }, id);
-    emit({ ToolStart: { id: "tool_1", name: "Bash", args: { command: "ls" } } }, id);
-    emit({ ToolUpdate: { tool_use_id: "tool_1", seq: 1, message: "running" } }, id);
+    parkedTools = approvalBatch();
+    parkedTools.forEach((tool, index) => {
+      emit({ ToolStart: { id: tool.id, name: tool.name, args: tool.args } }, id);
+      emit({ ToolUpdate: { tool_use_id: tool.id, seq: 1, message: index === 0 ? "running" : "preparing" } }, id);
+    });
     emit(
       {
         TurnPause: {
           turn_id,
-          reason: { Approval: { tools: [{ id: "tool_1", name: "Bash", args: { command: "ls" } }], message: "Allow?" } },
+          reason: {
+            Approval: {
+              tools: parkedTools.map((tool) => ({ id: tool.id, name: tool.name, args: tool.args })),
+              message: "Allow?",
+            },
+          },
         },
       },
       id,
@@ -149,8 +220,28 @@ function handle(op: unknown, id: string): void {
     return;
   }
   if ("ApprovalResponse" in record) {
+    // The window answers the whole batch at once; each call is closed by its own
+    // decision. A denied call never started, so it gets no ToolStart after the
+    // resume — only a Denied ToolEnd, which is how the row is coloured.
+    const responses =
+      (record.ApprovalResponse as { responses?: Array<{ tool_use_id?: string; decision?: string }> }).responses ?? [];
+    const tools = parkedTools.length > 0 ? parkedTools : [{ id: "tool_1", name: "Bash", args: { command: "ls" } }];
     emit({ TurnResume: { turn_id: "turn_1" } }, id);
-    emit({ ToolEnd: { tool_use_id: "tool_1", tool_name: "Bash", status: "Completed", result_json: { content: "ok" } } }, id);
+    for (const tool of tools) {
+      const decision = responses.find((response) => response.tool_use_id === tool.id)?.decision ?? "Deny";
+      const accepted = decision === "Accept" || decision === "AcceptForSession" || decision === "AcceptAlways";
+      emit(
+        {
+          ToolEnd: {
+            tool_use_id: tool.id,
+            tool_name: tool.name,
+            status: accepted ? "Completed" : "Denied",
+            result_json: { content: accepted ? "ok" : "the user denied this call" },
+          },
+        },
+        id,
+      );
+    }
     emit({ UsageUpdate: { usage: { input_tokens: 10, output_tokens: 2 }, context: { used_tokens: 12, limit_tokens: 100 } } }, id);
     emit({ TurnEnd: { turn_id: "turn_1", status: "Completed", steps: 2 } }, id);
     return;

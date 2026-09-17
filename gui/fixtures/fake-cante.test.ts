@@ -212,6 +212,138 @@ test("ApprovalResponse resumes, ends the tool, then completes the turn", async (
   }
 });
 
+test("FAKE_CANTE_APPROVAL_BATCH parks a whole batch and answers each call on its own decision", async () => {
+  const fake = spawnFake({ FAKE_CANTE_APPROVAL_BATCH: "2" });
+  try {
+    await fake.send({ StartSession: {} });
+    named(await fake.next(), "SessionStart");
+    await fake.send({ UserInput: "tidy two files" });
+
+    const before: string[] = [];
+    let pause: any;
+    for (let i = 0; i < 30 && !pause; i++) {
+      const frame = await fake.next();
+      before.push(eventName(frame.event));
+      if (eventName(frame.event) === "TurnPause") pause = frame.event;
+    }
+
+    const tools = pause.TurnPause.reason.Approval.tools;
+    expect(tools.map((tool: any) => tool.id)).toEqual(["tool_1", "tool_2"]);
+    // Both calls are announced and then parked in one pause: the batch the
+    // approval card is designed to list.
+    expect(before.filter((name) => name === "ToolStart")).toHaveLength(2);
+    expect(before.at(-1)).toBe("TurnPause");
+
+    await fake.send({
+      ApprovalResponse: {
+        turn_id: "turn_1",
+        responses: [
+          { tool_use_id: "tool_1", decision: "Accept" },
+          { tool_use_id: "tool_2", decision: "AcceptAlways" },
+        ],
+      },
+    });
+
+    const after: string[] = [];
+    const ends: any[] = [];
+    for (;;) {
+      const frame = await fake.next();
+      const name = eventName(frame.event);
+      after.push(name);
+      if (name === "ToolEnd") ends.push(named(frame, "ToolEnd"));
+      if (name === "TurnEnd") break;
+    }
+    expect(after).toEqual(["TurnResume", "ToolEnd", "ToolEnd", "UsageUpdate", "TurnEnd"]);
+    expect(ends.map((end) => [end.tool_use_id, end.status])).toEqual([
+      ["tool_1", "Completed"],
+      ["tool_2", "Completed"],
+    ]);
+  } finally {
+    await fake.close();
+  }
+});
+
+test("a denied call resumes the turn and closes as Denied without ever starting", async () => {
+  const fake = spawnFake({ FAKE_CANTE_APPROVAL_BATCH: "2" });
+  try {
+    await fake.send({ StartSession: {} });
+    named(await fake.next(), "SessionStart");
+    await fake.send({ UserInput: "tidy two files" });
+    while (eventName((await fake.next()).event) !== "TurnPause") {
+      // drain up to the pause
+    }
+
+    await fake.send({
+      ApprovalResponse: {
+        turn_id: "turn_1",
+        responses: [
+          { tool_use_id: "tool_1", decision: "Deny" },
+          { tool_use_id: "tool_2", decision: "Accept" },
+        ],
+      },
+    });
+
+    const after: string[] = [];
+    const ends: any[] = [];
+    for (;;) {
+      const frame = await fake.next();
+      const name = eventName(frame.event);
+      after.push(name);
+      if (name === "ToolEnd") ends.push(named(frame, "ToolEnd"));
+      if (name === "TurnEnd") break;
+    }
+    // The effect of a refusal: the call never ran, so no ToolStart follows the
+    // resume — only the Denied ToolEnd that colours its row.
+    expect(after).not.toContain("ToolStart");
+    expect(after).toEqual(["TurnResume", "ToolEnd", "ToolEnd", "UsageUpdate", "TurnEnd"]);
+    expect(ends.map((end) => [end.tool_use_id, end.status])).toEqual([
+      ["tool_1", "Denied"],
+      ["tool_2", "Completed"],
+    ]);
+    expect(String(ends[0].result_json.content)).toContain("denied");
+  } finally {
+    await fake.close();
+  }
+});
+
+test("FAKE_CANTE_TURN_ERROR reports Error then a non-Completed TurnEnd", async () => {
+  const fake = spawnFake({ FAKE_CANTE_TURN_ERROR: "1" });
+  try {
+    await fake.send({ StartSession: {} });
+    named(await fake.next(), "SessionStart");
+    await fake.send({ UserInput: "run the job" });
+
+    const seen: string[] = [];
+    let reported: any;
+    let end: any;
+    for (let i = 0; i < 20 && !end; i++) {
+      const frame = await fake.next();
+      const name = eventName(frame.event);
+      seen.push(name);
+      if (name === "Error") reported = named(frame, "Error");
+      if (name === "TurnEnd") end = named(frame, "TurnEnd");
+    }
+
+    expect(reported).toBe("provider error: HTTP 429 Too Many Requests");
+    expect(seen.at(-1)).toBe("TurnEnd");
+    // Externally tagged struct variant with the machine-readable kind, exactly
+    // the shape the store's error page reads.
+    expect(end).toEqual({
+      turn_id: "turn_1",
+      status: {
+        Error: {
+          kind: "rate_limited",
+          headline: "rate limited",
+          details: ["HTTP 429 Too Many Requests", "the gateway asked us to slow down"],
+        },
+      },
+      steps: 1,
+    });
+  } finally {
+    await fake.close();
+  }
+});
+
 test("Goal answers with Info for Set, Status and Clear", async () => {
   const fake = spawnFake();
   try {
