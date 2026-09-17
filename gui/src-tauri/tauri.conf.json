@@ -39,10 +39,10 @@
     "longDescription": "A graphical client for the Cante coding agent: session rail, streaming transcript, tool cards and approvals.",
     "copyright": "Copyright © 2026 Antigma Labs",
     "licenseFile": "../../LICENSE",
-    "resources": {
-      "target/release/cante-sheets": "cante-sheets",
-      "target/release/cante-pdf": "cante-pdf"
-    },
+    "resources": [
+      "target/release/cante-sheets*",
+      "target/release/cante-pdf*"
+    ],
     "macOS": {
       "minimumSystemVersion": "11.0"
     },

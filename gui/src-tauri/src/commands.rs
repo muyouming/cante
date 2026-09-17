@@ -72,10 +72,25 @@ pub fn resolve_tool_bin(
     }
 
     if let Some(dir) = exe_dir {
+        // 直接与可执行文件同目录 / macOS 的 ../Resources（Tauri 的资源目录）。
         if let Some(found) = existing(dir.join(bin_name)) {
             return available(&found);
         }
         if let Some(found) = existing(dir.join("..").join("Resources").join(bin_name)) {
+            return available(&found);
+        }
+        // 以及"资源按原目录结构打包"后的位置：tauri 的 resources 用数组写 glob 时，
+        // 文件会落到 $RESOURCE/target/release/<名字>。Windows 上产物的名字带 .exe，
+        // 所以这里不能只找无扩展名的那一个（这正是 #112 的另一半）。
+        let bundled = ["target", "release"];
+        let nested = bundled.iter().fold(dir.to_path_buf(), |acc, part| acc.join(part));
+        if let Some(found) = existing(nested.join(bin_name)) {
+            return available(&found);
+        }
+        let resources_nested = ["..", "Resources", "target", "release"]
+            .iter()
+            .fold(dir.to_path_buf(), |acc, part| acc.join(part));
+        if let Some(found) = existing(resources_nested.join(bin_name)) {
             return available(&found);
         }
     }
@@ -591,6 +606,46 @@ mod tests {
         let binary = dir.join(name);
         fs::write(&binary, b"#!/bin/sh\n").expect("write stub");
         binary.to_string_lossy().into_owned()
+    }
+
+    /// #112：打包后的资源会保留原目录结构（`$RESOURCE/target/release/<名字>`），
+    /// 而 Windows 上的名字带 `.exe`。解析器必须能找到这两种位置——真机验收时正是这里
+    /// 让"我们做出来的工具在 Windows 上等于没有"（配置没打包 + 找不到）。
+    #[test]
+    fn finds_a_tool_bundled_under_target_release() {
+        let dir = TempDir::new("bundled");
+        let expected = place_named(&dir.0.join("target").join("release"), SHEET_BIN_NAME);
+        let found = resolve_tool_bin(SHEET_BIN_NAME, None, Some(&dir.0), None, None, "缺");
+        assert!(found.available, "应当找到 {expected}");
+        assert_eq!(found.path.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn finds_a_tool_bundled_under_the_macos_resources_tree() {
+        let dir = TempDir::new("bundled-macos");
+        let expected = place_named(
+            &dir.0.join("..").join("Resources").join("target").join("release"),
+            SHEET_BIN_NAME,
+        );
+        let found = resolve_tool_bin(SHEET_BIN_NAME, None, Some(&dir.0), None, None, "缺");
+        assert!(found.available, "应当找到 {expected}");
+        assert_eq!(found.path.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn a_tool_of_the_other_platforms_name_does_not_count() {
+        // 名字是平台相关的（`cfg!(windows)` 决定带不带 .exe）。放一个"另一种平台"的
+        // 文件名进去，必须**不算**找到——否则我们会对外宣称有工具却调不起来。
+        //
+        // 注意：每个测试要用自己的根目录。`../Resources/...` 会跳出当前目录，
+        // 如果几个测试共用父目录，一个测试放的文件会被另一个测试找到（写过一次，红了）。
+        let outer = TempDir::new("wrong-name");
+        let dir = outer.0.join("isolated");
+        fs::create_dir_all(&dir).expect("create dir");
+        let other = if cfg!(windows) { "cante-sheets" } else { "cante-sheets.exe" };
+        place_named(&dir.join("target").join("release"), other);
+        let found = resolve_tool_bin(SHEET_BIN_NAME, None, Some(&dir), None, None, "缺");
+        assert!(!found.available, "不该把 {other} 当成 {SHEET_BIN_NAME}");
     }
 
     #[test]
