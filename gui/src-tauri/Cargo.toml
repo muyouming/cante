@@ -41,6 +41,13 @@ path = "src/bin/cante-sheets.rs"
 name = "cante-pdf"
 path = "src/bin/cante-pdf.rs"
 
+# #103 方案 C 的第一段：把 Cante 的 Op/Evt 协议架在 `pi --mode rpc` 前面。
+# 它和另外两个 helper 一样不是应用本体（default-run 仍然是 cante-gui）；
+# 这一段只做适配器本身，不进安装包（windows 打包不在本段范围）。
+[[bin]]
+name = "cante-bridge"
+path = "src/bin/cante-bridge.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
