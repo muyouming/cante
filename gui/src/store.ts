@@ -34,6 +34,7 @@ import {
   runIsOnline,
   type SnapshotDiff,
   type SnapshotEntry,
+  type TaskError,
   type TaskRun,
   type TaskRunUndo,
 } from "./simple/run.ts";
@@ -773,7 +774,7 @@ export function createStore(): Store {
         if (currentRun()?.state === "running") {
           if (reason.kind === "ok") void finishRun("done");
           else if (reason.kind === "interrupted") void finishRun("cancelled");
-          else void finishRun("failed", reason.headline);
+          else void finishRun("failed", turnFailureText(reason));
         }
         return;
       }
@@ -1048,11 +1049,39 @@ export function createStore(): Store {
     }
   }
 
-  function runError(detail: string | undefined, run: TaskRun): TaskRun["error"] {
+  /**
+   * 记进运行记录的失败原文 = 标题 + 底下的原始说明。
+   *
+   * 只留下 headline 会把「为什么」洗掉：headline 常常只是笼统的一句（例如
+   * 「turn failed」），真正可核对的事实在 details 里。出错页要据此给出具体出路，
+   * 所以两层都要留，而不是只给她一句「没有做完」。
+   */
+  function turnFailureText(reason: { headline: string; details: string[] }): string {
+    const parts = [reason.headline, ...reason.details]
+      .map((part) => part.trim())
+      .filter((part) => part.length > 0);
+    return clampText(parts.join("\n"), MAX_TOOL_DETAIL);
+  }
+
+  /**
+   * 失败记录的形状在 run.ts 里是冻结的（`TaskError`：what/how/detail），这一层
+   * 额外带上 `cause`：系统原话、错误码、「正被占用 / 找不到」之类的**可核对原文**。
+   *
+   * 它只给判断出路的人（`simple/recovery.ts`）用，**不许出现在界面上**——给用户看
+   * 的仍然是 what/how 那两句平实中文。之所以不跟着 detail 走：detail 是给技术同事
+   * 看的那一份，可能被换成更友好的说法，而「这一步到底该怎么办」必须拿得到原文。
+   */
+  type RunError = TaskError & { cause?: string };
+
+  function runError(detail: string | undefined, run: TaskRun): RunError {
+    const raw = typeof detail === "string" ? detail.trim() : "";
     return {
       what: run.dryRun ? "这次试跑没能做完。" : "这件事没有做完。",
       how: "原来的文件都还在。可以再试一次，或者换一种说法告诉我要做什么。",
-      detail: detail && detail.length > 0 ? detail : "没有更多说明。",
+      detail: raw.length > 0 ? raw : "没有更多说明。",
+      // 没有原文时就不填 cause：让出错页老老实实退回通用出口，
+      // 而不是拿一句我们自己写的兜底话去冒充「原因」。
+      ...(raw.length > 0 ? { cause: raw } : {}),
     };
   }
 

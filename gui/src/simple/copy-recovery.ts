@@ -18,6 +18,7 @@ export const RECOVERY: {
   readonly pickFiles: RecoveryCopy;
   readonly pickOtherFile: RecoveryCopy;
   readonly closeFile: RecoveryCopy;
+  readonly closeOffice: RecoveryCopy;
   readonly saveElsewhere: RecoveryCopy;
   readonly cleanDisk: RecoveryCopy;
   readonly explainInWords: RecoveryCopy;
@@ -56,6 +57,11 @@ export const RECOVERY: {
   closeFile: {
     label: "关掉那个窗口再试",
     why: "这个文件正被 Excel 或 WPS 打开着，所以改不动。先把那个窗口关掉，再点这个按钮。",
+  },
+  /** 原文里能听出是一张表格（Excel / WPS 的表格）：按钮直接点到那个程序。 */
+  closeOffice: {
+    label: "关掉 Excel 里那个窗口",
+    why: "这张表格正被 Excel 或 WPS 打开着，所以改不动它。在任务栏里找到那个表格窗口关掉，再点这个按钮。",
   },
   /** 没有权限：换个她能写的位置。 */
   saveElsewhere: {

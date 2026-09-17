@@ -20,7 +20,7 @@ import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { COMMON, ERROR_VIEW, explainError } from "./copy.ts";
-import { actionsFor } from "./recovery.ts";
+import { actionsFor, causeOf } from "./recovery.ts";
 import type { RecoveryAction, RecoveryContext } from "./recovery.ts";
 
 export interface ErrorViewProps {
@@ -79,7 +79,10 @@ export default function ErrorView(props: ErrorViewProps): JSX.Element {
   const [copied, setCopied] = createSignal(false);
   const [copyFailed, setCopyFailed] = createSignal(false);
   const human = (): ReturnType<typeof explainError> => explainError(props.error);
-  const actions = (): RecoveryAction[] => actionsFor(human(), props.context);
+  // `explainError` 只留下 what/how/detail（那三句是给她看的），可核对的原因得从
+  // 原始出错对象上单独取回来交给 actionsFor。cause 只用于判断，不在这里渲染。
+  const actions = (): RecoveryAction[] =>
+    actionsFor({ ...human(), cause: causeOf(props.error) }, props.context);
 
   async function onCopy(): Promise<void> {
     const detail = human().detail || `${human().what}\n${human().how}`;

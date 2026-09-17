@@ -35,11 +35,21 @@ export interface RecoveryAction {
   why: string;
 }
 
-/** 出错对象里被拿来判断的三段文本（`TaskRun.error` / `explainError` 的产物）。 */
+/** 出错对象里被拿来判断的几段文本（`TaskRun.error` / `explainError` 的产物）。 */
 export interface RecoveryError {
   what: string;
   how: string;
   detail: string;
+  /**
+   * 可核对的特征文本：系统原话、错误码、被占用/找不到之类的原文。
+   *
+   * `TaskRun.error.cause` 会把原始说明原样带上；detail 是给技术同事看的那一份，
+   * 可能已经被换成更友好的话，所以判断出路时先看 cause。这是**判断用的**，出错
+   * 界面不许把它打出来。
+   *
+   * 旧调用方不传这一项，行为和从前一模一样（只看 what/how/detail）。
+   */
+  cause?: string;
 }
 
 /** 这件事本来需要什么。缺省按「需要文件」处理，也就是原来的「换个方法」。 */
@@ -84,6 +94,15 @@ const BUSY =
 const OFFICE_OPEN =
   /\bExcel\b|\bWPS\b|金山表格|电子表格程序|~\$|\.(xlsx|xlsm|xlsb|xls|ett?|wps|docx?|pptx?)\b/i;
 
+/** 听起来就是一张表格（Excel / WPS 的表格）：按钮上可以直接写「Excel」。 */
+const SPREADSHEET = /\.(xlsx|xlsm|xlsb|xls|ett?|wps)\b|\bExcel\b|\bWPS\b|金山表格|电子表格/i;
+
+/**
+ * Excel / WPS 打开表格时会在旁边留一个 `~$` 开头的临时文件。原文里出现这个记号，
+ * 就说明那张表此刻正开着它——比泛泛的「文件打不开 / 格式看不懂」具体得多。
+ */
+const LOCK_FILE = /~\$/;
+
 /** 系统不让写。 */
 const PERMISSION =
   /permission denied|access is denied|operation not permitted|\bEACCES\b|\bEPERM\b|os error (1|13)\b|拒绝访问|没有权限|权限不足|只读|cannot write|write-protected/i;
@@ -115,6 +134,30 @@ const FORMAT =
 
 function action(kind: RecoveryKind, copy: RecoveryCopy): RecoveryAction {
   return { kind, label: copy.label, why: copy.why };
+}
+
+/**
+ * 从出错对象里取出可核对的特征文本。
+ *
+ * 只认对象上的 `cause`：抛出的是字符串 / Error 时本来就没这一段（`Error.message`
+ * 会经由 `explainError` 进 detail），返回 undefined，让 `actionsFor` 退回老样子。
+ */
+export function causeOf(input: unknown): string | undefined {
+  if (!input || typeof input !== "object") return undefined;
+  const cause = (input as { cause?: unknown }).cause;
+  return typeof cause === "string" && cause.trim().length > 0 ? cause : undefined;
+}
+
+/**
+ * 「表格被 Excel / WPS 开着」时按钮该点哪个程序。
+ *
+ * 只在原文真的能听出是表格时才在按钮上写「Excel」；认不出（例如只说是某个文档）
+ * 就用通用的「那个窗口」，不拿一个猜出来的程序名去误导她。
+ */
+function closeAction(text: string): RecoveryAction {
+  return SPREADSHEET.test(text)
+    ? action("close-file", RECOVERY.closeOffice)
+    : action("close-file", RECOVERY.closeFile);
 }
 
 const COPY_DETAIL = action("copy-detail", RECOVERY.copyDetail);
@@ -151,8 +194,10 @@ function generic(context?: RecoveryContext): RecoveryAction[] {
  * @param context 这件事本来需要什么；不传就按「需要文件」处理。
  */
 export function actionsFor(error: RecoveryError, context?: RecoveryContext): RecoveryAction[] {
-  const text = [error?.what ?? "", error?.how ?? "", error?.detail ?? ""]
-    .map((part) => String(part))
+  // cause 排在最前面：它是可以被核对的那段原文，比已经写成平实中文的 what/how
+  // 更接近系统真正说过的话。旧调用方没有 cause，拼出来的文本和从前一模一样。
+  const text = [causeOf(error), error?.what ?? "", error?.how ?? "", error?.detail ?? ""]
+    .map((part) => String(part ?? ""))
     .join("\n");
 
   // 空文本 / 认不出来：通用出口。判断顺序在下面：先挑最具体的。
@@ -172,12 +217,17 @@ export function actionsFor(error: RecoveryError, context?: RecoveryContext): Rec
     actions = [action("pick-files", RECOVERY.pickFiles)];
     if (context?.needs === "folder") actions.push(action("open-folder", RECOVERY.openFolder));
   } else if (BUSY.test(text)) {
-    actions = [action("close-file", RECOVERY.closeFile)];
+    // 表格被占用：Windows 上十有八九是 Excel / WPS 正开着它，按钮直接点那个程序。
+    actions = [closeAction(text)];
+  } else if (LOCK_FILE.test(text)) {
+    // 原文里带着 `~$` 这种临时锁文件的记号：表格开着它。这一条要排在「格式看不懂」
+    // 前面——光看 .xlsx 后缀会被归成「换一份文件再试」，那道按钮她不点也对不上。
+    actions = [closeAction(text)];
   } else if (PERMISSION.test(text)) {
     // 在 Windows 上，「写不进 xlsx」最常见的原因就是 Excel/WPS 正开着它，
     // 报出来的却是 Permission denied。所以两条路都给：先关窗口，不行再换位置。
     actions = OFFICE_OPEN.test(text)
-      ? [action("close-file", RECOVERY.closeFile), action("save-elsewhere", RECOVERY.saveElsewhere)]
+      ? [closeAction(text), action("save-elsewhere", RECOVERY.saveElsewhere)]
       : [action("save-elsewhere", RECOVERY.saveElsewhere)];
   } else if (SPACE.test(text)) {
     actions = [action("retry", RECOVERY.cleanDisk)];
