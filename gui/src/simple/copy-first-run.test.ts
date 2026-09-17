@@ -11,6 +11,8 @@ import {
   FIRST_RUN_SENTENCE_KEY,
   FREE_TEXT_RUN_ID,
   SAY_EXAMPLES,
+  exampleForSentence,
+  firstWinHintFor,
   firstWinRun,
   nextTimeSuggestion,
   rememberSentence,
@@ -19,7 +21,7 @@ import {
   type FinishedRun,
   type SentenceStore,
 } from "./copy-first-run.ts";
-import { FREE_TEXT_TASK_ID, taskById } from "./tasks/index.ts";
+import { FREE_TEXT_TASK_ID, freeTask, taskById } from "./tasks/index.ts";
 
 // ---------------------------------------------------------------------------
 // 三句例子：覆盖三种难度，而且都是她说得出口的一句话
@@ -64,6 +66,44 @@ describe("三句例子", () => {
     expect(FREE_TEXT_RUN_ID).toBe(FREE_TEXT_TASK_ID);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 照着例子原样说的一句：走卡片那条路
+//
+// F2：第三句例子（微信接龙）是要「贴进去的文字」，而「直接说一句话」那条路得到的
+// 是 freeTask（needs: "files"），她会卡在「先选一个」那一步。照原文提交时得进卡片。
+// ---------------------------------------------------------------------------
+
+describe("照着例子原样提交", () => {
+  test("每一句例子都认得出来，两头的空格不算改字", () => {
+    for (const item of SAY_EXAMPLES) {
+      expect(exampleForSentence(item.sentence)?.taskId).toBe(item.taskId);
+      expect(exampleForSentence(`  ${item.sentence}  `)?.taskId).toBe(item.taskId);
+    }
+  });
+
+  test("改过字就不是例子了：还是按她自己想的说", () => {
+    expect(exampleForSentence(`${SAY_EXAMPLES[2]!.sentence}，谢谢`)).toBeNull();
+    expect(exampleForSentence("帮我整理一下")).toBeNull();
+    expect(exampleForSentence("   ")).toBeNull();
+  });
+
+  test("微信接龙那句提交后进的是卡片，不会落到选文件页", () => {
+    const example = exampleForSentence(SAY_EXAMPLES[2]!.sentence);
+    expect(example).not.toBeNull();
+    const task = taskById(example!.taskId);
+    expect(task).toBeDefined();
+    // 对照：自由说那条路拿到的是 freeTask，它要文件——第三句例子卡住就是因为这个。
+    expect(freeTask("随便一句").needs).toBe("files");
+    // 卡片要的是「贴进去的文字」，所以不再卡在「先选一个」。
+    expect(task!.needs).toBe("text");
+    expect(task!.group).toBe("微信");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 第一次做成之后的提示：按哪条路说
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // 向导最后一步的三件事
@@ -135,6 +175,26 @@ describe("第一次做成之后那一句", () => {
       nextTimeSuggestion(makeRun({ taskId: FREE_TEXT_TASK_ID, instruction: "把".repeat(200) })),
     ).toBeNull();
     expect(nextTimeSuggestion(makeRun({ taskId: "x", taskTitle: "（只有括号）" }))).toBeNull();
+  });
+});
+
+describe("第一次做成之后的提示，按哪条路说", () => {
+  test("她自己说的一句话：可以说「刚才那句话」", () => {
+    expect(firstWinHintFor(makeRun({ taskId: FREE_TEXT_TASK_ID }))).toContain("刚才那句话");
+  });
+
+  test("点卡片做成的：没有「刚才那句话」，就不能那样说", () => {
+    const hint = firstWinHintFor(makeRun({ taskId: "excel.merge" }));
+    expect(hint).not.toContain("刚才那句话");
+    expect(hint.length).toBeGreaterThan(12);
+    expect(hint.endsWith("。")).toBe(true);
+  });
+
+  test("两种说法不一样，而且都答应得做到", () => {
+    const free = firstWinHintFor(makeRun({ taskId: FREE_TEXT_TASK_ID }));
+    const card = firstWinHintFor(makeRun({ taskId: "excel.merge" }));
+    expect(free).not.toBe(card);
+    for (const hint of [free, card]) expect(hint).toContain("填进下面的框里");
   });
 });
 

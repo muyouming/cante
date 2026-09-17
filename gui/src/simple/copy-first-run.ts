@@ -56,6 +56,19 @@ export const SAY_EXAMPLES: readonly SayExample[] = [
   },
 ];
 
+/**
+ * 她提交的这句话，是不是某条例子的原文？
+ *
+ * 是的话，这件事在卡片目录里本来就有，得走卡片那条流程（微信接龙要的是贴进去的
+ * 文字，走「直接说一句话」会卡在选文件那一步）。只要有半点不同（她改了字），就
+ * 还是按她自己想的说，不替她认。
+ */
+export function exampleForSentence(sentence: string): SayExample | null {
+  const value = sentence.trim();
+  if (!value) return null;
+  return SAY_EXAMPLES.find((item) => item.sentence === value) ?? null;
+}
+
 /** 首页输入框旁、向导最后一步用的那些话。 */
 export const FIRST_RUN = {
   /** 首页：摆在三句例子上面。要说清「点一下会怎样」。 */
@@ -86,8 +99,17 @@ export const FIRST_RUN = {
   wizardExamplesHint: "点一句，进去它就填在框里了，你改几个字就能开始。",
   /** 第一次做成之后，首页上那句话的开头。 */
   firstWinTitle: "这件事做成了。下一次，话可以说得更细：",
-  /** 为什么给她这一句：加一个条件，就是同一件事的另一种说法。 */
+  /**
+   * 为什么给她这一句（她自己说的一句话那条路）：她刚说出口的那句话还在眼前，
+   * 「在刚才那句话后面加上…」指的就是它。
+   */
   firstWinHint: "在刚才那句话后面加上你想要的条件，它就照着这个条件做。点一下就能填进下面的框里。",
+  /**
+   * 为什么给她这一句（点卡片那条路）：卡片做成的事没有「刚才那句话」，所以不能
+   * 那样说；说的是同一件事再往下说细一点，而且不承诺做不到的事。
+   */
+  firstWinHintCard:
+    "下一次做这件事，可以多说一个条件，它就照着这个条件做。点一下就能填进下面的框里。",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -198,6 +220,14 @@ export function nextTimeSuggestion(run: FinishedRun): string | null {
       : spokenTitle(run.taskTitle);
   if (!base) return null;
   return `${base}${EXTRA_CONDITION}`;
+}
+
+/**
+ * 第一次做成之后，那句提示怎么说：她自己说的一句话那条路可以说「刚才那句话」，
+ * 点卡片做成的没有那句话，得换一种说法。两种都不承诺做不到的事。
+ */
+export function firstWinHintFor(run: FinishedRun | null): string {
+  return run?.taskId === FREE_TEXT_RUN_ID ? FIRST_RUN.firstWinHint : FIRST_RUN.firstWinHintCard;
 }
 
 /**

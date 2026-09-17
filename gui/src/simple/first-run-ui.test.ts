@@ -60,6 +60,23 @@ describe("首页：三句例子点一下就填进输入框", () => {
     expect(HOME).toContain("const seed = takeSentence();");
     expect(HOME).toContain("if (seed) setText(seed);");
   });
+
+  // F2 — 她照着例子原样提交时，不能走自由说那条路：第三句例子（微信接龙）要的是
+  // 贴进去的文字，而自由说拿到的是 freeTask（needs: "files"），会卡在「先选一个」。
+  test("照着例子原样提交：先进那条卡片，改过字才按自由说走", () => {
+    expect(HOME).toContain("exampleForSentence(value)");
+    expect(HOME).toContain("props.onPickTask(task)");
+    expect(HOME).toContain("props.onSubmitText(value)");
+    expect(HOME.indexOf("props.onPickTask(task)")).toBeLessThan(
+      HOME.indexOf("props.onSubmitText(value)"),
+    );
+  });
+
+  // F3 — 点卡片做成的场景根本没有「刚才那句话」，不能套用自由说那一句。
+  test("第一次做成之后的提示按哪条路说（卡片不搬「刚才那句话」）", () => {
+    expect(HOME).toContain("firstWinHintFor(firstWin())");
+    expect(HOME).not.toContain("FIRST_RUN.firstWinHint");
+  });
 });
 
 describe("向导最后一步：三件事 + 三句能点的话", () => {

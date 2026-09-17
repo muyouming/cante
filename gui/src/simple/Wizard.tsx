@@ -180,8 +180,11 @@ export default function Wizard(props: WizardProps): JSX.Element {
   });
 
   return (
-    <div class="flex h-full min-h-0 w-full items-center justify-center overflow-y-auto px-5 py-8">
-      <div class="w-full max-w-xl">
+    // F1 — 这里的 items-center + 内容比窗口高时会把顶部裁掉且滚不回去（最大窗口
+    // 下标题整段消失）。所以外层只 justify-center，让内层用 m-auto 居中：
+    // margin:auto 在溢出时归零，顶部不会被裁。
+    <div class="flex h-full min-h-0 w-full justify-center overflow-y-auto px-5 py-8">
+      <div class="m-auto w-full max-w-xl">
         <ol class="flex items-center justify-center gap-2" aria-label={WIZARD.progressLabel}>
           <For each={WIZARD.stepLabels}>
             {(label, index) => (
@@ -312,9 +315,10 @@ export default function Wizard(props: WizardProps): JSX.Element {
               </For>
             </ul>
 
-            <p class="mt-6 text-[17px] font-semibold text-slate-100">
+            {/* F6 — 这行是小标题，就得是标题字号：typography 的闸门只扫 h1/h2/h3。 */}
+            <h2 class="mt-6 text-[20px] font-semibold text-slate-100">
               {FIRST_RUN.wizardExamplesTitle}
-            </p>
+            </h2>
             <p class="mt-1 text-[16px] leading-relaxed text-slate-400">
               {FIRST_RUN.wizardExamplesHint}
             </p>

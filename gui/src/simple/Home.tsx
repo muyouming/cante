@@ -17,6 +17,8 @@ import { HOME, TASK_GROUPS, taskGroupRank } from "./copy.ts";
 import {
   FIRST_RUN,
   SAY_EXAMPLES,
+  exampleForSentence,
+  firstWinHintFor,
   firstWinRun,
   nextTimeSuggestion,
   takeSentence,
@@ -169,6 +171,15 @@ export default function Home(props: HomeProps): JSX.Element {
     }
     setHint(null);
     setText("");
+    // r24 — 她提交的这一句正好是某条例子的原文时，那不是「自由发挥」：这件事卡片
+    // 里本来就有，走卡片流程才走得通（微信接龙要的是贴进去的文字，走「直接说一句
+    // 话」会卡在选文件那一步）。改过一个字就还是按她自己想的说，不替她认。
+    const example = exampleForSentence(value);
+    const task = example ? taskById(example.taskId) : undefined;
+    if (task) {
+      props.onPickTask(task);
+      return;
+    }
     props.onSubmitText(value);
   };
 
@@ -195,7 +206,7 @@ export default function Home(props: HomeProps): JSX.Element {
                   {sentence()}
                 </button>
                 <p class="mt-2 text-[16px] leading-relaxed text-slate-300">
-                  {FIRST_RUN.firstWinHint}
+                  {firstWinHintFor(firstWin())}
                 </p>
               </section>
             )}
