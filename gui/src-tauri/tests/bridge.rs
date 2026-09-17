@@ -1,11 +1,17 @@
 //! End-to-end: drive `cante-bridge` (the `pi --mode rpc` adapter) against a real
-//! `pi` child and a fake OpenAI-compatible endpoint, and assert the three
-//! things this first segment promises:
+//! `pi` child and a fake OpenAI-compatible endpoint, and assert what the adapter
+//! promises:
 //!
 //! * `StartSession` produces a `SessionStart`;
 //! * `UserInput` produces ordered `MessageDelta`s, an `AgentMessage` and a
 //!   closing `TurnEnd`;
-//! * `Interrupt` produces a `TurnEnd` whose status is "aborted", not "done".
+//! * `Interrupt` produces a `TurnEnd` whose status is "aborted", not "done";
+//! * the approval gate (gui/docs/BRIDGE-gate.md): a `tool_call` is paused as
+//!   `TurnPause`, a `Deny` really stops the command, one batch is one pause,
+//!   per-call decisions work, and `Interrupt` works while paused.
+//!
+//! The gate tests rely on marker files written by the scripted `bash` command:
+//! "did the command run?" is a filesystem fact, not an event to be trusted.
 //!
 //! The endpoint is a few dozen lines of `std::net` in this file on purpose: CI
 //! installs `bun` but not `node`, so the probe's `node` fake
@@ -159,10 +165,15 @@ fn serve_connection(stream: TcpStream, scenario: &str) -> std::io::Result<()> {
 
     let request: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
     let model = request.get("model").and_then(Value::as_str).unwrap_or("probe-model").to_string();
+    // A continuation is a request whose LAST message is a tool result. Keying on
+    // "any tool message" would make a later prompt (which still carries the
+    // earlier result in its history) look like a continuation and never call a
+    // tool again.
     let has_tool_result = request
         .get("messages")
         .and_then(Value::as_array)
-        .map(|messages| messages.iter().any(|message| message.get("role").and_then(Value::as_str) == Some("tool")))
+        .and_then(|messages| messages.last())
+        .map(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
         .unwrap_or(false);
 
     begin_sse(&mut writer)?;
@@ -174,6 +185,35 @@ fn serve_connection(stream: TcpStream, scenario: &str) -> std::io::Result<()> {
                 thread::sleep(Duration::from_millis(120));
             }
             write_chunk(&mut writer, &chunk(&model, json!({}), json!("stop")))?;
+        }
+        // `gate`: one bash call whose command writes a marker file, so
+        // "did the command really run?" is a filesystem fact. `gate2` puts two
+        // calls in the SAME assistant message, to pin the one-pause-per-batch
+        // behaviour (the gate reads the siblings out of the session).
+        "gate" | "gate2" if !has_tool_result => {
+            let calls: Vec<(&str, &str)> = if scenario == "gate2" {
+                vec![
+                    ("call_gate_1", "echo one > gate-ran-1.txt"),
+                    ("call_gate_2", "echo two > gate-ran-2.txt"),
+                ]
+            } else {
+                vec![("call_gate_1", "echo one > gate-ran.txt")]
+            };
+            for part in ["我先看一下", "，然后用工具。"] {
+                write_chunk(&mut writer, &chunk(&model, json!({ "role": "assistant", "content": part }), Value::Null))?;
+                thread::sleep(Duration::from_millis(20));
+            }
+            for (index, (id, _)) in calls.iter().enumerate() {
+                let call = json!({ "tool_calls": [{ "index": index, "id": id, "type": "function",
+                    "function": { "name": "bash", "arguments": "" } }] });
+                write_chunk(&mut writer, &chunk(&model, call, Value::Null))?;
+            }
+            for (index, (_, command)) in calls.iter().enumerate() {
+                let arguments = json!({ "command": command }).to_string();
+                let delta = json!({ "tool_calls": [{ "index": index, "function": { "arguments": arguments } }] });
+                write_chunk(&mut writer, &chunk(&model, delta, Value::Null))?;
+            }
+            write_chunk(&mut writer, &chunk(&model, json!({}), json!("tool_calls")))?;
         }
         _ if !has_tool_result => {
             for part in ["我先看一下", "，然后用工具。"] {
@@ -353,6 +393,15 @@ impl BridgeRun {
             .filter_map(|frame| frame["event"].get("TurnEnd").cloned())
             .collect()
     }
+
+    /// Index of the first received frame with this `Evt` name, if any.
+    fn index_of(&self, name: &str) -> Option<usize> {
+        self.received.iter().position(|frame| event_name(frame) == name)
+    }
+
+    fn events_named(&self, name: &str) -> Vec<&Value> {
+        self.received.iter().filter(|frame| event_name(frame) == name).collect()
+    }
 }
 
 impl Drop for BridgeRun {
@@ -374,6 +423,39 @@ fn event_name(frame: &Value) -> String {
 
 fn is(name: &str) -> impl Fn(&Value) -> bool + '_ {
     move |frame| event_name(frame) == name
+}
+
+/// Open a session and send one prompt. Every gate test starts the same way.
+fn begin(run: &mut BridgeRun) {
+    run.send(
+        json!({ "StartSession": { "provider": "probe", "model": "probe-model", "permission_mode": "auto" } }),
+        "op_start",
+    );
+    run.wait_for("SessionStart", is("SessionStart"));
+    run.send(json!({ "UserInput": "把这件事做了" }), "op_input");
+}
+
+fn decision(tool_use_id: &str, decision: &str) -> Value {
+    json!({ "tool_use_id": tool_use_id, "decision": decision })
+}
+
+fn approve(run: &mut BridgeRun, turn_id: &str, responses: Value) {
+    run.send(
+        json!({ "ApprovalResponse": { "turn_id": turn_id, "responses": responses } }),
+        "op_approve",
+    );
+}
+
+/// The tools a `TurnPause` is asking about, in order.
+fn paused_tools(pause: &Value) -> Vec<Value> {
+    pause["event"]["TurnPause"]["reason"]["Approval"]["tools"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn paused_turn_id(pause: &Value) -> String {
+    pause["event"]["TurnPause"]["turn_id"].as_str().unwrap_or("").to_string()
 }
 
 /// Is this program on PATH and does it answer `--version`? Bounded, so a wedged
@@ -538,6 +620,17 @@ fn the_rust_daemon_drives_the_adapter_without_changes() {
                 }
                 match event_name(&frame).as_str() {
                     "SessionStart" => session_start = true,
+                    "TurnPause" => {
+                        // The production path pauses for approval like any other
+                        // client; answering through `Daemon::approve` is the
+                        // exact call the Tauri command makes.
+                        let turn_id = frame["event"]["TurnPause"]["turn_id"].as_str().unwrap_or("");
+                        let responses: Vec<Value> = paused_tools(&frame)
+                            .iter()
+                            .map(|tool| decision(tool["id"].as_str().unwrap_or(""), "Accept"))
+                            .collect();
+                        daemon.approve(turn_id, responses).expect("the daemon must be able to approve");
+                    }
                     "TurnEnd" if frame["event"]["TurnEnd"]["status"] == json!("Completed") => {
                         completed = true;
                     }
@@ -668,6 +761,11 @@ fn bridge_streams_a_turn_from_pi() {
     let turn_id = turn_start["event"]["TurnStart"]["turn_id"].clone();
     assert!(turn_id.as_str().unwrap_or("").starts_with("turn_"));
 
+    // The gate stops the call before it runs; this test only needs it to go
+    // through, so it allows once.
+    let pause = run.wait_for("TurnPause", is("TurnPause"));
+    approve(&mut run, &paused_turn_id(&pause), json!([decision("call_bridge_1", "Accept")]));
+
     let tool_start = run.wait_for("ToolStart", is("ToolStart"));
     assert_eq!(tool_start["event"]["ToolStart"]["name"], json!("bash"));
     let tool_end = run.wait_for("ToolEnd", is("ToolEnd"));
@@ -716,4 +814,173 @@ fn bridge_reports_an_interrupted_turn() {
     for turn_end in run.turn_ends() {
         assert_ne!(turn_end["status"], json!("Completed"), "a stopped turn must never read as done");
     }
+}
+
+// ---------------------------------------------------------------------------
+// The approval gate (gui/docs/BRIDGE-gate.md)
+// ---------------------------------------------------------------------------
+
+/// The core promise: a tool call is stopped *before* it runs, the window gets a
+/// `TurnPause` whose `tool_use_id` is the real `toolCallId`, and a `Deny` means
+/// the command never executed — asserted on the filesystem, not on an event.
+#[test]
+fn bridge_pauses_a_call_and_a_denial_stops_it() {
+    let Some(mut run) = BridgeRun::start("gate-deny", "gate") else {
+        return;
+    };
+    begin(&mut run);
+    let turn_id = run.wait_for("TurnStart", is("TurnStart"))["event"]["TurnStart"]["turn_id"].clone();
+
+    let pause = run.wait_for("TurnPause", is("TurnPause"));
+    assert_eq!(pause["event"]["TurnPause"]["turn_id"], turn_id, "the pause belongs to the open turn");
+    let tools = paused_tools(&pause);
+    assert_eq!(tools.len(), 1, "one call, one question: {pause}");
+    assert_eq!(tools[0]["id"], json!("call_gate_1"), "tool_use_id must be pi's toolCallId");
+    assert_eq!(tools[0]["name"], json!("bash"));
+    assert_eq!(tools[0]["args"]["command"], json!("echo one > gate-ran.txt"));
+    // Probe revision B: the progress list must not say "running" while the
+    // approval sheet is still open.
+    assert!(run.index_of("ToolStart").is_none(), "no ToolStart before the decision");
+
+    approve(&mut run, &paused_turn_id(&pause), json!([decision("call_gate_1", "Deny")]));
+
+    let resume = run.wait_for("TurnResume", is("TurnResume"));
+    assert_eq!(resume["event"]["TurnResume"]["turn_id"], turn_id);
+    run.wait_for("the denied call's ToolStart", is("ToolStart"));
+    let tool_end = run.wait_for("ToolEnd", is("ToolEnd"));
+    assert_eq!(tool_end["event"]["ToolEnd"]["status"], json!("Denied"));
+    // The row opens (with the sheet already closed) and closes as denied: the
+    // frontend builds its tool row from `ToolStart`, and colours it from the
+    // `ToolEnd` status.
+    assert_eq!(
+        run.index_of("ToolStart").unwrap(),
+        run.index_of("TurnResume").unwrap() + 1,
+        "the row opens after the sheet closes"
+    );
+    assert!(
+        run.index_of("ToolEnd").unwrap() > run.index_of("ToolStart").unwrap(),
+        "the row must open before it closes"
+    );
+
+    let end = run.wait_for("TurnEnd", is("TurnEnd"));
+    assert_eq!(end["event"]["TurnEnd"]["status"], json!("Completed"), "the assistant carries on after a denial");
+    assert_eq!(run.events_named("ToolEnd").len(), 1, "a denied call closes exactly once");
+    assert!(!run.work.join("gate-ran.txt").exists(), "a denied command must not run");
+}
+
+/// Accepting really runs the command.
+#[test]
+fn bridge_runs_an_accepted_call() {
+    let Some(mut run) = BridgeRun::start("gate-accept", "gate") else {
+        return;
+    };
+    begin(&mut run);
+    run.wait_for("TurnStart", is("TurnStart"));
+    let pause = run.wait_for("TurnPause", is("TurnPause"));
+    approve(&mut run, &paused_turn_id(&pause), json!([decision("call_gate_1", "Accept")]));
+
+    let ends = run.wait_for("ToolEnd", is("ToolEnd"));
+    assert_eq!(ends["event"]["ToolEnd"]["status"], json!("Completed"));
+    let end = run.wait_for("TurnEnd", is("TurnEnd"));
+    assert_eq!(end["event"]["TurnEnd"]["status"], json!("Completed"));
+    assert!(run.work.join("gate-ran.txt").exists(), "an accepted command must run");
+}
+
+/// Two calls in one assistant message produce **one** `TurnPause` carrying both
+/// (PROBE §3 revision D: read the siblings out of `ctx.sessionManager`).
+#[test]
+fn bridge_asks_once_for_a_batch_of_calls() {
+    let Some(mut run) = BridgeRun::start("gate-batch", "gate2") else {
+        return;
+    };
+    begin(&mut run);
+    run.wait_for("TurnStart", is("TurnStart"));
+    let pause = run.wait_for("TurnPause", is("TurnPause"));
+    let tools = paused_tools(&pause);
+    let mut ids: Vec<&str> = tools.iter().filter_map(|tool| tool["id"].as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, vec!["call_gate_1", "call_gate_2"], "both siblings must ride one pause: {pause}");
+
+    approve(
+        &mut run,
+        &paused_turn_id(&pause),
+        json!([decision("call_gate_1", "Accept"), decision("call_gate_2", "Accept")]),
+    );
+    run.wait_for("TurnEnd", is("TurnEnd"));
+
+    assert_eq!(run.events_named("TurnPause").len(), 1, "the batch must not be asked call by call");
+    assert!(run.work.join("gate-ran-1.txt").exists());
+    assert!(run.work.join("gate-ran-2.txt").exists());
+}
+
+/// Per-call decisions do come back: one sibling allowed, the other denied. This
+/// is the question `PROBE-pi-rpc.md` §6 left open for a single-valued dialog —
+/// answered here with the adapter's own encoding (see BRIDGE-gate.md).
+#[test]
+fn bridge_can_allow_one_call_and_deny_its_sibling() {
+    let Some(mut run) = BridgeRun::start("gate-partial", "gate2") else {
+        return;
+    };
+    begin(&mut run);
+    run.wait_for("TurnStart", is("TurnStart"));
+    let pause = run.wait_for("TurnPause", is("TurnPause"));
+    approve(
+        &mut run,
+        &paused_turn_id(&pause),
+        json!([decision("call_gate_1", "Accept"), decision("call_gate_2", "Deny")]),
+    );
+    run.wait_for("TurnEnd", is("TurnEnd"));
+
+    let statuses: Vec<String> = run
+        .events_named("ToolEnd")
+        .iter()
+        .filter_map(|frame| frame["event"]["ToolEnd"]["status"].as_str().map(str::to_string))
+        .collect();
+    assert!(statuses.contains(&"Completed".to_string()), "the allowed call ran: {statuses:?}");
+    assert!(statuses.contains(&"Denied".to_string()), "the denied call was blocked: {statuses:?}");
+    assert!(run.work.join("gate-ran-1.txt").exists());
+    assert!(!run.work.join("gate-ran-2.txt").exists());
+}
+
+/// Stop must work while the sheet is open, not only during streaming.
+#[test]
+fn bridge_can_interrupt_while_waiting_for_approval() {
+    let Some(mut run) = BridgeRun::start("gate-interrupt", "gate") else {
+        return;
+    };
+    begin(&mut run);
+    run.wait_for("TurnStart", is("TurnStart"));
+    run.wait_for("TurnPause", is("TurnPause"));
+    run.send(json!("Interrupt"), "op_stop");
+
+    let end = run.wait_for("TurnEnd", is("TurnEnd"));
+    let status = &end["event"]["TurnEnd"]["status"];
+    assert!(status.get("Interrupted").is_some(), "stopping at the sheet must be an interrupt, got {status}");
+    assert!(!run.work.join("gate-ran.txt").exists(), "nothing may run after a stop");
+    assert!(run.turn_ends().iter().all(|turn| turn["status"] != json!("Completed")));
+}
+
+/// `AcceptAlways` is remembered for the rest of this bridge process (by tool
+/// name) — and that is all: see BRIDGE-gate.md §4 for why it is not persisted.
+#[test]
+fn bridge_remembers_allow_always_for_the_session() {
+    let Some(mut run) = BridgeRun::start("gate-always", "gate") else {
+        return;
+    };
+    begin(&mut run);
+    run.wait_for("TurnStart", is("TurnStart"));
+    let pause = run.wait_for("TurnPause", is("TurnPause"));
+    approve(&mut run, &paused_turn_id(&pause), json!([decision("call_gate_1", "AcceptAlways")]));
+    run.wait_for("TurnEnd", is("TurnEnd"));
+    let marker = run.work.join("gate-ran.txt");
+    assert!(marker.exists(), "the allowed call must have run");
+
+    // Second turn, same tool name: the question must not come back.
+    fs::remove_file(&marker).expect("remove the marker for the second turn");
+    run.send(json!({ "UserInput": "再来一次" }), "op_input_2");
+    run.wait_for("the second TurnStart", is("TurnStart"));
+    run.wait_for("the second TurnEnd", is("TurnEnd"));
+    assert_eq!(run.turn_ends().len(), 2, "the second turn must have ended");
+    assert_eq!(run.events_named("TurnPause").len(), 1, "an already-allowed tool must not be asked again");
+    assert!(marker.exists(), "the second call must have run without a pause");
 }

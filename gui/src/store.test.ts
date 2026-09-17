@@ -641,6 +641,22 @@ describe("replyToRun", () => {
     dispose();
   });
 
+  test("store 暴露的 composedInstruction 就是真正发出去的那段（r20 隐私面板据此展示）", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这两张表合成一张");
+    const exposed = store.composedInstruction(store.currentRun()!);
+    await store.confirmRun();
+
+    const sent = opCalls("send_input") as Array<{ text: string }>;
+    // 逐字一致：面板拿这个展示，就不会和真正发出去的那份漂移。
+    expect(sent.at(-1)?.text).toBe(exposed);
+    // 旧任务（卡片已经不在）退回她那一句话，不凭空拼一份。
+    expect(store.composedInstruction({ ...store.currentRun()!, taskId: "gone.forever" })).toBe(
+      "把这两张表合成一张",
+    );
+    dispose();
+  });
+
   test("试跑发出去的也是卡片提示词", async () => {
     const { store, dispose } = await setup();
     await store.startRun(TASK, ["/work/a.xlsx"], "把这两张表合成一张");
