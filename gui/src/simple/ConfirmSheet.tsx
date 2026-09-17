@@ -12,6 +12,8 @@ import { For, Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { TRUST, evidenceLine } from "./copy.ts";
+import { PRE_ANSWER_COPY } from "./copy-preanswer.ts";
+import type { PreAnswerDecision } from "./copy-preanswer.ts";
 import {
   formatAdviceNote,
   formatStartBlockNote,
@@ -28,6 +30,11 @@ import { inspectSelection } from "./format-check.ts";
 import { evidenceFor, failureFor } from "./evidence.ts";
 import { fileName, folderName, hasActiveRisk, planRisks } from "./run.ts";
 import { risksForTask } from "./tasks/index.ts";
+import {
+  defaultPreAnswerIndex,
+  preAnswerDecisions,
+  setPreAnswers,
+} from "./tasks/prompt.ts";
 import type { Store } from "../store.ts";
 
 export interface ConfirmSheetProps {
@@ -44,6 +51,8 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   const [allowOverwrite, setAllowOverwrite] = createSignal(false);
   const [showAllFiles, setShowAllFiles] = createSignal(false);
   const [showFailure, setShowFailure] = createSignal(false);
+  // 「动手前先定好这几件事」——每一道题她选的是哪一条（题号 → 选项下标）。
+  const [answers, setAnswers] = createSignal<Record<string, number>>({});
   let cancelButton: HTMLButtonElement | undefined;
 
   const run = () => props.store.currentRun();
@@ -64,6 +73,30 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   });
   // #63 — the job's own known limits, straight from its card definition.
   const taskRisks = () => risksForTask(run()?.taskId ?? "");
+  // 把「她知道、我们非要问到一半才问」的问题挪到动手之前。
+  // 两张表列名对不上按哪张算、隐藏行算不算——这些她一眼就能答，真机上助手却会跑到
+  // 一半停下来问。所以：默认值先选好（就是卡片本来会做的那一种），她可以不改；
+  // 选了什么必须真的进指令，否则界面问了也是白问。
+  const decisions = (): readonly PreAnswerDecision[] => preAnswerDecisions(run()?.taskId ?? "");
+  let syncedRunId = "";
+  createEffect(() => {
+    const staged = run();
+    if (!staged || staged.state !== "preview" || staged.id === syncedRunId) return;
+    syncedRunId = staged.id;
+    // 每开一张新的确认页，先把她没动过的那些按默认值同步进指令。
+    const defaults: Record<string, number> = {};
+    for (const decision of preAnswerDecisions(staged.taskId)) {
+      defaults[decision.id] = defaultPreAnswerIndex(decision);
+    }
+    setAnswers(defaults);
+    setPreAnswers(staged.taskId, defaults);
+  });
+
+  function choosePreAnswer(decision: PreAnswerDecision, index: number): void {
+    const next = { ...answers(), [decision.id]: index };
+    setAnswers(next);
+    setPreAnswers(run()?.taskId ?? "", next);
+  }
   // #64 — what this computer's own history says, or nothing at all.
   const track = () => evidenceFor(props.store.runs(), run()?.taskId ?? "");
   const failure = () => failureFor(props.store.runs(), run()?.taskId ?? "");
@@ -123,6 +156,47 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
                 )}
               </For>
             </ol>
+
+            {/* 动手前先定好这几件事：默认已经选好，不改也能直接开始。 */}
+            <Show when={decisions().length > 0}>
+              <h3 class="mt-6 text-[20px] font-semibold text-slate-200">{PRE_ANSWER_COPY.heading}</h3>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-400">{PRE_ANSWER_COPY.hint}</p>
+              <For each={decisions()}>
+                {(decision) => (
+                  <fieldset class="mt-4">
+                    <legend class="text-base leading-relaxed text-slate-200">{decision.question}</legend>
+                    <For each={decision.options}>
+                      {(option, index) => (
+                        <label
+                          class="mt-2 flex min-h-[44px] cursor-pointer items-start gap-3 rounded-xl border px-4 py-2"
+                          classList={{
+                            "border-sky-500 bg-sky-950/40": answers()[decision.id] === index(),
+                            "border-slate-700 bg-slate-800/40": answers()[decision.id] !== index(),
+                          }}
+                        >
+                          <input
+                            type="radio"
+                            name={decision.id}
+                            class="mt-1 h-5 w-5 accent-sky-500"
+                            checked={answers()[decision.id] === index()}
+                            onChange={() => choosePreAnswer(decision, index())}
+                          />
+                          <span>
+                            <span class="block text-base text-slate-100">
+                              {option.label}
+                              <Show when={option.isDefault}>
+                                <span class="ml-2 text-[16px] text-slate-400">{PRE_ANSWER_COPY.defaultTag}</span>
+                              </Show>
+                            </span>
+                            <span class="mt-1 block text-[16px] leading-relaxed text-slate-400">{option.note}</span>
+                          </span>
+                        </label>
+                      )}
+                    </For>
+                  </fieldset>
+                )}
+              </For>
+            </Show>
 
             <Show when={taskRisks().length > 0}>
               <h3 class="mt-6 text-[20px] font-semibold text-slate-200">{TRUST.limitsTitle}</h3>
