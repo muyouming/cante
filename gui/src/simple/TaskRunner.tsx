@@ -27,6 +27,8 @@ import { formatElapsed, type RunProgressView } from "./progress.ts";
 import type { TaskDef, TaskError, TaskRun } from "./tasks/index.ts";
 import ApprovalSheet from "./ApprovalSheet.tsx";
 import ConfirmSheet from "./ConfirmSheet.tsx";
+// r25 — 助手停下来问结构化问题时的大按钮回答卡（挂法和审批卡一样：暂停一出现就要能答）。
+import QuestionSheet from "./QuestionSheet.tsx";
 import { markFocusLayer } from "./FocusLayer.tsx";
 import ResultCard from "./ResultCard.tsx";
 import ErrorView from "./ErrorView.tsx";
@@ -716,6 +718,12 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
             screen the window simply looks frozen, which a non-technical user reads
             as "it broke". */}
         <ApprovalSheet store={props.store} />
+
+        {/* ---- Paused on a structured question (r25) ---- */}
+        {/* Same reason as the approval sheet: the turn is parked and the window
+            would otherwise look frozen. The questions render as big Chinese
+            buttons, with a free-text "other" and a skip/discuss way out. */}
+        <QuestionSheet store={props.store} />
 
         {/* ---- Running (#62) ---- */}
         {/* She is watching a job she handed over, not reading a chat log. So

@@ -1,0 +1,117 @@
+---
+title: "Windows: What Works Today"
+description: "What the Windows bundle does today, how to make one machine usable with WSL, and what the cante-bridge replacement can and cannot do yet"
+---
+
+This page is for the **technical colleague** who gets called over when the app does not work on Windows. The app's own screens are Chinese-only by design and written for someone who does not work in IT, so they will not tell you any of this. It covers three things: what actually works today, how to make one machine usable today, and what the product cannot do yet — including the parts we have not verified.
+
+:::warning
+The app installs and opens on Windows, but it **cannot run a task out of the box**. Everything below is about why, and what can be done about it today. If you are only here to help someone get unblocked, read the first two sections.
+:::
+
+## Status: it installs and opens, then cannot start a session
+
+The Windows bundles (`Cante_<version>_x64-setup.exe` for a per-user install, `Cante_<version>_x64_en-US.msi` for per-machine) install and uninstall cleanly. Verified on `gui-v0.2.0` on Windows 11 Home 25H2 x64:
+
+- silent install exits 0, and the window opens in a **real WebView2** (the app process starts `msedgewebview2.exe`);
+- the first screen is the **Chinese simple mode** — a three-step wizard and the task-card home screen, not a developer console;
+- the two helper programs the app carries work from the install directory: `cante-sheets.exe --version` prints `cante-sheets 0.2.0` and `cante-pdf.exe --version` prints `cante-pdf 0.2.0` (both exit 0).
+
+What is missing is the component that does the work. The app drives an assistant runtime by launching `cante serve` — from the `CANTE_BIN` command spec, or a `cante` found on `PATH`. Upstream publishes that runtime for **macOS and Linux only** ([the upstream README says so](https://github.com/muyouming/cante/blob/main/README.md), and the [docs overview](/) carries the same warning), and its source is not in this repository, so we cannot build a Windows version ourselves.
+
+The result is that on Windows the wizard's second step stops at:
+
+> 这台电脑还缺一个必须的组件
+
+> 这不是网络问题，也不是你操作错了，是这台电脑少了一个真正干活的组件。装好它，任务才能跑起来。
+
+> 请让帮你配置这台电脑的技术同事装一次 Cante 的组件，装好后点「重新检查」。
+
+That message is accurate on macOS, where the component really can be installed. On Windows it points at something that does not exist as a native build. The only action the screen offers is 复制详情（给技术同事看）, which copies the facts (what is missing, which locations were searched) so they can be handed to you — that is the button that typically produces the message you are reading this page for.
+
+## Making one machine work today: run the runtime inside WSL
+
+The route that works today is to run the upstream Linux binary inside WSL (Ubuntu) and point the app at it. WSL is a real Linux environment, so the runtime it runs is the same one macOS and Linux users get; the app reaches it through the stdin/stdout of `wsl.exe`.
+
+- **Cost:** administrator rights for the WSL install itself (it is a machine-wide change, and expect a reboot), then a one-off per-machine setup. This is IT work, not something the person using the app ever does.
+- **What changes:** one environment variable for the app's process, `CANTE_BIN`. It is a *command spec*, not a path — the app appends `serve` to it — so `wsl.exe -e /home/<user>/cante-bin/ante serve` is the whole value. The spec is a command line split lexically, so a path containing spaces has to be quoted.
+
+The exact steps, the setup script, and the checks are in [`gui/DEVELOPING-WINDOWS.md`](https://github.com/muyouming/cante/blob/main/gui/DEVELOPING-WINDOWS.md). In outline:
+
+1. Run `gui\scripts\windows\wsl-ante-setup.ps1` once from Windows PowerShell. It downloads and unpacks the Linux runtime into `~/cante-bin/` inside WSL, self-checks it, and prints the `CANTE_BIN` value to use.
+2. Set `CANTE_BIN` to that value — for the current PowerShell window only (fastest, and what acceptance runs do), or user-level with `[Environment]::SetEnvironmentVariable(...)`, which needs a sign-out and sign-in before it reaches apps started from the Start menu.
+3. Start the app from that same window, and run a read-only card such as merging two sheets.
+
+Do not stop at "the window opened" — that is also true when nothing is connected. These are the checks that separate the two:
+
+| Check | Passing looks like |
+| --- | --- |
+| `wsl.exe -e /home/<user>/cante-bin/ante --version` | prints a version number |
+| The app's first check | reaches 准备好了, **not** 这台电脑还缺一个必须的组件 |
+| The provider list | an entry appears — it comes from the runtime, so it only lists when the app is really talking to it |
+| A read-only card | an output file appears next to the input, visible in Explorer |
+| The log | no "component missing" notice, no unexpected `cante://exit` |
+
+Give a card **at least 1800 seconds** before calling it a failure: slow models have been measured at 850 seconds, and a 600-second cutoff turns success into a wrong "failed".
+
+What this route does not fix:
+
+- **Path mapping.** The app picks Windows paths (`C:\Users\...\预算.xlsx`) while the Linux side sees `/mnt/c/Users/.../预算.xlsx`. The model has to reconcile the two. If a card reports a missing file, suspect this before suspecting the card.
+- **Performance is not the target machine's.** WSL on a developer box is not evidence about feel on a 16 GB office PC.
+- **It is not a delivery path.** It is our own acceptance method. It does not replace a real Windows build of the runtime, and the person using the app should never be asked to install WSL.
+- **SSH has no interactive desktop.** A GUI started from an SSH session has no window to look at. Window-level checks need RDP, or a process attached to a logged-in session.
+
+## The replacement we are building: `cante-bridge`
+
+A second route exists on `main` and does **not** need WSL. `pi` runs natively on Windows, so we added a small binary, `cante-bridge`, that speaks the app's runtime protocol and drives `pi --mode rpc` instead of `cante serve`. `CANTE_BIN` points at `cante-bridge.exe`; the Rust side and the front end are unchanged. That the daemon protocol can be implemented by something other than upstream's binary is the useful part: it is the first concrete step toward a Windows build that does not depend on a component we cannot compile.
+
+What has been demonstrated, all on macOS against a scripted fake OpenAI-compatible endpoint (so no model or network is needed), and in CI:
+
+| Piece | Demonstrated | Written up in |
+| --- | --- | --- |
+| The three mechanics the bridge depends on: JSONL event stream, an extension that can block a tool call and ask a question, and `abort` | all three answered "yes" by a probe | [`gui/docs/PROBE-pi-rpc.md`](https://github.com/muyouming/cante/blob/main/gui/docs/PROBE-pi-rpc.md) |
+| First slice: `StartSession`, `UserInput` with streaming text and a tool call, `Interrupt` | works end to end through the existing `daemon.rs`, with no changes to the Rust bridge or the front end | [`gui/docs/BRIDGE-spike.md`](https://github.com/muyouming/cante/blob/main/gui/docs/BRIDGE-spike.md) |
+| The approval gate: `TurnPause` / `ApprovalResponse` mapped onto `pi`'s extension dialog | one question can cover a batch of calls, per-call allow/deny within a batch, "always" remembered for the session, and interrupting while a question is open | [`gui/docs/BRIDGE-gate.md`](https://github.com/muyouming/cante/blob/main/gui/docs/BRIDGE-gate.md) |
+
+Two things to know before trying it on a machine:
+
+- **`PI_BIN` must point at a real `.exe`.** npm installs `pi` as a `pi.cmd` shim, and the Rust side starts processes with `CreateProcess`, which cannot execute `.cmd`. Check `Get-Command pi` and look at the `Source` suffix; a `pi.exe` (for example one left by `bun install -g`) works.
+- **`pi` needs its own model and credentials.** In the simple mode the app does not pass a provider or model down to the runtime, so on this path the model and the key come from `pi`'s own configuration (`~\.pi\agent\` or the usual `*_API_KEY` variables), not from Cante. Likewise, the released `v0.2.0` installer predates the bridge and contains no `cante-bridge.exe`; a build from `main` puts it beside the main program.
+
+What is **not** there yet — this is why the bridge is not a supported path:
+
+- **Permission policy is not at parity.** The gate currently intercepts every tool call. Upstream's `strict` / `auto` / `yolo` modes, its allow/ask/deny rule lists, its dangerous-command detection and its persisted grants have no counterpart yet, so "which calls should be asked about" is not yet the same product. This is the part that implements the promise that destructive actions are confirmed first, so treat it as the piece to be sceptical about.
+- **"Who processes your data" needs reconciling.** The privacy panel names the provider from the session info; on this path the credentials live in `pi`'s config. The two must be made to agree rather than assumed to.
+- **Local-only inference, error classification and usage accounting** are also not at parity.
+- **Nothing on this path has been run on a real Windows machine.** Every Windows-side statement in the bridge documents comes from reading the source and from parse-level tests run on macOS. The unsettled questions — whether `pi` starts and exits cleanly under `CreateProcess`, whether the console window flashes, whether it reaches a LAN gateway — are listed in [`gui/docs/BRIDGE-windows.md`](https://github.com/muyouming/cante/blob/main/gui/docs/BRIDGE-windows.md).
+
+There is no date for any of this, and we are not promising one. Whether the bridge becomes the supported Windows path, or whether Windows keeps the WSL arrangement, is an open product decision — see [`gui/docs/DECISION-windows-runtime.md`](https://github.com/muyouming/cante/blob/main/gui/docs/DECISION-windows-runtime.md) and issue [#103](https://github.com/muyouming/cante/issues/103).
+
+## Limits to pass on to whoever you are helping
+
+These are the product's own declared boundaries. They are not bugs, and they are worth repeating in plain language, because each one is a place where doing nothing is safer than guessing:
+
+- **Screenshots and photos of tables are not supported.** The client protocol carries text only, so an image cannot reach the model even if the model could read it, and ordinary office machines have no OCR tool. For the cards that do attach an image, whether it actually arrives depends on the host runtime binary — which is not in this repository and has been verified against exactly one local vision model. Do not promise it.
+- **Scanned PDFs are not converted silently.** A PDF with no text layer, or one whose fonts carry no text map (common in Chinese PDFs produced by a print or export pipeline, where the text is visibly there but unrecoverable), makes the run stop and ask instead of handing over a page of noise.
+- **Very large or heavily merged spreadsheets may need a hand-checked pass.** Beyond a few hundred thousand rows, or with merged cells used as headers, the confirmation sheet says so before anything starts.
+- **The interface is Chinese only**, deliberately, and the product targets Windows first. Expect to translate labels for yourself.
+- **The installers are unsigned.** Because of that, Windows SmartScreen is expected to warn on the first launch (更多信息 → 仍要运行) and macOS Gatekeeper similarly; the warning does not reappear after that. Here is the honest gap: our acceptance installs came from files without a Mark of the Web, where SmartScreen does not fire at all, so the exact wording a real user sees on first double-click has **not** been captured yet.
+
+## What we have not verified
+
+The four Windows acceptance rounds all ran over SSH, with no interactive desktop. That is enough to establish install, package contents and readiness checks, but these need RDP and a person:
+
+- native file dialogs and end-to-end runs from paths with spaces and Chinese characters;
+- whether a console window flashes at launch (the code hides it with `CREATE_NO_WINDOW`, but the path was never exercised on a real machine);
+- WPS `.et` handling, WeChat PC plus a Chinese IME, and the feel on a 16 GB machine without a discrete GPU;
+- fonts, Chinese text layout and general window feel.
+
+The acceptance reports keep the raw commands and outputs for everything they do claim: [`gui/WINDOWS-ACCEPTANCE-1.md`](https://github.com/muyouming/cante/blob/main/gui/WINDOWS-ACCEPTANCE-1.md) through [`-4.md`](https://github.com/muyouming/cante/blob/main/gui/WINDOWS-ACCEPTANCE-4.md). Where to read next:
+
+| Question | Read |
+| --- | --- |
+| What exactly was run on a real Windows machine, with outputs | `gui/WINDOWS-ACCEPTANCE-{1,2,3,4}.md` |
+| Step-by-step WSL setup and the acceptance checklist | `gui/DEVELOPING-WINDOWS.md` |
+| Why the runtime has no Windows build, and the options considered | `gui/docs/DECISION-windows-runtime.md` |
+| Where the bridge stands, and what is unverified on Windows | `gui/docs/BRIDGE-windows.md` |
+| The product's declared honesty boundaries | [`gui/ROADMAP.md`](https://github.com/muyouming/cante/blob/main/gui/ROADMAP.md), section 6.8 |

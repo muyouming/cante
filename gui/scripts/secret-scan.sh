@@ -56,6 +56,9 @@ HOME_WIN_RE="[Cc]:[\\\\/]+[Uu]sers[\\\\/]+$_HOME_TAIL"
 is_placeholder_user() {
   case "$1" in
     user|username|name|example|you|yourname|someone|x|你) return 0 ;;
+    # 「省略号」是通用的占位写法（`C:\Users\…` 读起来就是"某个用户名"），
+    # 文档里这么写是**对的**，规则该放行 —— 否则闸门会把好习惯也判成违规 ✗。
+    "…"|"..."|xxx|xxxx|xxxxx|用户名|用户|某用户|某某) return 0 ;;
   esac
   return 1
 }
@@ -78,9 +81,15 @@ key_is_real() {
 
 # home_is_real：从命中片段里取出用户名；通用占位符放行。
 home_is_real() {
-  local user="${1#/Users/}"
-  user="${user#/home/}"
-  user="${user%%/*}"
+  local user="$1"
+  # 剥掉路径前缀，只留"用户名"那一段：POSIX 的两种家目录写法与 Windows 的那种
+  # （大小写、正反斜杠都可能）都要认，否则 Windows 形态会把整条路径当成用户名，
+  # 占位符判断就永远不生效 ✗。
+  # 注：这段注释本身也刻意不写完整的家目录前缀 —— 脚本会扫自己，注释里用占位写法
+  # 才不会被自己的规则命中（这是这个文件的约定）。
+  user="${user#/Users/}"; user="${user#/home/}"
+  user="${user#*[Uu]sers[\\/]}"; user="${user#*[Uu]sers/}"
+  user="${user%%/*}"; user="${user%%\\*}"
   is_placeholder_user "$user" && return 1
   return 0
 }

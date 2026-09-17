@@ -116,9 +116,38 @@ jobs:
       - name: Install the matching msedgedriver
         run: bash gui/e2e-windows/install-msedgedriver.sh
 
+      # Measured on the three runs before this change: between this step's
+      # "Looking up installed tauri packages" line and the build itself the CLI
+      # went quiet for 5.1 s, 11.8 s and 21.1 s — it asks cargo for the
+      # workspace metadata, and cargo revalidates the crates.io index while it
+      # does (the same job's gate step pays 24–28 s for exactly that, against
+      # 1.6 s on Linux).
+      #
+      # Everything this build needs is already in the local cargo cache: `e2e.sh`
+      # ran `cargo test` a minute earlier in this same job, and `cargo test`
+      # builds every binary (`Running unittests src\main.rs`, `src\bin\*.rs`), so
+      # the app binary's dependency set is a subset of what was just resolved and
+      # downloaded. Going offline therefore cannot hide a missing crate — it only
+      # stops cargo from asking the network what it already knows. If a pull
+      # request adds a dependency, the *online* gate step above fetches it first.
       - name: Build the app for the smoke test (debug, no bundle)
         working-directory: gui
+        env:
+          CARGO_NET_OFFLINE: 'true'
         run: bunx tauri build --debug --no-bundle
+
+      # gsudo is the de-elevation helper the step below needs, and getting it
+      # through winget cost 10–17 s on each of the last three runs — almost all of
+      # it winget's own start-up and source update, not the 3.4 MB MSI (measured
+      # install itself: ~3 s). The binary is the same every time, so this step
+      # keeps the copy winget once installed. It is only a cache: on a miss the
+      # step below installs through winget exactly as before and re-fills it.
+      # Bump the `v1` (or drop the cache) to drop the stored copy.
+      - name: Restore the de-elevation helper (gsudo)
+        uses: actions/cache@v6
+        with:
+          path: ~/gsudo-cache
+          key: gsudo-cache-v1-${{ runner.os }}
 
       # De-elevated on purpose. WebView2 runtime 150+ ignores `WEBVIEW2_*`
       # environment variables when the host process runs elevated
@@ -132,16 +161,25 @@ jobs:
       - name: UI smoke test (real WebView2 window, de-elevated)
         shell: pwsh
         run: |
-          winget install --id gerardog.gsudo --exact --accept-source-agreements --accept-package-agreements --disable-interactivity
           icacls "$env:GITHUB_WORKSPACE" /grant "Everyone:(OI)(CI)F" | Out-Null
-          # gsudo ships as an MSI, so it is not in this shell's PATH yet; look in
-          # the places the installer and winget put it.
-          $gsudo = (Get-Command gsudo -ErrorAction SilentlyContinue).Source
-          if (-not $gsudo) {
-            $gsudo = (Get-ChildItem "$env:ProgramFiles\gsudo", "$env:LOCALAPPDATA\Microsoft\WinGet" -Recurse -Filter gsudo.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+          $gsudoCache = Join-Path $env:USERPROFILE 'gsudo-cache\gsudo.exe'
+          if (Test-Path $gsudoCache) {
+            $gsudo = $gsudoCache
+            Write-Host "==> gsudo: $gsudo (restored)"
           }
-          if (-not $gsudo) { throw "gsudo was not found after winget install" }
-          Write-Host "==> gsudo: $gsudo"
+          else {
+            winget install --id gerardog.gsudo --exact --accept-source-agreements --accept-package-agreements --disable-interactivity
+            # gsudo ships as an MSI, so it is not in this shell's PATH yet; look in
+            # the places the installer and winget put it.
+            $gsudo = (Get-Command gsudo -ErrorAction SilentlyContinue).Source
+            if (-not $gsudo) {
+              $gsudo = (Get-ChildItem "$env:ProgramFiles\gsudo", "$env:LOCALAPPDATA\Microsoft\WinGet" -Recurse -Filter gsudo.exe -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
+            }
+            if (-not $gsudo) { throw "gsudo was not found after winget install" }
+            New-Item -ItemType Directory -Force -Path (Split-Path $gsudoCache) | Out-Null
+            Copy-Item -LiteralPath $gsudo -Destination $gsudoCache
+            Write-Host "==> gsudo: $gsudo (installed, kept for the next run)"
+          }
           # Absolute paths: the script finds the binary, the driver and its own
           # artifact folder from its own location, so the cwd can be anything.
           & $gsudo --integrity Medium node "$env:GITHUB_WORKSPACE\gui\e2e-windows\smoke.mjs"
