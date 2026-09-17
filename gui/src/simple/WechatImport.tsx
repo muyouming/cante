@@ -178,6 +178,7 @@ export default function WechatImport(props: WechatImportProps): JSX.Element {
         <h3 class="text-[20px] font-bold tracking-widest text-slate-500">第二步：把聊天内容贴进来</h3>
         <p class="text-[16px] leading-5 text-slate-400">{WECHAT_PASTE.hint}</p>
         <textarea
+          aria-label={WECHAT_PASTE.label}
           class="min-h-[240px] w-full resize-y overflow-y-auto rounded-md border border-slate-800 bg-[#0e141b] px-3 py-2 text-[16px] leading-6 text-slate-200 focus:border-sky-600"
           placeholder={WECHAT_PASTE.placeholder}
           value={pasted()}
