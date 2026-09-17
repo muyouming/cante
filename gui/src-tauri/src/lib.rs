@@ -1,6 +1,7 @@
 // Bootstrap for the Cante desktop shell. Workstream A owns everything below the
 // `TODO(A)` markers; this file must keep `run()` as the entry point.
 pub mod admin_config;
+pub mod bridge;
 pub mod commands;
 pub mod daemon;
 pub mod files;

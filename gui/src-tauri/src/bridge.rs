@@ -1,0 +1,1135 @@
+//! Protocol adapter: the Cante `Op`/`Evt` JSONL protocol on stdio, in front of
+//! `pi --mode rpc` (issue #103, plan C, first segment).
+//!
+//! `daemon.rs` spawns `CANTE_BIN` (a command spec) and appends `serve`. Pointing
+//! `CANTE_BIN` at this crate's `cante-bridge` binary therefore replaces the
+//! upstream daemon without touching the Rust bridge or the frontend: the
+//! adapter reads `{"op":…,"id":"op_<ULID>"}` lines on stdin, drives a `pi`
+//! child, and writes `EventMsg` lines on stdout.
+//!
+//! Scope of this first segment (see `gui/docs/BRIDGE-spike.md`):
+//!
+//! * `StartSession` → spawn `pi --mode rpc` + emit `SessionStart`;
+//! * `UserInput` → `prompt` → `MessageDelta`/`AgentMessage`/`TurnEnd`;
+//! * `Interrupt` → `abort` → `TurnEnd{Interrupted}`.
+//!
+//! Deliberately **not** here: the approval gate (`TurnPause`/`ApprovalResponse`),
+//! usage reporting, session persistence/resume, skills/subagents, multiple
+//! sessions, Windows packaging. Unsupported ops answer with an `Error` event
+//! instead of silently doing nothing, so a future wiring mistake is visible.
+//!
+//! Two probe findings shape the translation and are easy to get wrong:
+//!
+//! * `turn_end` is one *assistant reply*, not a user turn — a prompt with a tool
+//!   call produces two of them. `TurnEnd` is therefore emitted only on
+//!   `agent_settled`; `turn_end`/`turn_start` only count `steps`.
+//! * `message_start` carries a partial snapshot; `message_end.message` is
+//!   authoritative, so `AgentMessage` comes from there.
+
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::PathBuf;
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc, Mutex, MutexGuard};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use serde_json::{json, Map, Value};
+
+use crate::protocol::{self, LineSplitter};
+
+/// The line `cante-bridge --version` prints. `health` only checks it is non-empty.
+pub const VERSION: &str = concat!("cante-bridge ", env!("CARGO_PKG_VERSION"));
+
+/// How long `get_state` may take before `SessionStart` is emitted without it.
+const STATE_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long `pi` may keep running after its stdin is closed before it is killed.
+const PI_EXIT_GRACE: Duration = Duration::from_secs(5);
+
+/// Lock a mutex, ignoring poisoning: a panicked writer must not wedge the
+/// adapter that the desktop app depends on.
+fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+// ---------------------------------------------------------------------------
+// Pure translation: one `pi` event → zero or more Cante `Evt`s
+// ---------------------------------------------------------------------------
+
+/// Everything the translator has to remember between `pi` events.
+#[derive(Default, Debug)]
+struct TurnState {
+    turn_id: Option<String>,
+    /// Assistant replies in the current user turn (`turn_start` count).
+    steps: u32,
+    /// The last assistant `stopReason` seen (`"stop"`, `"aborted"`, `"error"`, …).
+    stop_reason: Option<String>,
+    /// The last `errorMessage` seen, verbatim.
+    error_message: Option<String>,
+    /// The user pressed stop during this turn.
+    requested_abort: bool,
+    /// A user turn is in flight (from `agent_start` to `agent_settled`).
+    active: bool,
+    /// Per-tool accumulated result text, to turn `pi`'s cumulative
+    /// `tool_execution_update` into the deltas `ToolUpdate` carries.
+    partials: HashMap<String, String>,
+    /// Per-tool update counter (`ToolUpdate.seq`).
+    seqs: HashMap<String, u32>,
+}
+
+impl TurnState {
+    fn begin_turn(&mut self) {
+        self.turn_id = Some(format!("turn_{}", protocol::ulid()));
+        self.steps = 0;
+        self.stop_reason = None;
+        self.error_message = None;
+        self.requested_abort = false;
+        self.active = true;
+        self.partials.clear();
+        self.seqs.clear();
+    }
+
+    /// The current turn id, minting one if `pi` skipped `agent_start`.
+    fn current_turn_id(&mut self) -> String {
+        if self.turn_id.is_none() {
+            self.turn_id = Some(format!("turn_{}", protocol::ulid()));
+        }
+        self.turn_id.clone().expect("turn id was just set")
+    }
+
+    fn record_stop_reason(&mut self, message: &Value) {
+        if let Some(reason) = message.get("stopReason").and_then(Value::as_str) {
+            self.stop_reason = Some(reason.to_string());
+        }
+        if let Some(error) = message.get("errorMessage").and_then(Value::as_str) {
+            if !error.is_empty() {
+                self.error_message = Some(error.to_string());
+            }
+        }
+    }
+
+    /// The `TurnEnd.status` for the turn that just settled.
+    fn end_status(&self) -> Value {
+        match self.stop_reason.as_deref() {
+            Some("error") => {
+                let headline = self
+                    .error_message
+                    .clone()
+                    .unwrap_or_else(|| "助手在回答的时候出错了".to_string());
+                json!({ "Error": { "headline": headline } })
+            }
+            // The user asked to stop, or `pi` says it was aborted: both are
+            // "被中止", never "完成" (probe finding: stopReason "aborted").
+            Some("aborted") => json!({ "Interrupted": { "reason": "user" } }),
+            _ if self.requested_abort => json!({ "Interrupted": { "reason": "user" } }),
+            _ => json!("Completed"),
+        }
+    }
+}
+
+/// Join the text blocks of a `content` array (assistant message or tool result).
+fn text_of_content(content: Option<&Value>) -> String {
+    match content {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Array(blocks)) => blocks
+            .iter()
+            .filter(|block| block.get("type").and_then(Value::as_str) == Some("text"))
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>()
+            .join(""),
+        _ => String::new(),
+    }
+}
+
+fn str_field<'a>(value: &'a Value, key: &str) -> &'a str {
+    value.get(key).and_then(Value::as_str).unwrap_or("")
+}
+
+/// Translate one `pi` RPC event into Cante `Evt` payloads.
+///
+/// Events that are part of the RPC sub-protocol (`response`,
+/// `extension_ui_request`) are handled by the runtime, not here.
+fn translate(event: &Value, state: &mut TurnState) -> Vec<Value> {
+    match str_field(event, "type") {
+        "agent_start" => {
+            // pi emits `agent_start` again when a run continues (observed:
+            // twice for one tool-calling prompt). A Cante turn is one user
+            // prompt, so only the first one opens a turn; otherwise every
+            // continuation would mint a new `turn_id` and the closing TurnEnd
+            // would not match the TurnStart the UI saw.
+            if state.active {
+                return Vec::new();
+            }
+            state.begin_turn();
+            let turn_id = state.current_turn_id();
+            vec![json!({ "TurnStart": { "turn_id": turn_id } })]
+        }
+        // One assistant reply starts here; `TurnEnd` is reserved for
+        // `agent_settled` because a prompt can contain several replies.
+        "turn_start" => {
+            state.steps = state.steps.saturating_add(1);
+            Vec::new()
+        }
+        "message_update" => {
+            let Some(delta) = event.get("assistantMessageEvent") else {
+                return Vec::new();
+            };
+            let text = delta.get("delta").and_then(Value::as_str).unwrap_or("");
+            if text.is_empty() {
+                return Vec::new();
+            }
+            match str_field(delta, "type") {
+                "text_delta" => vec![json!({ "MessageDelta": text })],
+                "thinking_delta" => vec![json!({ "ThinkingDelta": text })],
+                _ => Vec::new(),
+            }
+        }
+        "message_end" => {
+            let Some(message) = event.get("message") else {
+                return Vec::new();
+            };
+            // `pi` echoes the user prompt as a `role:"user"` message; the
+            // adapter emits its own `UserInput`, so the echo is dropped here.
+            if message.get("role").and_then(Value::as_str) != Some("assistant") {
+                return Vec::new();
+            }
+            state.record_stop_reason(message);
+            let text = text_of_content(message.get("content"));
+            if text.is_empty() {
+                return Vec::new();
+            }
+            vec![json!({ "AgentMessage": text })]
+        }
+        "tool_execution_start" => {
+            let id = str_field(event, "toolCallId");
+            state.partials.insert(id.to_string(), String::new());
+            state.seqs.insert(id.to_string(), 0);
+            vec![json!({ "ToolStart": {
+                "id": id,
+                "name": str_field(event, "toolName"),
+                "args": event.get("args").cloned().unwrap_or(Value::Null),
+            }})]
+        }
+        "tool_execution_update" => {
+            let id = str_field(event, "toolCallId");
+            let full = text_of_content(event.get("partialResult").and_then(|r| r.get("content")));
+            let previous = state.partials.get(id).cloned().unwrap_or_default();
+            // `pi` sends the accumulated output; `ToolUpdate` carries what to
+            // append. A payload that is not an extension of the last one is
+            // passed through whole rather than dropped.
+            let delta = match full.strip_prefix(previous.as_str()) {
+                Some(rest) => rest.to_string(),
+                None => full.clone(),
+            };
+            state.partials.insert(id.to_string(), full);
+            if delta.is_empty() {
+                return Vec::new();
+            }
+            let seq = state.seqs.entry(id.to_string()).or_insert(0);
+            *seq = seq.saturating_add(1);
+            vec![json!({ "ToolUpdate": {
+                "tool_use_id": id,
+                "seq": *seq,
+                "message": delta,
+            }})]
+        }
+        "tool_execution_end" => {
+            let id = str_field(event, "toolCallId");
+            state.partials.remove(id);
+            let failed = event.get("isError").and_then(Value::as_bool).unwrap_or(false);
+            vec![json!({ "ToolEnd": {
+                "tool_use_id": id,
+                "tool_name": str_field(event, "toolName"),
+                "status": if failed { "Failed" } else { "Completed" },
+                "result_json": event.get("result").cloned().unwrap_or(Value::Null),
+            }})]
+        }
+        // Authoritative stop reason lives on the assistant message.
+        "turn_end" => {
+            if let Some(message) = event.get("message") {
+                state.record_stop_reason(message);
+            }
+            Vec::new()
+        }
+        "agent_settled" => {
+            let turn_id = state.current_turn_id();
+            let status = state.end_status();
+            let steps = state.steps;
+            state.active = false;
+            state.partials.clear();
+            state.seqs.clear();
+            vec![json!({ "TurnEnd": { "turn_id": turn_id, "status": status, "steps": steps } })]
+        }
+        "compaction_start" => vec![json!("CompactStart")],
+        "compaction_end" => {
+            let summary = event
+                .get("result")
+                .and_then(|result| result.get("summary"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            vec![json!({ "CompactEnd": { "summary": summary } })]
+        }
+        _ => Vec::new(),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SessionInfo
+// ---------------------------------------------------------------------------
+
+/// Fold Cante's PascalCase permission modes onto `pi`'s world, and back.
+fn permission_mode_wire(value: Option<&str>) -> &'static str {
+    match value.map(str::to_ascii_lowercase).as_deref() {
+        Some("strict") => "Strict",
+        Some("yolo") => "Yolo",
+        _ => "Auto",
+    }
+}
+
+fn model_spec(model: Option<&Value>) -> Value {
+    let mut spec = Map::new();
+    match model {
+        Some(model) if model.is_object() => {
+            spec.insert("id".to_string(), model.get("id").cloned().unwrap_or(json!("")));
+            if let Some(name) = model.get("name").and_then(Value::as_str) {
+                if !name.is_empty() {
+                    spec.insert("display_name".to_string(), json!(name));
+                }
+            }
+            // `input` is where pi says text vs image. Absent means "pi did not
+            // say", which the frontend reads as "cannot see images" — never
+            // invented here.
+            if let Some(input) = model.get("input").and_then(Value::as_array) {
+                let vision = input.iter().any(|item| item.as_str() == Some("image"));
+                spec.insert("support_vision".to_string(), json!(vision));
+            }
+        }
+        _ => {
+            spec.insert("id".to_string(), json!(""));
+        }
+    }
+    Value::Object(spec)
+}
+
+fn provider_spec(model: Option<&Value>) -> Value {
+    let base_url = model
+        .and_then(|model| model.get("baseUrl"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    // The wire shape (`crates/protocol-shape`) types both fields as required
+    // strings, so an unknown provider is the empty string, not a guess: the
+    // privacy panel then falls back to `provider.id`.
+    json!({
+        "id": model.and_then(|model| model.get("provider")).and_then(Value::as_str).unwrap_or(""),
+        "display_name": "",
+        "base_url": base_url,
+    })
+}
+
+/// Build the `SessionStart` payload from a `get_state` response.
+///
+/// Fields pi cannot answer are left empty rather than guessed: `session_id` and
+/// `model.id` are `""`, `title` is `null`, and `skills` is `[]` (skills are out
+/// of scope for this segment).
+fn session_info(
+    state: Option<&Value>,
+    cwd: &str,
+    permission_mode: Option<&str>,
+) -> Value {
+    let model = state.and_then(|state| state.get("model")).filter(|value| !value.is_null());
+    let session_id = state
+        .and_then(|state| state.get("sessionId"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    json!({
+        "model": model_spec(model),
+        "provider": provider_spec(model),
+        "session_id": session_id,
+        "cwd": cwd,
+        "permission_mode": permission_mode_wire(permission_mode),
+        "title": Value::Null,
+        "skills": [],
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Envelope + timestamps
+// ---------------------------------------------------------------------------
+
+fn now_iso8601() -> String {
+    let ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|delta| delta.as_millis() as u64)
+        .unwrap_or(0);
+    iso8601_from_ms(ms)
+}
+
+/// RFC 3339 UTC with milliseconds, without pulling in a date library.
+fn iso8601_from_ms(ms: u64) -> String {
+    let seconds = ms / 1000;
+    let millis = ms % 1000;
+    let (year, month, day) = civil_from_days((seconds / 86_400) as i64);
+    let second_of_day = seconds % 86_400;
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{millis:03}Z",
+        second_of_day / 3600,
+        (second_of_day % 3600) / 60,
+        second_of_day % 60,
+    )
+}
+
+/// Days since 1970-01-01 → (year, month, day). Howard Hinnant's algorithm.
+fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let year = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if month <= 2 { year + 1 } else { year }, month, day)
+}
+
+// ---------------------------------------------------------------------------
+// `pi` process plumbing
+// ---------------------------------------------------------------------------
+
+/// The `StartSession` request fields this segment understands.
+#[derive(Default, Debug, Clone)]
+struct StartArgs {
+    model: Option<String>,
+    provider: Option<String>,
+    permission_mode: Option<String>,
+    cwd: Option<String>,
+}
+
+impl StartArgs {
+    fn parse(request: &Value) -> Self {
+        let get = |key: &str| request.get(key).and_then(Value::as_str).map(str::to_string);
+        Self {
+            model: get("model"),
+            provider: get("provider"),
+            permission_mode: get("permission_mode"),
+            cwd: get("cwd"),
+        }
+    }
+}
+
+/// Arguments for the `pi` child. `--no-session` matches this segment's scope:
+/// session persistence/resume is not wired up, so claiming it would be a lie.
+fn pi_args(args: &StartArgs) -> Vec<String> {
+    let mut out = vec!["--mode".to_string(), "rpc".to_string(), "--no-session".to_string()];
+    if let Some(provider) = &args.provider {
+        out.push("--provider".to_string());
+        out.push(provider.clone());
+    }
+    if let Some(model) = &args.model {
+        out.push("--model".to_string());
+        out.push(model.clone());
+    }
+    out
+}
+
+fn pi_program() -> String {
+    std::env::var("PI_BIN")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "pi".to_string())
+}
+
+/// Windows: `pi` is a console program; spawning it from the window process
+/// would flash a console. Same treatment `daemon.rs` gives `cante`.
+#[cfg(windows)]
+fn hide_console(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+#[cfg(not(windows))]
+fn hide_console(_command: &mut Command) {}
+
+fn close_pi_stdin(stdin: &Arc<Mutex<Option<ChildStdin>>>) {
+    if let Ok(mut guard) = stdin.lock() {
+        drop(guard.take());
+    }
+}
+
+/// Wait for a child that already lost its pipes, killing it if it lingers.
+fn reap(mut child: Child) {
+    let deadline = Instant::now() + PI_EXIT_GRACE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return;
+            }
+        }
+    }
+}
+
+/// The response to a `pi` extension dialog, or `None` for fire-and-forget
+/// methods. The approval gate is out of scope for this segment, but an
+/// unexpected dialog must not hang the turn: answering "cancelled" is the
+/// fail-safe direction the probe measured (the extension sees no/false).
+fn ui_response_for(request: &Value) -> Option<Value> {
+    let method = request.get("method").and_then(Value::as_str)?;
+    if !matches!(method, "select" | "confirm" | "input" | "editor") {
+        return None;
+    }
+    let id = request.get("id")?;
+    Some(json!({ "type": "extension_ui_response", "id": id, "cancelled": true }))
+}
+
+// ---------------------------------------------------------------------------
+// Runtime
+// ---------------------------------------------------------------------------
+
+type Sink = Arc<Mutex<std::io::Stdout>>;
+
+/// State shared with the `pi` stdout reader thread.
+struct Shared {
+    /// The op id that caused the current turn (used as `EventMsg.parent`).
+    parent: Option<String>,
+    turn: TurnState,
+}
+
+/// The running `pi` child.
+struct Pi {
+    child: Child,
+    stdin: Arc<Mutex<Option<ChildStdin>>>,
+}
+
+struct ReaderCtx {
+    sink: Sink,
+    shared: Arc<Mutex<Shared>>,
+    state_tx: mpsc::Sender<Value>,
+    shutting_down: Arc<AtomicBool>,
+    /// Set once `SessionStart` has been announced.
+    started: Arc<AtomicBool>,
+    pi_stdin: Arc<Mutex<Option<ChildStdin>>>,
+}
+
+/// Run the adapter on stdin/stdout until stdin closes or `Shutdown` arrives.
+/// Returns the process exit code.
+pub fn serve() -> i32 {
+    let sink: Sink = Arc::new(Mutex::new(std::io::stdout()));
+    let mut session = Session::new(sink);
+    session.serve_stdin();
+    session.finish();
+    0
+}
+
+struct Session {
+    sink: Sink,
+    shared: Arc<Mutex<Shared>>,
+    shutting_down: Arc<AtomicBool>,
+    started: Arc<AtomicBool>,
+    pi: Option<Pi>,
+    state_rx: Option<mpsc::Receiver<Value>>,
+    args: StartArgs,
+    stop: bool,
+}
+
+impl Session {
+    fn new(sink: Sink) -> Self {
+        Self {
+            sink,
+            shared: Arc::new(Mutex::new(Shared { parent: None, turn: TurnState::default() })),
+            shutting_down: Arc::new(AtomicBool::new(false)),
+            started: Arc::new(AtomicBool::new(false)),
+            pi: None,
+            state_rx: None,
+            args: StartArgs::default(),
+            stop: false,
+        }
+    }
+
+    // -- stdin ---------------------------------------------------------------
+
+    fn serve_stdin(&mut self) {
+        let stdin = std::io::stdin();
+        let mut reader = BufReader::new(stdin.lock());
+        let mut splitter = LineSplitter::default();
+        let mut buffer = [0u8; 8192];
+        while !self.stop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(n) => {
+                    for line in splitter.push(&buffer[..n]) {
+                        self.handle_line(&line);
+                        if self.stop {
+                            break;
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
+        }
+        if let Some(line) = splitter.finish() {
+            self.handle_line(&line);
+        }
+    }
+
+    fn handle_line(&mut self, line: &str) {
+        let frame: Value = match serde_json::from_str(line) {
+            Ok(frame) => frame,
+            Err(_) => {
+                eprintln!("cante-bridge: ignoring a non-JSON stdin line");
+                return;
+            }
+        };
+        let op = frame.get("op").cloned().unwrap_or(Value::Null);
+        let id = frame.get("id").and_then(Value::as_str).unwrap_or("").to_string();
+        self.handle_op(&op, &id);
+    }
+
+    fn handle_op(&mut self, op: &Value, id: &str) {
+        match op {
+            Value::String(name) => match name.as_str() {
+                "Interrupt" => self.interrupt(id),
+                "Shutdown" => self.stop = true,
+                other => self.unsupported(other, id),
+            },
+            Value::Object(map) => {
+                if let Some(request) = map.get("StartSession") {
+                    self.start_session(request, id);
+                } else if let Some(text) = map.get("UserInput").and_then(Value::as_str) {
+                    self.user_input(text, id);
+                } else if map.contains_key("ResumeSession") {
+                    self.unsupported("ResumeSession", id);
+                } else if let Some(name) = map.keys().next() {
+                    self.unsupported(name, id);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn start_session(&mut self, request: &Value, id: &str) {
+        self.args = StartArgs::parse(request);
+        if let Err(error) = self.ensure_pi(id) {
+            self.error(&error, Some(id));
+        }
+    }
+
+    fn user_input(&mut self, text: &str, id: &str) {
+        if let Err(error) = self.ensure_pi(id) {
+            self.error(&error, Some(id));
+            return;
+        }
+        let streaming = lock(&self.shared).turn.active;
+        lock(&self.shared).parent = Some(id.to_string());
+        // The daemon echoes the prompt as `UserInput`; the transcript's "you"
+        // row is rendered from it (the store does not render the local send).
+        emit(&self.sink, json!({ "UserInput": text }), Some(id));
+        let mut command = json!({ "id": id, "type": "prompt", "message": text });
+        if streaming {
+            // One thing at a time is the product's model, but a second prompt
+            // must not be dropped on the floor: pi queues it as steering.
+            command["streamingBehavior"] = json!("steer");
+        }
+        if let Err(error) = self.write_pi(&command) {
+            self.error(&error, Some(id));
+        }
+    }
+
+    fn interrupt(&mut self, id: &str) {
+        {
+            let mut shared = lock(&self.shared);
+            shared.parent = Some(id.to_string());
+            shared.turn.requested_abort = true;
+        }
+        if self.pi.is_none() {
+            return;
+        }
+        if let Err(error) = self.write_pi(&json!({ "id": id, "type": "abort" })) {
+            self.error(&error, Some(id));
+        }
+    }
+
+    fn unsupported(&self, name: &str, id: &str) {
+        eprintln!("cante-bridge: unsupported op {name}");
+        self.error(&format!("这个版本还不支持这个操作：{name}"), Some(id));
+    }
+
+    fn error(&self, message: &str, parent: Option<&str>) {
+        emit(&self.sink, json!({ "Error": message }), parent);
+    }
+
+    // -- pi child ------------------------------------------------------------
+
+    fn cwd_path(&self) -> PathBuf {
+        if let Some(cwd) = self.args.cwd.as_deref() {
+            let path = PathBuf::from(cwd);
+            if path.is_dir() {
+                return path;
+            }
+        }
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    }
+
+    fn ensure_pi(&mut self, op_id: &str) -> Result<(), String> {
+        if self.pi.is_some() {
+            return Ok(());
+        }
+        let cwd = self.cwd_path();
+        let program = pi_program();
+        let args = pi_args(&self.args);
+        let mut command = Command::new(&program);
+        command
+            .args(&args)
+            .current_dir(&cwd)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        hide_console(&mut command);
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("没能把助手启动起来（{program}）：{error}"))?;
+        let stdin = child.stdin.take().ok_or_else(|| "没拿到助手的输入管道".to_string())?;
+        let stdout = child.stdout.take().ok_or_else(|| "没拿到助手的输出管道".to_string())?;
+        let stderr = child.stderr.take().ok_or_else(|| "没拿到助手的错误管道".to_string())?;
+        let pi_stdin = Arc::new(Mutex::new(Some(stdin)));
+
+        let (state_tx, state_rx) = mpsc::channel();
+        self.state_rx = Some(state_rx);
+        let ctx = ReaderCtx {
+            sink: Arc::clone(&self.sink),
+            shared: Arc::clone(&self.shared),
+            state_tx,
+            shutting_down: Arc::clone(&self.shutting_down),
+            started: Arc::clone(&self.started),
+            pi_stdin: Arc::clone(&pi_stdin),
+        };
+        thread::Builder::new()
+            .name("cante-bridge-pi".to_string())
+            .spawn(move || pi_reader(stdout, ctx))
+            .map_err(|error| format!("没能开始读助手的输出：{error}"))?;
+        thread::Builder::new()
+            .name("cante-bridge-pi-log".to_string())
+            .spawn(move || pi_log(stderr))
+            .map_err(|error| format!("没能开始读助手的日志：{error}"))?;
+        self.pi = Some(Pi { child, stdin: pi_stdin });
+
+        let request_id = format!("state_{}", protocol::ulid());
+        self.write_pi(&json!({ "id": request_id, "type": "get_state" }))?;
+        let response = match self.state_rx.as_ref() {
+            Some(rx) => rx.recv_timeout(STATE_TIMEOUT).ok(),
+            None => None,
+        };
+        let data = response
+            .as_ref()
+            .filter(|response| response.get("success").and_then(Value::as_bool) == Some(true))
+            .and_then(|response| response.get("data"))
+            .cloned();
+        let info = session_info(
+            data.as_ref(),
+            &cwd.to_string_lossy(),
+            self.args.permission_mode.as_deref(),
+        );
+        emit(&self.sink, json!({ "SessionStart": info }), Some(op_id));
+        self.started.store(true, Ordering::SeqCst);
+        if data.is_none() {
+            emit(
+                &self.sink,
+                json!({ "Info": "没拿到助手的自述信息，先按已知的默认值走" }),
+                Some(op_id),
+            );
+        }
+        Ok(())
+    }
+
+    fn write_pi(&self, value: &Value) -> Result<(), String> {
+        let pi = self.pi.as_ref().ok_or_else(|| "助手还没启动".to_string())?;
+        let mut guard = lock(&pi.stdin);
+        let stdin = guard.as_mut().ok_or_else(|| "助手的输入管道已经关了".to_string())?;
+        writeln!(stdin, "{value}").map_err(|error| format!("写给助手失败：{error}"))?;
+        stdin.flush().map_err(|error| format!("写给助手失败：{error}"))
+    }
+
+    // -- shutdown ------------------------------------------------------------
+
+    fn finish(&mut self) {
+        self.shutting_down.store(true, Ordering::SeqCst);
+        emit(&self.sink, json!("Goodbye"), None);
+        if let Some(pi) = self.pi.take() {
+            close_pi_stdin(&pi.stdin);
+            reap(pi.child);
+        }
+    }
+}
+
+/// Read `pi` stdout, translate events, and forward logs.
+fn pi_reader(stdout: ChildStdout, ctx: ReaderCtx) {
+    let mut reader = BufReader::new(stdout);
+    let mut splitter = LineSplitter::default();
+    let mut buffer = [0u8; 8192];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(n) => {
+                for line in splitter.push(&buffer[..n]) {
+                    handle_pi_line(&line, &ctx);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    if let Some(line) = splitter.finish() {
+        handle_pi_line(&line, &ctx);
+    }
+    // `pi` closed its stdout. On the normal path `finish()` is already tearing
+    // the session down; anything else means the child died under us, and the
+    // desktop bridge has to see the pipe end so it can report `cante://exit`.
+    if !ctx.shutting_down.load(Ordering::SeqCst) {
+        let parent = lock(&ctx.shared).parent.clone();
+        ctx.shutting_down.store(true, Ordering::SeqCst);
+        close_pi_stdin(&ctx.pi_stdin);
+        // Died before `SessionStart`? That is a startup failure the window has
+        // to hear about, not a silent goodbye (a misconfigured provider exits
+        // here). After startup, the turn events already told the story.
+        if !ctx.started.load(Ordering::SeqCst) {
+            emit(
+                &ctx.sink,
+                json!({ "Error": "助手没能启动起来，它一开始就退出了" }),
+                parent.as_deref(),
+            );
+        }
+        emit(&ctx.sink, json!("Goodbye"), parent.as_deref());
+        std::process::exit(0);
+    }
+}
+
+fn handle_pi_line(line: &str, ctx: &ReaderCtx) {
+    let value: Value = match serde_json::from_str(line) {
+        Ok(value) => value,
+        Err(_) => {
+            eprintln!("cante-bridge: ignoring a non-JSON line from the assistant");
+            return;
+        }
+    };
+    match value.get("type").and_then(Value::as_str).unwrap_or("") {
+        "extension_ui_request" => {
+            if let Some(response) = ui_response_for(&value) {
+                let _ = write_pi_stdin(&ctx.pi_stdin, &response);
+            } else {
+                eprintln!("cante-bridge: ignoring a fire-and-forget UI request");
+            }
+            return;
+        }
+        "response" => {
+            if value.get("command").and_then(Value::as_str) == Some("get_state") {
+                let _ = ctx.state_tx.send(value);
+            }
+            return;
+        }
+        _ => {}
+    }
+    let (parent, events) = {
+        let mut shared = lock(&ctx.shared);
+        let parent = shared.parent.clone();
+        let events = translate(&value, &mut shared.turn);
+        (parent, events)
+    };
+    for event in events {
+        emit(&ctx.sink, event, parent.as_deref());
+    }
+}
+
+/// Forward `pi`'s stderr verbatim: `daemon.rs` turns those lines into
+/// `cante://log`, and the probe measured pi's stderr as clean.
+fn pi_log(stderr: impl Read) {
+    let reader = BufReader::new(stderr);
+    for line in reader.lines().map_while(Result::ok) {
+        eprintln!("{line}");
+    }
+}
+
+fn write_pi_stdin(stdin: &Arc<Mutex<Option<ChildStdin>>>, value: &Value) -> Result<(), String> {
+    let mut guard = lock(stdin);
+    let stdin = guard.as_mut().ok_or_else(|| "assistant stdin is closed".to_string())?;
+    writeln!(stdin, "{value}").map_err(|error| error.to_string())?;
+    stdin.flush().map_err(|error| error.to_string())
+}
+
+fn emit(sink: &Sink, event: Value, parent: Option<&str>) {
+    let frame = json!({
+        "timestamp": now_iso8601(),
+        "id": format!("evt_{}", protocol::ulid()),
+        "event": event,
+        "parent": parent,
+    });
+    let mut out = lock(sink);
+    let _ = writeln!(out, "{frame}");
+    let _ = out.flush();
+}
+
+// ---------------------------------------------------------------------------
+// Tests: translation only — the end-to-end run lives in `tests/bridge.rs`.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn deltas(events: &[Value]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| event.get("MessageDelta").and_then(Value::as_str).map(str::to_string))
+            .collect()
+    }
+
+    fn turn_ends(events: &[Value]) -> Vec<Value> {
+        events
+            .iter()
+            .filter_map(|event| event.get("TurnEnd").cloned())
+            .collect()
+    }
+
+    #[test]
+    fn agent_start_opens_a_turn_and_agent_settled_closes_it() {
+        let mut state = TurnState::default();
+        let started = translate(&json!({ "type": "agent_start" }), &mut state);
+        let turn_id = started[0]["TurnStart"]["turn_id"].as_str().unwrap().to_string();
+        assert!(turn_id.starts_with("turn_"));
+
+        // A continuation reports `agent_start` again; it must not open a
+        // second turn with a new id.
+        assert!(
+            translate(&json!({ "type": "agent_start" }), &mut state).is_empty(),
+            "a repeated agent_start must not open a new turn"
+        );
+
+        // A tool-calling prompt makes two assistant replies; neither may end
+        // the user turn on its own.
+        translate(&json!({ "type": "turn_start" }), &mut state);
+        let mid = translate(
+            &json!({ "type": "turn_end", "message": { "role": "assistant", "stopReason": "toolUse" } }),
+            &mut state,
+        );
+        assert!(turn_ends(&mid).is_empty(), "turn_end must not emit TurnEnd");
+        translate(&json!({ "type": "turn_start" }), &mut state);
+
+        let settled = translate(
+            &json!({ "type": "agent_settled" }),
+            &mut state,
+        );
+        let ends = turn_ends(&settled);
+        assert_eq!(ends.len(), 1);
+        assert_eq!(ends[0]["turn_id"], json!(turn_id));
+        assert_eq!(ends[0]["status"], json!("Completed"));
+        assert_eq!(ends[0]["steps"], json!(2));
+    }
+
+    #[test]
+    fn text_deltas_and_the_final_message_keep_their_order() {
+        let mut state = TurnState::default();
+        translate(&json!({ "type": "agent_start" }), &mut state);
+        let first = translate(
+            &json!({ "type": "message_update", "assistantMessageEvent": { "type": "text_delta", "delta": "我先看一下" } }),
+            &mut state,
+        );
+        let thinking = translate(
+            &json!({ "type": "message_update", "assistantMessageEvent": { "type": "thinking_delta", "delta": "嗯" } }),
+            &mut state,
+        );
+        let second = translate(
+            &json!({ "type": "message_update", "assistantMessageEvent": { "type": "text_delta", "delta": "，然后用工具。" } }),
+            &mut state,
+        );
+        assert_eq!(deltas(&first), vec!["我先看一下"]);
+        assert_eq!(thinking, vec![json!({ "ThinkingDelta": "嗯" })]);
+        assert_eq!(deltas(&second), vec!["，然后用工具。"]);
+
+        let end = translate(
+            &json!({ "type": "message_end", "message": {
+                "role": "assistant",
+                "content": [
+                    { "type": "text", "text": "我先看一下" },
+                    { "type": "toolCall", "id": "call_1", "name": "bash", "arguments": {} }
+                ],
+                "stopReason": "toolUse",
+            }}),
+            &mut state,
+        );
+        assert_eq!(end, vec![json!({ "AgentMessage": "我先看一下" })]);
+    }
+
+    #[test]
+    fn the_user_echo_is_not_an_agent_message() {
+        let mut state = TurnState::default();
+        let out = translate(
+            &json!({ "type": "message_end", "message": { "role": "user", "content": "把这件事做了" } }),
+            &mut state,
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn tool_updates_carry_only_the_new_text() {
+        let mut state = TurnState::default();
+        let start = translate(
+            &json!({ "type": "tool_execution_start", "toolCallId": "call_1", "toolName": "bash", "args": { "command": "ls" } }),
+            &mut state,
+        );
+        assert_eq!(start, vec![json!({ "ToolStart": { "id": "call_1", "name": "bash", "args": { "command": "ls" } } })]);
+
+        let first = translate(
+            &json!({ "type": "tool_execution_update", "toolCallId": "call_1",
+                "partialResult": { "content": [{ "type": "text", "text": "a\n" }] } }),
+            &mut state,
+        );
+        assert_eq!(first, vec![json!({ "ToolUpdate": { "tool_use_id": "call_1", "seq": 1, "message": "a\n" } })]);
+
+        // pi resends the accumulated output; only the suffix may be appended.
+        let second = translate(
+            &json!({ "type": "tool_execution_update", "toolCallId": "call_1",
+                "partialResult": { "content": [{ "type": "text", "text": "a\nb\n" }] } }),
+            &mut state,
+        );
+        assert_eq!(second, vec![json!({ "ToolUpdate": { "tool_use_id": "call_1", "seq": 2, "message": "b\n" } })]);
+
+        let third = translate(
+            &json!({ "type": "tool_execution_update", "toolCallId": "call_1",
+                "partialResult": { "content": [{ "type": "text", "text": "a\nb\n" }] } }),
+            &mut state,
+        );
+        assert!(third.is_empty(), "an unchanged cumulative update adds nothing");
+    }
+
+    #[test]
+    fn tool_end_maps_is_error_to_failed() {
+        let mut state = TurnState::default();
+        let out = translate(
+            &json!({ "type": "tool_execution_end", "toolCallId": "call_1", "toolName": "bash",
+                "result": { "content": [{ "type": "text", "text": "boom" }] }, "isError": true }),
+            &mut state,
+        );
+        assert_eq!(out[0]["ToolEnd"]["status"], json!("Failed"));
+        assert_eq!(out[0]["ToolEnd"]["tool_name"], json!("bash"));
+    }
+
+    #[test]
+    fn an_aborted_turn_ends_as_interrupted() {
+        let mut state = TurnState::default();
+        translate(&json!({ "type": "agent_start" }), &mut state);
+        translate(
+            &json!({ "type": "message_end", "message": {
+                "role": "assistant", "content": [{ "type": "text", "text": "这是" }],
+                "stopReason": "aborted", "errorMessage": "Request was aborted",
+            }}),
+            &mut state,
+        );
+        let ends = turn_ends(&translate(&json!({ "type": "agent_settled" }), &mut state));
+        assert_eq!(ends[0]["status"], json!({ "Interrupted": { "reason": "user" } }));
+    }
+
+    #[test]
+    fn an_error_turn_keeps_the_message() {
+        let mut state = TurnState::default();
+        translate(&json!({ "type": "agent_start" }), &mut state);
+        translate(
+            &json!({ "type": "message_end", "message": {
+                "role": "assistant", "content": [],
+                "stopReason": "error", "errorMessage": "529 overloaded",
+            }}),
+            &mut state,
+        );
+        let ends = turn_ends(&translate(&json!({ "type": "agent_settled" }), &mut state));
+        assert_eq!(ends[0]["status"], json!({ "Error": { "headline": "529 overloaded" } }));
+    }
+
+    #[test]
+    fn requesting_a_stop_is_enough_even_without_a_stop_reason() {
+        let mut state = TurnState::default();
+        translate(&json!({ "type": "agent_start" }), &mut state);
+        state.requested_abort = true;
+        let ends = turn_ends(&translate(&json!({ "type": "agent_settled" }), &mut state));
+        assert_eq!(ends[0]["status"], json!({ "Interrupted": { "reason": "user" } }));
+    }
+
+    #[test]
+    fn session_info_reads_the_state_response_verbatim() {
+        let state = json!({
+            "model": {
+                "id": "probe-model",
+                "name": "Probe Model",
+                "provider": "probe",
+                "baseUrl": "http://127.0.0.1:1/v1",
+                "input": ["text", "image"],
+            },
+            "sessionId": "session-1",
+        });
+        let info = session_info(Some(&state), "/tmp/work", Some("auto"));
+        assert_eq!(info["session_id"], json!("session-1"));
+        assert_eq!(info["model"]["id"], json!("probe-model"));
+        assert_eq!(info["model"]["display_name"], json!("Probe Model"));
+        assert_eq!(info["model"]["support_vision"], json!(true));
+        assert_eq!(info["provider"]["id"], json!("probe"));
+        assert_eq!(info["provider"]["base_url"], json!("http://127.0.0.1:1/v1"));
+        assert_eq!(info["provider"]["display_name"], json!(""));
+        assert_eq!(info["permission_mode"], json!("Auto"));
+        assert_eq!(info["cwd"], json!("/tmp/work"));
+        assert_eq!(info["skills"], json!([]));
+        assert_eq!(info["title"], Value::Null);
+    }
+
+    #[test]
+    fn missing_state_leaves_the_session_fields_empty_not_invented() {
+        let info = session_info(None, "/tmp/work", Some("strict"));
+        assert_eq!(info["session_id"], json!(""));
+        assert_eq!(info["model"], json!({ "id": "" }));
+        assert_eq!(info["provider"]["id"], json!(""));
+        assert_eq!(info["provider"]["base_url"], json!(""));
+        assert_eq!(info["permission_mode"], json!("Strict"));
+        // No `support_vision` at all: "pi did not say", never `false` or `true`.
+        assert!(info["model"].get("support_vision").is_none());
+    }
+
+    #[test]
+    fn permission_modes_fold_to_the_wire_values() {
+        assert_eq!(permission_mode_wire(Some("strict")), "Strict");
+        assert_eq!(permission_mode_wire(Some("Auto")), "Auto");
+        assert_eq!(permission_mode_wire(Some("yolo")), "Yolo");
+        assert_eq!(permission_mode_wire(None), "Auto");
+        assert_eq!(permission_mode_wire(Some("nonsense")), "Auto");
+    }
+
+    #[test]
+    fn pi_args_carry_mode_and_the_optional_model() {
+        assert_eq!(pi_args(&StartArgs::default()), vec!["--mode", "rpc", "--no-session"]);
+        let args = StartArgs {
+            model: Some("probe-model".to_string()),
+            provider: Some("probe".to_string()),
+            permission_mode: None,
+            cwd: None,
+        };
+        assert_eq!(
+            pi_args(&args),
+            vec!["--mode", "rpc", "--no-session", "--provider", "probe", "--model", "probe-model"]
+        );
+    }
+
+    #[test]
+    fn dialogs_are_cancelled_and_notifications_are_ignored() {
+        let dialog = json!({ "type": "extension_ui_request", "id": "u1", "method": "select" });
+        assert_eq!(
+            ui_response_for(&dialog),
+            Some(json!({ "type": "extension_ui_response", "id": "u1", "cancelled": true }))
+        );
+        let notify = json!({ "type": "extension_ui_request", "id": "u2", "method": "notify" });
+        assert_eq!(ui_response_for(&notify), None);
+    }
+
+    #[test]
+    fn timestamps_are_rfc3339_utc() {
+        assert_eq!(iso8601_from_ms(0), "1970-01-01T00:00:00.000Z");
+        assert_eq!(iso8601_from_ms(1_700_000_000_123), "2023-11-14T22:13:20.123Z");
+    }
+}
