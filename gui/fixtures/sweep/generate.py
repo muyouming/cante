@@ -6,24 +6,76 @@
 列顺序不同、密码 PDF、扫描版 PDF、没有时间记录的文件……
 
 为什么用脚本生成而不是提交二进制：.xlsx / .docx / .pdf 都是二进制，提交进仓库既
-占地方又看不出内容，改起来也没法 diff。这里只用 Python 标准库（外加可选的 pypdf
-做加密 PDF）现场生成，大小都是几 KB。
+占地方又看不出内容，改起来也没法 diff。这里只用 Python 标准库，**另外两个依赖是必须的**
+（见下），现场生成，大小都是几 KB。
+
+依赖：**缺了就报错退出，不静默降级**。
+这一条是普查自己发现的教训（`gui/SWEEP-0.2.1.md`）：以前 pypdf 不在时 `encrypt_pdf()`
+只是 `return False`，那份「加密材料.pdf」就**根本没加密**——同一个场景在不同机器上
+不是同一个夹具，看起来却像“产品变好了”。夹具不完整就必须大声失败。
 
 用法：
     python3 gui/fixtures/sweep/generate.py [目标目录]
+    python3 gui/fixtures/sweep/generate.py --check-deps   # 只查依赖，不生成
 
-默认写到本目录下的 generated/。生成完会打印每个文件的名字，方便核对。
+默认写到本目录下的 generated/。生成完会打印每个文件的名字，方便核对；
+同时写一份 `fixture-status.json`，让普查报告能看出**每份夹具是完整还是缺依赖**。
 """
 
 from __future__ import annotations
 
 import base64
+import json
 import os
 import shutil
 import struct
 import sys
 import zipfile
 from xml.sax.saxutils import escape
+
+# ---------------------------------------------------------------------------
+# 依赖：缺一个就停下（不静默降级）
+# ---------------------------------------------------------------------------
+
+
+class MissingFixtureDependency(RuntimeError):
+    """夹具需要的依赖没装。宁可整轮停下，也不要生成一份“看起来一样”的假夹具。"""
+
+
+# (import 名, 用来干什么, 怎么装)
+DEPENDENCIES: list[tuple[str, str, str]] = [
+    ("pypdf", "加密 PDF（pdf.merge 的「加密材料」场景）", "python3 -m pip install pypdf"),
+    ("PIL", "表格照片（vision.table 的截图输入）", "python3 -m pip install pillow"),
+]
+
+# 上一次 generate() 每份夹具的状态：key → "complete" / "missing-dep: <名字>"。
+# 写进 fixture-status.json，也挂在这里方便同进程的调用方直接读。
+LAST_STATUS: dict[str, str] = {}
+
+
+def missing_dependencies() -> list[tuple[str, str, str]]:
+    missing: list[tuple[str, str, str]] = []
+    for module, purpose, install in DEPENDENCIES:
+        try:
+            __import__(module)
+        except ImportError:
+            missing.append((module, purpose, install))
+    return missing
+
+
+def dependency_message(missing: list[tuple[str, str, str]]) -> str:
+    lines = ["夹具生成缺少依赖，**不生成**（宁可停下，也不要生成一份不一样却看不出来的夹具）："]
+    for module, purpose, install in missing:
+        lines.append(f"  - 缺 {module}：用来生成{purpose}")
+        lines.append(f"      装它：{install}")
+    lines.append("装完重跑同一条命令即可。")
+    return "\n".join(lines)
+
+
+def check_dependencies() -> None:
+    missing = missing_dependencies()
+    if missing:
+        raise MissingFixtureDependency(dependency_message(missing))
 
 # ---------------------------------------------------------------------------
 # .xlsx 写入器（纯标准库：xlsx 就是一个 zip + 几个 XML）
@@ -307,12 +359,19 @@ def write_pdf(path: str, pages: list[list[str] | None]) -> None:
         handle.write(_pdf_bytes(pages))
 
 
-def encrypt_pdf(path: str, user_password: str = "secret") -> bool:
-    """有 pypdf 就加密；没有就返回 False（调用方会退化为不加密）。"""
+def encrypt_pdf(path: str, user_password: str = "secret") -> None:
+    """加密一份 PDF。
+
+    pypdf 不在时**抛异常**（以前是 `return False` → 文件静静地没加密，
+    于是 pdf.merge 那个场景在不同机器上不是同一份夹具）。
+    """
     try:
         from pypdf import PdfReader, PdfWriter
-    except Exception:
-        return False
+    except ImportError as error:  # pragma: no cover - 取决于环境
+        raise MissingFixtureDependency(
+            "要生成加密 PDF，需要 pypdf（装它：python3 -m pip install pypdf）。"
+            "没有它就不能把这份夹具做成加密的——那会让 pdf.merge 这个场景看起来像产品支持了，所以这里直接停下。"
+        ) from error
     reader = PdfReader(path)
     writer = PdfWriter()
     for page in reader.pages:
@@ -320,7 +379,6 @@ def encrypt_pdf(path: str, user_password: str = "secret") -> bool:
     writer.encrypt(user_password)
     with open(path, "wb") as handle:
         writer.write(handle)
-    return True
 
 
 # ---------------------------------------------------------------------------
@@ -594,18 +652,372 @@ def _small_zip(path: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# 后补的夹具（issue #161：把普查覆盖率从 20/32 补到全部卡片）
+#
+# 这些卡片原先从来没进过普查计划（核对账、发票、人员变化、看图转表格、资料调研、
+# 接龙与点名）。每张卡都配一份能真跑的输入；确实造不出来的在 CARDS 里逐张写理由。
+# ---------------------------------------------------------------------------
+
+
+def _totals(path: str) -> None:
+    """check.totals：台账里有小计/合计，其中一个是错的；另带重复行与空行。"""
+    write_xlsx(
+        path,
+        [
+            (
+                "报销台账",
+                [
+                    [Bold("项目"), Bold("一月"), Bold("二月"), Bold("三月")],
+                    [Text("差旅"), Num(1200), Num(800), Num(1500)],
+                    [Text("办公"), Num(300.5), Num(220.5), Num(410)],
+                    [Text("招待"), Num(600), Num(0), Num(250)],
+                    # 完全重复的一行
+                    [Text("办公"), Num(300.5), Num(220.5), Num(410)],
+                    # 空行
+                    [None, None, None, None],
+                    # 这一行的小计是错的：三月实际是 1500+410+250 = 2160
+                    [Bold("小计"), Num(2100.5), Num(1020.5), Num(2150)],
+                ],
+            )
+        ],
+    )
+
+
+def _reconcile(a_path: str, b_path: str) -> None:
+    """check.reconcile：两张表按单号对账（有只在一边的，也有金额对不上的）。"""
+    write_xlsx(
+        a_path,
+        [
+            (
+                "订单台账",
+                [
+                    [Bold("单号"), Bold("客户"), Bold("应收金额")],
+                    [Text("SO-1001"), Text("晨光商贸"), Num(1200)],
+                    [Text("SO-1002"), Text("北方物流"), Num(860)],
+                    [Text("SO-1003"), Text("海联电子"), Num(2450.5)],
+                    [Text("SO-1004"), Text("南岸百货"), Num(300)],
+                ],
+            )
+        ],
+    )
+    write_xlsx(
+        b_path,
+        [
+            (
+                "收款记录",
+                [
+                    [Bold("单号"), Bold("到账日期"), Bold("实收金额")],
+                    [Text("SO-1001"), Text("2024-03-06"), Num(1200)],
+                    # 金额对不上：应收 860，实收 806
+                    [Text("SO-1002"), Text("2024-03-08"), Num(806)],
+                    [Text("SO-1003"), Text("2024-03-12"), Num(2450.5)],
+                    # 这张只在收款表里，订单表里没有
+                    [Text("SO-1099"), Text("2024-03-15"), Num(99)],
+                ],
+            )
+        ],
+    )
+
+
+def _invoice_pdf(path: str, number: str, date: str, seller: str, total: str) -> None:
+    """invoice.ledger / invoice.dupes 用的电子发票 PDF。
+
+    字段名用拉丁字母：我们的 PDF 写入器只有 Helvetica + latin-1（标准库造不出中文字体），
+    中文会被替换成问号。卡片本身也说了「字段的叫法可能不同」，所以这仍然是有效的输入；
+    这个不足写在报告里。
+    """
+    write_pdf(
+        path,
+        [
+            [
+                "ELECTRONIC INVOICE",
+                f"Invoice No: {number}",
+                f"Issue Date: {date}",
+                f"Seller: {seller}",
+                f"Total (tax included): {total}",
+            ]
+        ],
+    )
+
+
+def _invoice_sheet(path: str) -> None:
+    """invoice.dupes：一张汇总表，里面有重复的发票号码（只标不删）。"""
+    write_xlsx(
+        path,
+        [
+            (
+                "发票清单",
+                [
+                    [Bold("发票号"), Bold("开票日期"), Bold("销方名称"), Bold("价税合计")],
+                    [Text("044031900111"), Text("2024-03-05"), Text("晨光商贸"), Num(1130)],
+                    [Text("044031900112"), Text("2024-03-06"), Text("北方物流"), Num(860)],
+                    # 同一个号码第二次出现，金额一样
+                    [Text("044031900111"), Text("2024-03-05"), Text("晨光商贸"), Num(1130)],
+                    # 同一个号码第三次出现，金额不一样
+                    [Text("044031900113"), Text("2024-03-09"), Text("海联电子"), Num(2450.5)],
+                    [Text("044031900113"), Text("2024-03-09"), Text("海联电子"), Num(2540.5)],
+                    # 号码看不清的一行
+                    [None, Text("2024-03-10"), Text("南岸百货"), Num(300)],
+                ],
+            )
+        ],
+    )
+
+
+def _invoice_book(path: str) -> None:
+    """invoice.crosscheck：发票台账（用于和报销明细对账）。"""
+    write_xlsx(
+        path,
+        [
+            (
+                "发票台账",
+                [
+                    [Bold("发票号码"), Bold("开票日期"), Bold("销方名称"), Bold("价税合计")],
+                    [Text("044031900111"), Text("2024-03-05"), Text("晨光商贸"), Num(1130)],
+                    [Text("044031900112"), Text("2024-03-06"), Text("北方物流"), Num(860)],
+                    [Text("044031900113"), Text("2024-03-09"), Text("海联电子"), Num(2450.5)],
+                ],
+            )
+        ],
+    )
+
+
+def _reimburse(path: str) -> None:
+    """invoice.crosscheck：报销明细（号码对不上、金额对不上的各有）。"""
+    write_xlsx(
+        path,
+        [
+            (
+                "报销明细",
+                [
+                    [Bold("发票号码"), Bold("报销人"), Bold("报销金额")],
+                    [Text("044031900111"), Text("王芳"), Num(1130)],
+                    # 金额对不上：发票 860，报销只报 806
+                    [Text("044031900112"), Text("李强"), Num(806)],
+                    # 号码写错了：台账里没有这个号
+                    [Text("044031900199"), Text("赵敏"), Num(510)],
+                    # 重复报一笔（同号同额出现两次）
+                    [Text("044031900111"), Text("王芳"), Num(1130)],
+                ],
+            )
+        ],
+    )
+
+
+def _roster(path: str) -> None:
+    """admin.byperson：花名册（一人一行，工号带前导 0）。"""
+    write_xlsx(
+        path,
+        [
+            (
+                "花名册",
+                [
+                    [Bold("工号"), Bold("姓名"), Bold("部门"), Bold("岗位")],
+                    [Text("001"), Text("王芳"), Text("行政部"), Text("行政专员")],
+                    [Text("002"), Text("李强"), Text("销售部"), Text("销售经理")],
+                    # 姓名前后多了空格 / 全角空格
+                    [Text("003"), Text(" 张伟"), Text("技术部"), Text("工程师")],
+                    [Text("004"), Text("赵　敏"), Text("财务部"), Text("会计")],
+                ],
+            )
+        ],
+    )
+
+
+def _attend(path: str) -> None:
+    """admin.byperson：考勤（一人多行）。"""
+    write_xlsx(
+        path,
+        [
+            (
+                "考勤",
+                [
+                    [Bold("工号"), Bold("日期"), Bold("状态")],
+                    [Text("001"), Text("2024-03-01"), Text("出勤")],
+                    [Text("001"), Text("2024-03-02"), Text("出勤")],
+                    [Text("002"), Text("2024-03-01"), Text("休假")],
+                    [Text("002"), Text("2024-03-02"), Text("出勤")],
+                    [Text("005"), Text("2024-03-01"), Text("出勤")],
+                ],
+            )
+        ],
+    )
+
+
+def _salary(path: str) -> None:
+    """admin.byperson：工资表（一人一行，用「员工编号」认人——与花名册列名不同）。"""
+    write_xlsx(
+        path,
+        [
+            (
+                "工资",
+                [
+                    [Bold("员工编号"), Bold("姓名"), Bold("应发工资")],
+                    [Text("001"), Text("王芳"), Num(8200)],
+                    [Text("002"), Text("李强"), Num(12500)],
+                    [Text("003"), Text("张伟"), Num(15800)],
+                    # 工资表里有、花名册里没有的这个工号
+                    [Text("009"), Text("周涛"), Num(9600)],
+                ],
+            )
+        ],
+    )
+
+
+def _staff_prev(path: str) -> None:
+    """admin.changes：上个月的员工名单。"""
+    write_xlsx(
+        path,
+        [
+            (
+                "上月名单",
+                [
+                    [Bold("工号"), Bold("姓名"), Bold("部门"), Bold("手机号")],
+                    [Text("001"), Text("王芳"), Text("行政部"), Text("13800000001")],
+                    [Text("002"), Text("李强"), Text("销售部"), Text("13800000002")],
+                    [Text("007"), Text("孙悦"), Text("市场部"), Text("13800000007")],
+                ],
+            )
+        ],
+    )
+
+
+def _staff_now(path: str) -> None:
+    """admin.changes：这个月的员工名单（有新增、有离职、有信息变更）。"""
+    write_xlsx(
+        path,
+        [
+            (
+                "本月名单",
+                [
+                    [Bold("工号"), Bold("姓名"), Bold("部门"), Bold("手机号")],
+                    [Text("001"), Text("王芳"), Text("行政部"), Text("13800000001")],
+                    # 部门 + 手机号都变了（应算两条）
+                    [Text("002"), Text("李强"), Text("大客户部"), Text("13900000002")],
+                    # 新来的
+                    [Text("008"), Text("吴迪"), Text("技术部"), Text("13800000008")],
+                    # 007 孙悦 不在了（离职）
+                ],
+            )
+        ],
+    )
+
+
+def _contracts(path: str) -> None:
+    """admin.expiry：合同/证照台账（快到期、已过期、日期看不清都有；日期写法不统一）。"""
+    import datetime
+
+    today = datetime.date.today()
+
+    def stamp(days: int, style: int) -> object:
+        day = today + datetime.timedelta(days=days)
+        if style == 0:
+            return Text(day.strftime("%Y/%m/%d"))
+        if style == 1:
+            return Text(day.strftime("%Y.%m.%d"))
+        if style == 2:
+            return Text(f"{day.year}年{day.month}月{day.day}日")
+        return Text(day.strftime("%Y-%m-%d"))
+
+    write_xlsx(
+        path,
+        [
+            (
+                "合同台账",
+                [
+                    [Bold("名称"), Bold("类型"), Bold("到期日"), Bold("负责人")],
+                    [Text("办公楼租赁合同"), Text("合同"), stamp(9, 0), Text("王芳")],
+                    [Text("营业执照"), Text("证照"), stamp(28, 1), Text("王芳")],
+                    [Text("消防年检"), Text("年检"), stamp(45, 2), Text("李强")],
+                    # 已经过期
+                    [Text("电梯维保合同"), Text("合同"), stamp(-6, 3), Text("李强")],
+                    # 日期看不清的两种
+                    [Text("保洁服务合同"), Text("合同"), Text("长期"), Text("赵敏")],
+                    [Text("网络专线合同"), Text("合同"), None, Text("赵敏")],
+                ],
+            )
+        ],
+    )
+
+
+def _table_photo(path: str) -> None:
+    """vision.table：一张表格的照片（PNG）。
+
+    需要 Pillow。内容用拉丁字母与数字：Pillow 的默认位图字体没有中文字形，
+    画中文会变成豆腐块。这里要测的是「看图抄格子」这条路，不是中文字形识别。
+    """
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError as error:  # pragma: no cover - 取决于环境
+        raise MissingFixtureDependency(
+            "要生成表格照片，需要 pillow（装它：python3 -m pip install pillow）。"
+        ) from error
+
+    width, height = 640, 260
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    rows = [
+        ["No.", "Item", "Qty", "Unit Price", "Amount"],
+        ["A01", "Notebook", "12", "5.50", "66.00"],
+        ["A02", "Pen Box", "30", "2.00", "60.00"],
+        ["A03", "Stapler", "4", "18.00", "72.00"],
+    ]
+    left, top, row_h = 20, 20, 46
+    col_w = [70, 190, 70, 130, 130]
+    for r, row in enumerate(rows):
+        y = top + r * row_h
+        draw.rectangle([left, y, left + sum(col_w), y + row_h], outline="black", width=2)
+        x = left
+        for c, cell in enumerate(row):
+            draw.text((x + 8, y + 14), cell, fill="black")
+            if c:
+                draw.line([x, y, x, y + row_h], fill="black", width=2)
+            x += col_w[c]
+    image.save(path)
+
+
+def _class_roster(path: str) -> None:
+    """wechat.missing：班级花名册（用来和群里的接龙比对，找出没报的）。"""
+    write_xlsx(
+        path,
+        [
+            (
+                "花名册",
+                [
+                    [Bold("序号"), Bold("姓名"), Bold("学号")],
+                    [Num(1), Text("陈嘉怡"), Text("20240101")],
+                    [Num(2), Text("刘思远"), Text("20240102")],
+                    [Num(3), Text("王梓涵"), Text("20240103")],
+                    [Num(4), Text("张梦琪"), Text("20240104")],
+                    [Num(5), Text("李昊然"), Text("20240105")],
+                    [Num(6), Text("周雨萱"), Text("20240106")],
+                ],
+            )
+        ],
+    )
+
+
 def generate(root: str) -> dict[str, str]:
-    """把所有素材生成到 root 下，返回「逻辑名 → 相对路径」的清单。"""
+    """把所有素材生成到 root 下，返回「逻辑名 → 相对路径」的清单。
+
+    依赖缺一个就抛 `MissingFixtureDependency`（**不静默降级**）；
+    同时把每份夹具的状态写进 `<root>/fixture-status.json`，让普查报告能看出
+    「完整」还是「缺依赖」。
+    """
+    check_dependencies()
     if os.path.isdir(root):
         shutil.rmtree(root)
     os.makedirs(root, exist_ok=True)
     manifest: dict[str, str] = {}
+    status: dict[str, str] = {}
 
     def rel(name: str) -> str:
         return name
 
     def register(key: str, name: str) -> str:
         manifest[key] = rel(name)
+        status[key] = "complete"
         return os.path.join(root, name)
 
     # --- 表格 ---
@@ -621,6 +1033,34 @@ def generate(root: str) -> dict[str, str]:
     )
     _big_table(register("big", "区域记录表.xlsx"))
     _names_phones(register("names_phones", "姓名电话.xlsx"))
+
+    # --- #161 后补：核对账 / 发票 / 人员变化（原先 12 张没进普查计划的卡）---
+    _totals(register("totals", "报销台账.xlsx"))
+    _reconcile(
+        register("reconcile_a", "订单台账.xlsx"),
+        register("reconcile_b", "收款记录.xlsx"),
+    )
+    for index, (number, date, seller, total) in enumerate(
+        [
+            ("044031900111", "2024-03-05", "Chenguang Trading Co., Ltd.", "1130.00"),
+            ("044031900112", "2024-03-06", "Beifang Logistics Co., Ltd.", "860.00"),
+            # 与第一张号码相同：给 invoice.dupes / invoice.ledger 都能用
+            ("044031900111", "2024-03-05", "Chenguang Trading Co., Ltd.", "1130.00"),
+        ],
+        start=1,
+    ):
+        _invoice_pdf(register(f"invoice_pdf_{index}", f"电子发票{index}.pdf"), number, date, seller, total)
+    _invoice_sheet(register("invoice_sheet", "发票清单.xlsx"))
+    _invoice_book(register("invoice_book", "发票台账.xlsx"))
+    _reimburse(register("reimburse", "报销明细.xlsx"))
+    _roster(register("roster", "花名册.xlsx"))
+    _attend(register("attend", "考勤表.xlsx"))
+    _salary(register("salary", "工资表.xlsx"))
+    _staff_prev(register("staff_prev", "员工名单_上月.xlsx"))
+    _staff_now(register("staff_now", "员工名单_本月.xlsx"))
+    _contracts(register("contracts", "合同台账.xlsx"))
+    _table_photo(register("table_photo", "记账本照片.png"))
+    _class_roster(register("class_roster", "花名册_班级.xlsx"))
 
     # --- 文档 ---
     _annual_report(
@@ -648,7 +1088,8 @@ def generate(root: str) -> dict[str, str]:
     write_pdf(pdf_scanned, [None, None])
     pdf_locked = register("pdf_locked", "加密材料.pdf")
     write_pdf(pdf_locked, [["Locked - Page 1"], ["Locked - Page 2"]])
-    manifest["pdf_locked_encrypted"] = "yes" if encrypt_pdf(pdf_locked) else "no"
+    encrypt_pdf(pdf_locked)
+    manifest["pdf_locked_encrypted"] = "yes"
 
     # --- 照片 / 小文件（改名、分类、重复用）---
     photo_dir = os.path.join(root, "照片")
@@ -711,12 +1152,42 @@ def generate(root: str) -> dict[str, str]:
     _write(os.path.join(dupes, "备份", "文档副本.txt"), "内容一样。\n")
     _write(os.path.join(dupes, "不同.txt"), "内容不一样。\n")
 
+    LAST_STATUS.clear()
+    LAST_STATUS.update(status)
+    with open(os.path.join(root, "fixture-status.json"), "w", encoding="utf-8") as handle:
+        json.dump(
+            {
+                "dependencies": [
+                    {"module": module, "purpose": purpose, "status": "ok"}
+                    for module, purpose, _ in DEPENDENCIES
+                ],
+                "fixtures": {key: {"path": manifest[key], "status": status.get(key, "complete")}
+                             for key in sorted(status)},
+            },
+            handle,
+            ensure_ascii=False,
+            indent=2,
+        )
+
     return manifest
 
 
 def main(argv: list[str]) -> int:
+    if "--check-deps" in argv:
+        missing = missing_dependencies()
+        if missing:
+            print(dependency_message(missing), file=sys.stderr)
+            return 2
+        for module, purpose, _install in DEPENDENCIES:
+            print(f"  {module:8s} 已装（用来生成{purpose}）")
+        print("依赖齐全。")
+        return 0
     target = argv[1] if len(argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), "generated")
-    manifest = generate(target)
+    try:
+        manifest = generate(target)
+    except MissingFixtureDependency as error:
+        print(str(error), file=sys.stderr)
+        return 2
     print(f"生成到：{target}")
     for key in sorted(manifest):
         print(f"  {key:22s} {manifest[key]}")
