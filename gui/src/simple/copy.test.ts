@@ -96,3 +96,28 @@ describe("出错的出路对她可执行", () => {
     }
   });
 });
+
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const read = (name: string): string => readFileSync(join(HERE, name), "utf8");
+
+describe("#175 复制详情要够技术同事用", () => {
+  test("复制出去的那段带上程序名、任务名与时间，而不只是程序原文", () => {
+    const src = read("ErrorView.tsx");
+    const copy = read("copy.ts");
+    // 那三句是面向她的字 ✓，按仓库的规矩住在 copy 模块里（内联中文只许减少 ✓），
+    // 组件只引用常量 —— 这条断言盯的是"引用关系还在、任务名还传得下来"。
+    expect(copy).toContain("detailHeader");
+    expect(copy).toContain("detailTask");
+    expect(copy).toContain("detailWhen");
+    expect(src).toContain("ERROR_VIEW.detailHeader");
+    expect(src).toContain("ERROR_VIEW.detailTask");
+    expect(
+      src.includes("props.context?.title"),
+      "复制详情里没带任务名：同事拿到只会问「这是啥」（#175 走查读到剪贴板里只有 42 字节）。",
+    ).toBe(true);
+  });
+});

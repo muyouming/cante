@@ -270,3 +270,21 @@ describe("actionsFor：每条动作她自己读得懂", () => {
     expect(explained[0]?.kind).toBe("pick-files");
   });
 });
+
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const read = (name: string): string => readFileSync(join(HERE, name), "utf8");
+
+describe("#175 出错的出路必须和刚才那件事对得上", () => {
+  test("TaskRunner 把 context 传给 ErrorView —— 否则永远走 default（让她去重选文件）", () => {
+    const runner = read("TaskRunner.tsx");
+    expect(
+      runner.includes("context={{ needs: props.task.needs"),
+      "TaskRunner 渲染 ErrorView 时没传 context：文书/微信族（一个文件都没用）失败后，\n" +
+        "出路会变成「重新选一次文件」——那一步根本不存在（#175 走查亲手复现）。",
+    ).toBe(true);
+  });
+});

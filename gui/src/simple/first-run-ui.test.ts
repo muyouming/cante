@@ -155,3 +155,19 @@ describe("两处界面说的是同一批例子", () => {
     }
   });
 });
+
+
+
+describe("#175 向导的两条「缺东西」分支都必须有复制按钮", () => {
+  test("说「点「复制详情」」的地方，同屏就真的能有那个按钮", () => {
+    const wizard = read("Wizard.tsx");
+    // notice() 分支与兜底分支各要一次 —— 兜底那一支原来只有两行字 ✗，
+    // 而文案里写着「点「复制详情」…」，她会去找一个不存在的东西。
+    const presses = wizard.split("onCopyDaemon()").length - 1;
+    expect(
+      presses,
+      "向导里能按「复制详情」的地方少于两处：有一支文案提到了按钮、屏幕上却没有它（#175 走查抓到的就是这个）。",
+    ).toBeGreaterThanOrEqual(2);
+    expect(read("copy.ts")).toContain("copyDetailLabel");
+  });
+});
