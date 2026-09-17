@@ -12,6 +12,8 @@ import { For, Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { FOLLOWUP, TRUST } from "./copy.ts";
+// r17 — 结果卡片上补一句：这些文件以后在首页也能找回来。
+import { RESULTS } from "./copy-results.ts";
 // 两轮各自的文案模块都要（核对 + 复制成微信能贴的文字）。
 import { VERIFY } from "./copy-verify.ts";
 import { SHARE, shareReadFailed } from "./copy-share.ts";
@@ -470,6 +472,10 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
                       打开所在文件夹
                     </button>
                   </div>
+                  {/* r17 — 告诉她这些结果以后还能从哪儿找回来，一次说完，不多嘴。 */}
+                  <p class="w-full text-[16px] leading-relaxed text-slate-400 sm:basis-full">
+                    {RESULTS.keepHint}
+                  </p>
                   {/* 表格类结果可以变成微信里能贴的文字。只是复制，不是发送。 */}
                   <Show when={isTablePath(file.path)}>
                     <div class="flex w-full flex-col gap-2 sm:basis-full">
