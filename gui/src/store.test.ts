@@ -12,6 +12,15 @@ import { createRoot } from "solid-js";
 
 import { eventName, type EventMsg } from "./protocol.ts";
 import { describeApproval } from "./simple/approval.ts";
+import { FOLLOW_RECOMMENDATION_NOTE } from "./simple/copy-question.ts";
+import {
+  DISMISSED_REPLY,
+  answeredReply,
+  discussReply,
+  draftsFor,
+  followRecommendationReply,
+  toggleOption,
+} from "./simple/question.ts";
 import { SCHEDULE_STORAGE_KEY } from "./simple/schedule.ts";
 
 // ---------------------------------------------------------------------------
@@ -318,6 +327,127 @@ describe("approvals and scale", () => {
     // Generous ceiling: this is a guard against a quadratic regression, not a
     // benchmark (locally the whole loop is a few milliseconds).
     expect(performance.now() - started).toBeLessThan(2_000);
+    dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// r25 — structured questions: `TurnPause{reason:Question}` in, `Op::QuestionResponse`
+// out. The semantics asserted here are the protocol's (msg.rs): echo both ids,
+// `selected` carries option labels, `note` carries free text, and the pause clears
+// on TurnResume *and* on TurnEnd.
+// ---------------------------------------------------------------------------
+
+const QUESTION_PAUSE = {
+  turn_id: "t1",
+  reason: {
+    Question: {
+      tool_use_id: "toolu_1",
+      questions: [
+        {
+          header: "金额那一列",
+          question: "表里的「金额（元）」就是你说的金额吗？",
+          multi_select: false,
+          options: [
+            { label: "就是它", description: "直接填进金额那一列" },
+            { label: "不是它", description: "我会再告诉你哪一列才是" },
+          ],
+        },
+      ],
+    },
+  },
+};
+
+describe("structured questions", () => {
+  test("TurnPause{Question} → 状态里有问题", async () => {
+    const { store, dispose } = await setup();
+    emit("event", event("TurnPause", QUESTION_PAUSE));
+    expect(store.question()?.turn_id).toBe("t1");
+    expect(store.question()?.tool_use_id).toBe("toolu_1");
+    expect(store.question()?.questions[0]!.options[0]!.label).toBe("就是它");
+    // 和审批暂停一样：窗口停下来等她了，不能看起来像卡死。
+    expect(store.daemonStatus()).toBe("awaiting");
+    dispose();
+  });
+
+  test("回答 → 发出正确的 QuestionResponse（turn_id / tool_use_id / selected 都对）", async () => {
+    const { store, dispose } = await setup();
+    emit("event", event("TurnPause", QUESTION_PAUSE));
+    const questions = store.question()!.questions;
+    const drafts = draftsFor(questions);
+    drafts[0] = toggleOption(drafts[0]!, "不是它", false);
+    await store.answerQuestion(answeredReply(questions, drafts));
+    expect(opCalls("question_response")).toEqual([
+      {
+        turn_id: "t1",
+        tool_use_id: "toolu_1",
+        reply: { Answered: [{ selected: ["不是它"] }] },
+      },
+    ]);
+    expect(store.question()).toBeNull();
+    dispose();
+  });
+
+  test("自由文本进 note；「你看着办」翻成建议 + 她明确表态", async () => {
+    const { store, dispose } = await setup();
+    emit("event", event("TurnPause", QUESTION_PAUSE));
+    const questions = store.question()!.questions;
+    await store.answerQuestion(answeredReply(questions, [{ selected: [], note: "其实是第二列" }]));
+    // 回答成功就清掉了暂停，再发一次才能测第二条出路。
+    emit("event", event("TurnPause", QUESTION_PAUSE));
+    await store.answerQuestion(followRecommendationReply(questions));
+    const [free, follow] = opCalls("question_response");
+    expect(free).toEqual({
+      turn_id: "t1",
+      tool_use_id: "toolu_1",
+      reply: { Answered: [{ selected: [], note: "其实是第二列" }] },
+    });
+    expect(follow).toEqual({
+      turn_id: "t1",
+      tool_use_id: "toolu_1",
+      reply: { Answered: [{ selected: ["就是它"], note: FOLLOW_RECOMMENDATION_NOTE }] },
+    });
+    dispose();
+  });
+
+  test("「先聊聊」发 Discuss；「先不回答」发 Dismissed", async () => {
+    const { store, dispose } = await setup();
+    emit("event", event("TurnPause", QUESTION_PAUSE));
+    await store.answerQuestion(discussReply("先说说看"));
+    emit("event", event("TurnPause", QUESTION_PAUSE));
+    await store.answerQuestion(DISMISSED_REPLY);
+    const [discuss, dismissed] = opCalls("question_response");
+    expect(discuss).toEqual({
+      turn_id: "t1",
+      tool_use_id: "toolu_1",
+      reply: { Discuss: { message: "先说说看" } },
+    });
+    expect(dismissed).toEqual({ turn_id: "t1", tool_use_id: "toolu_1", reply: "Dismissed" });
+    dispose();
+  });
+
+  test("TurnResume 清掉提问状态", async () => {
+    const { store, dispose } = await setup();
+    emit("event", event("TurnPause", QUESTION_PAUSE));
+    expect(store.question()).not.toBeNull();
+    emit("event", event("TurnResume", { turn_id: "t1" }));
+    expect(store.question()).toBeNull();
+    dispose();
+  });
+
+  test("TurnEnd 也清掉提问状态（被取消的回合可能不发 resume）", async () => {
+    const { store, dispose } = await setup();
+    emit("event", event("TurnPause", QUESTION_PAUSE));
+    expect(store.question()).not.toBeNull();
+    emit("event", event("TurnEnd", { turn_id: "t1", status: "Completed", steps: 1 }));
+    expect(store.question()).toBeNull();
+    dispose();
+  });
+
+  test("读不出来的提问不弹空框", async () => {
+    const { store, dispose } = await setup();
+    emit("event", event("TurnPause", { turn_id: "t1", reason: { Question: { questions: [] } } }));
+    expect(store.question()).toBeNull();
     dispose();
   });
 });

@@ -121,6 +121,7 @@ export interface BridgeStatePayload {
   status: "idle" | "thinking" | "streaming" | "awaiting" | "error" | "offline";
   session: SessionInfo | null;
   pending_approval: PendingApproval | null;
+  pending_question: PendingQuestion | null;
   cante: string | null;
   cwd: string;
 }
@@ -129,6 +130,64 @@ export interface PendingApproval {
   turn_id: string;
   message: string;
   tools: Array<{ id: string; name: string; args: unknown }>;
+}
+
+// ---------------------------------------------------------------------------
+// Structured questions (`TurnPauseReason::Question` / `Op::QuestionResponse`).
+//
+// Semantics are the protocol's, not ours (crates/protocol-shape/src/msg.rs):
+//   * every question's FIRST option is the model's recommendation, and no
+//     option is ever chosen on the user's behalf;
+//   * a question pause can coexist with sibling tools still running, so
+//     `ToolStart`/`ToolEnd` may arrive while it is pending;
+//   * the client must clear question UI on `TurnResume` AND on `TurnEnd` — a
+//     cancelled turn may end without a resume.
+// ---------------------------------------------------------------------------
+
+/** One selectable option of a {@link QuestionSpec}. */
+export interface QuestionOption {
+  label: string;
+  /** 选它会怎样 — what choosing this option means. */
+  description: string;
+  /** Optional preview content; the simple surface ignores it. */
+  preview?: string | null;
+}
+
+/** One question in a {@link PendingQuestion}. */
+export interface QuestionSpec {
+  /** Short label for this question, suitable for a chip or tab. */
+  header: string;
+  /** The full question text. */
+  question: string;
+  /** Whether the user may select more than one option. */
+  multi_select?: boolean;
+  /** The offered choices. A free-text "Other" is the client's to add. */
+  options: QuestionOption[];
+}
+
+/** One question's answer inside {@link QuestionReply}'s `Answered`. */
+export interface QuestionAnswer {
+  /** Selected option labels; empty when the answer is only free text. */
+  selected: string[];
+  /** Free text: a note on the selection, or the answer itself. */
+  note?: string | null;
+}
+
+/**
+ * What the user did with a question pause. Externally tagged, like every Rust
+ * enum on this wire: `Answered` and `Discuss` are single-key objects,
+ * `Dismissed` is the bare string.
+ */
+export type QuestionReply =
+  | { Answered: QuestionAnswer[] }
+  | "Dismissed"
+  | { Discuss: { message?: string | null } };
+
+/** One pending question pause: the paused turn, its tool call, and the questions. */
+export interface PendingQuestion {
+  turn_id: string;
+  tool_use_id: string;
+  questions: QuestionSpec[];
 }
 
 export interface EventsResponse {

@@ -229,11 +229,19 @@ pub struct CanteState {
     pub status: String,
     pub session: Option<Value>,
     pub pending_approval: Option<Value>,
+    /// r25 — the open question pause (`TurnPauseReason::Question`), shaped like
+    /// `PendingQuestion` in the frontend: `{ turn_id, tool_use_id, questions }`.
+    pub pending_question: Option<Value>,
 }
 
 impl Default for CanteState {
     fn default() -> Self {
-        Self { status: "idle".to_string(), session: None, pending_approval: None }
+        Self {
+            status: "idle".to_string(),
+            session: None,
+            pending_approval: None,
+            pending_question: None,
+        }
     }
 }
 
@@ -244,6 +252,7 @@ impl CanteState {
             "status": self.status,
             "session": self.session,
             "pending_approval": self.pending_approval,
+            "pending_question": self.pending_question,
             "cante": cante,
             "cwd": cwd,
         })
@@ -257,11 +266,13 @@ pub fn reduce_state(state: &mut CanteState, event: &Value) {
         "SessionStart" | "SessionUpdated" => {
             state.session = event_payload(event, name).cloned();
             state.pending_approval = None;
+            state.pending_question = None;
             state.status = "idle".to_string();
         }
         "SessionEnd" | "Goodbye" => {
             state.session = None;
             state.pending_approval = None;
+            state.pending_question = None;
             state.status = "offline".to_string();
         }
         "TurnStart" => {
@@ -280,6 +291,19 @@ pub fn reduce_state(state: &mut CanteState, event: &Value) {
         }
         "TurnPause" => {
             if let Some(payload) = event_payload(event, "TurnPause") {
+                // r25 — a `reason.Question` is the other half of this pause: the
+                // model asked structured questions instead of asking to run a
+                // tool. Shape it for the frontend and clear the approval half.
+                if let Some(question) = payload
+                    .get("reason")
+                    .and_then(|reason| reason.get("Question"))
+                    .filter(|question| question.is_object())
+                {
+                    state.status = "awaiting".to_string();
+                    state.pending_question = Some(question_payload(payload, question));
+                    state.pending_approval = None;
+                    return;
+                }
                 // A `reason.Approval` that is present but not an object (null,
                 // a string, …) carries no approval payload, so it must not
                 // open an empty approval prompt.
@@ -290,18 +314,24 @@ pub fn reduce_state(state: &mut CanteState, event: &Value) {
                 {
                     state.status = "awaiting".to_string();
                     state.pending_approval = Some(pending_approval(payload, approval));
+                    state.pending_question = None;
                 }
             }
         }
         "TurnResume" => {
             state.status = "streaming".to_string();
             state.pending_approval = None;
+            // The protocol requires question UI to clear here *and* on TurnEnd.
+            state.pending_question = None;
         }
         "TurnEnd" => {
             if state.status != "error" {
                 state.status = "idle".to_string();
             }
             state.pending_approval = None;
+            // A cancelled turn may end without a resume, so this is the other
+            // place the protocol says to clear.
+            state.pending_question = None;
         }
         "Error" => {
             state.status = "error".to_string();
@@ -330,4 +360,64 @@ fn pending_approval(payload: &Value, approval: &Value) -> Value {
         })
         .unwrap_or_default();
     json!({ "turn_id": turn_id, "message": message, "tools": tools })
+}
+
+/// r25 — shape a `reason.Question` pause for the frontend.
+///
+/// Mirrors [`PendingQuestion`] in `src/protocol.ts`: the paused turn, the tool
+/// call to echo back, and the questions. The questions are passed through
+/// verbatim (the wire is trusted for shape, and unknown fields must survive),
+/// so Rust never has to learn what a question is.
+fn question_payload(payload: &Value, question: &Value) -> Value {
+    let turn_id = payload.get("turn_id").and_then(Value::as_str).unwrap_or("").to_string();
+    let tool_use_id =
+        question.get("tool_use_id").and_then(Value::as_str).unwrap_or("").to_string();
+    let questions = question.get("questions").cloned().unwrap_or_else(|| Value::Array(Vec::new()));
+    json!({ "turn_id": turn_id, "tool_use_id": tool_use_id, "questions": questions })
+}
+
+#[cfg(test)]
+mod question_state_tests {
+    use super::*;
+
+    fn pause(reason: Value) -> Value {
+        json!({ "TurnPause": { "turn_id": "turn_1", "reason": reason } })
+    }
+
+    fn question_reason() -> Value {
+        json!({
+            "Question": {
+                "tool_use_id": "toolu_1",
+                "questions": [{ "header": "金额那一列", "question": "就是它吗？", "options": [] }],
+            }
+        })
+    }
+
+    #[test]
+    fn a_question_pause_advertises_the_questions() {
+        let mut state = CanteState::default();
+        reduce_state(&mut state, &pause(question_reason()));
+        assert_eq!(state.status, "awaiting");
+        assert!(state.pending_approval.is_none());
+        let question = state.pending_question.as_ref().expect("pending_question");
+        assert_eq!(question["turn_id"], "turn_1");
+        assert_eq!(question["tool_use_id"], "toolu_1");
+        assert_eq!(question["questions"][0]["question"], "就是它吗？");
+    }
+
+    #[test]
+    fn question_ui_clears_on_resume_and_on_end() {
+        // The protocol says both places: a cancelled turn may end without a resume.
+        let endings = [
+            json!({ "TurnResume": { "turn_id": "turn_1" } }),
+            json!({ "TurnEnd": { "turn_id": "turn_1", "status": "Completed", "steps": 1 } }),
+        ];
+        for ending in endings {
+            let mut state = CanteState::default();
+            reduce_state(&mut state, &pause(question_reason()));
+            assert!(state.pending_question.is_some());
+            reduce_state(&mut state, &ending);
+            assert!(state.pending_question.is_none(), "not cleared by {ending}");
+        }
+    }
 }

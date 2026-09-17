@@ -41,6 +41,8 @@ import {
 // 卡片提示词（`instructionFor`）：卡片里写好的步骤与安全规矩必须真的发出去，
 // 见 `composedInstruction`。曾经因为漏了这条导入路径，卡片的规矩从未到达助手。
 import { instructionFor } from "./simple/tasks/index.ts";
+// r25 — 结构化提问：协议载荷 → 可渲染的题目 → `Op::QuestionResponse`。
+import { readPendingQuestion, readQuestionSpecs } from "./simple/question.ts";
 import {
   dueSchedules,
   newScheduleId,
@@ -71,7 +73,9 @@ import {
   toolResultText,
   type EventMsg,
   type PendingApproval,
+  type PendingQuestion,
   type PermissionMode,
+  type QuestionReply,
   type ReviewDecision,
   type SessionInfo,
   type TurnEndStatus,
@@ -112,6 +116,12 @@ export interface Store {
   session: Accessor<SessionInfo | null>;
   approval: Accessor<PendingApproval | null>;
   /**
+   * r25 — 助手停下来问的那几件事（`TurnPause{reason:Question}`）。
+   * 有它时，回答优先用按钮（`QuestionSheet`）；回答框是文本兜底。
+   * `TurnResume` 与 `TurnEnd` 都会清掉它：被取消的回合可能不发 resume。
+   */
+  question: Accessor<PendingQuestion | null>;
+  /**
    * The row stream. The pro transcript view is gone, but two consumers keep
    * this alive: `simple/evidence.ts` reads the last assistant row for the
    * #63「需要你核对」paragraph and the r7 question-ending check. Nothing else
@@ -126,6 +136,12 @@ export interface Store {
   startSession(overrides?: SessionOverrides): Promise<void>;
   interrupt(): Promise<void>;
   respond(decisions: ReviewDecision[], message?: string): Promise<void>;
+  /**
+   * r25 — 把界面上的回答翻成 `Op::QuestionResponse` 发出去。
+   * `turn_id` / `tool_use_id` 从那条暂停里**原样带回**（协议要求：对不上的回复会被丢掉）。
+   * 界面用 `simple/question.ts` 把按钮翻成 `reply`，store 只负责带上暂停的标识。
+   */
+  answerQuestion(reply: QuestionReply): Promise<void>;
   // ---- privacy (r5-privacy) -----------------------------------------------
   /** What may leave this computer, and who receives it. */
   privacy: Accessor<PrivacyState>;
@@ -325,6 +341,22 @@ function normalizeApproval(value: unknown): PendingApproval | null {
   };
 }
 
+/**
+ * r25 — 从 `cante://state` 里的 `pending_question` 读出一份可回答的提问。
+ * 形状与 `TurnPause{reason:Question}` 一致（`turn_id` + `tool_use_id` + `questions`），
+ * 一样在缺件时返回 null：读不出来的提问不该弹一个空的提问框。
+ */
+function questionFromState(value: unknown): PendingQuestion | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  const turnId = typeof record.turn_id === "string" ? record.turn_id : "";
+  const toolUseId = typeof record.tool_use_id === "string" ? record.tool_use_id : "";
+  if (!turnId || !toolUseId) return null;
+  const questions = readQuestionSpecs(record.questions);
+  if (questions.length === 0) return null;
+  return { turn_id: turnId, tool_use_id: toolUseId, questions };
+}
+
 function pad(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -375,6 +407,7 @@ export function createStore(): Store {
   const [daemonStatus, setDaemonStatus] = createSignal<DaemonStatus>("offline");
   const [session, setSession] = createSignal<SessionInfo | null>(null);
   const [approval, setApproval] = createSignal<PendingApproval | null>(null);
+  const [question, setQuestion] = createSignal<PendingQuestion | null>(null);
   const [rows, setRows] = createSignal<Row[]>([]);
   const [steps, setSteps] = createSignal(0);
   const [notice, setNotice] = createSignal<string | null>(null);
@@ -559,6 +592,7 @@ export function createStore(): Store {
     batch(() => {
       setDaemonStatus("offline");
       setApproval(null);
+      setQuestion(null);
       setNotice(`cante daemon exited (${payload?.code ?? "signal"})`);
     });
     if (currentRun()?.state === "running") {
@@ -592,6 +626,12 @@ export function createStore(): Store {
     if (state.status) setDaemonStatus(state.status);
     if (state.session !== undefined) setSession(state.session ?? null);
     if (state.pending_approval !== undefined) setApproval(normalizeApproval(state.pending_approval));
+    // `pending_question` 是 r25 新增的字段，`tauri.ts` 的 `BridgeState` 还没带上它
+    // （那一份归冻结的桥，本轮不动）；这里只做一次带类型的局部拓宽。
+    const questionState = state as Partial<BridgeState> & { pending_question?: unknown };
+    if (questionState.pending_question !== undefined) {
+      setQuestion(questionFromState(questionState.pending_question));
+    }
   }
 
   function transition(name: string, event: unknown): void {
@@ -600,6 +640,7 @@ export function createStore(): Store {
       case "SessionUpdated": {
         setDaemonStatus("idle");
         setApproval(null);
+        setQuestion(null);
         const info = eventPayload<SessionInfo>(event, name);
         if (info) setSession(info);
         return;
@@ -621,9 +662,13 @@ export function createStore(): Store {
       case "TurnResume":
         setDaemonStatus("streaming");
         setApproval(null);
+        // 协议：提问 UI 必须在 resume 上清掉。
+        setQuestion(null);
         return;
       case "TurnEnd":
         if (daemonStatus() !== "error") setDaemonStatus("idle");
+        // 协议：也要在 end 上清掉——被取消的回合可能**不发** resume。
+        setQuestion(null);
         return;
       case "Error":
         setDaemonStatus("error");
@@ -633,6 +678,7 @@ export function createStore(): Store {
         setDaemonStatus("offline");
         setSession(null);
         setApproval(null);
+        setQuestion(null);
         return;
       default:
     }
@@ -776,7 +822,18 @@ export function createStore(): Store {
         return;
       }
       case "TurnPause": {
-        const payload = eventPayload<{ turn_id?: unknown; reason?: { Approval?: unknown } }>(event, "TurnPause");
+        const payload = eventPayload<{
+          turn_id?: unknown;
+          reason?: { Approval?: unknown; Question?: unknown };
+        }>(event, "TurnPause");
+        // r25 — 结构化提问：和审批是同一个暂停事件的两个理由。先看它：
+        // 有题目就摆按钮，没题目才回到审批。两者不会同时挂在一个 reason 上。
+        const asked = readPendingQuestion(payload);
+        if (asked) {
+          setDaemonStatus("awaiting");
+          setQuestion(asked);
+          return;
+        }
         const gate = payload?.reason?.Approval;
         if (!gate) return;
         const gateRecord = typeof gate === "object" ? (gate as Record<string, unknown>) : {};
@@ -872,6 +929,34 @@ export function createStore(): Store {
     if (responses.length === 0) return;
     const ok = await attempt(() => invoke("approve", { turn_id: pending.turn_id, responses }));
     if (ok) setApproval(null);
+  }
+
+  /**
+   * r25 — 回答一次结构化提问，走协议的一等公民 `Op::QuestionResponse`。
+   *
+   * 与 `respond` 的分工写在意图里：这条路径对应界面上那排大按钮（`QuestionSheet`），
+   * `turn_id` / `tool_use_id` 一律从**那条暂停**里原样带回，`reply` 由
+   * `simple/question.ts` 从她的勾选和自由文字翻出来（`selected` 用选项 label，`note`
+   * 装自由文本）。
+   *
+   * 我们已有的回答框（`replyToRun`）**保留**：它是文本兜底（没有结构化选项、或者
+   * 她想直接说一句话时走它）。有结构化提问时按钮优先。
+   *
+   * 注意：`question_response` 这条命令要由桥（`bridge.rs` / `commands.rs` / `daemon.rs`）
+   * 接住，本轮无权改那几个文件，所以这里只做到"按正确的形状发出去"这一步；
+   * 真机上它还到不了会话（见本轮报告「我没验证什么」）。
+   */
+  async function answerQuestion(reply: QuestionReply): Promise<void> {
+    const pending = question();
+    if (!pending) return;
+    const ok = await attempt(() =>
+      invokeOp("question_response", {
+        turn_id: pending.turn_id,
+        tool_use_id: pending.tool_use_id,
+        reply,
+      }),
+    );
+    if (ok) setQuestion(null);
   }
 
   // ---- #62 — what the running screen shows --------------------------------
@@ -1551,6 +1636,7 @@ export function createStore(): Store {
     daemonStatus,
     session,
     approval,
+    question,
     rows,
     steps,
     progress,
@@ -1559,6 +1645,7 @@ export function createStore(): Store {
     startSession,
     interrupt,
     respond,
+    answerQuestion,
     privacy,
     setLocalOnly,
     pickFiles,
