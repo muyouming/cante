@@ -1,0 +1,104 @@
+// 「例子点一下真的填进输入框」这半边。
+//
+// 这个仓库没有 jsdom（理由写在 typography.test.ts 的开头），所以这里扫源码。扫的是
+// 接线，不是文案：例子必须渲染成按钮、点下去必须经过同一个把句子写进输入框的地方、
+// 两个界面用的是同一批例子且没有各写一份。真的点一下会怎样，用无头浏览器核过（见
+// 本轮报告）；这个文件负责让接线一断就红，而不是靠人记得。
+import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const HERE = import.meta.dir;
+const read = (name: string): string => readFileSync(join(HERE, name), "utf8");
+
+const HOME = read("Home.tsx");
+const WIZARD = read("Wizard.tsx");
+
+/** 组件里某个函数的函数体（到下一个顶格收尾的 `}` 为止），用来断言它做了什么。 */
+function bodyOf(source: string, name: string): string {
+  const start = source.indexOf(`function ${name}(`);
+  expect(start).toBeGreaterThan(-1);
+  const end = source.indexOf("\n  }", start);
+  return source.slice(start, end > start ? end : source.length);
+}
+
+describe("首页：三句例子点一下就填进输入框", () => {
+  test("例子渲染成按钮，点的还是它自己那一句（不是另写一份文案）", () => {
+    expect(HOME).toContain("<For each={SAY_EXAMPLES}>");
+    expect(HOME).toContain("onClick={() => pickExample(example.sentence)}");
+  });
+
+  test("点下去真的把句子写进输入框，而且光标也进框", () => {
+    const body = bodyOf(HOME, "pickExample");
+    expect(body).toContain("setText(sentence)");
+    expect(body).toContain("input?.focus()");
+    // 框里显示的就是这个 text，所以 setText 之后她真的看得见
+    expect(HOME).toContain("value={text()}");
+    expect(HOME).toContain("ref={input}");
+  });
+
+  test("例子和输入框在同一个框里（她开口的地方，不是要翻页去找的地方）", () => {
+    const formStart = HOME.indexOf("<form");
+    const formEnd = HOME.indexOf("</form>", formStart);
+    const box = HOME.indexOf('id="cante-say"');
+    const examples = HOME.indexOf("<For each={SAY_EXAMPLES}>");
+    expect(formStart).toBeGreaterThan(-1);
+    expect(formEnd).toBeGreaterThan(formStart);
+    for (const place of [box, examples]) {
+      expect(place).toBeGreaterThan(formStart);
+      expect(place).toBeLessThan(formEnd);
+    }
+  });
+
+  test("第一次做成之后那句变体也点得动（不另开一条路）", () => {
+    expect(HOME).toContain("firstWinRun(props.store.runs())");
+    expect(HOME).toContain("nextTimeSuggestion(run)");
+    expect(HOME).toContain("onClick={() => pickExample(sentence())}");
+  });
+
+  test("向导里点的那一句会被带过来填好（取走即清，只填一次）", () => {
+    expect(HOME).toContain("const seed = takeSentence();");
+    expect(HOME).toContain("if (seed) setText(seed);");
+  });
+});
+
+describe("向导最后一步：三件事 + 三句能点的话", () => {
+  test("三条承诺都渲染出来了", () => {
+    expect(WIZARD).toContain("<For each={FIRST_RUN.promises}>");
+  });
+
+  test("三句例子在最后一步里，而且最后一步就是最后一步", () => {
+    const done = WIZARD.indexOf('step() === "done"');
+    const examples = WIZARD.indexOf("<For each={SAY_EXAMPLES}>");
+    expect(done).toBeGreaterThan(-1);
+    expect(examples).toBeGreaterThan(done);
+    expect(WIZARD.indexOf('step() === "done"', done + 1)).toBe(-1);
+  });
+
+  test("点一句会记下来交给首页，而且她看得出自己点中了哪一句", () => {
+    const body = bodyOf(WIZARD, "pickExample");
+    expect(body).toContain("setPicked(example.sentence)");
+    expect(body).toContain("rememberSentence(example.sentence)");
+    expect(WIZARD).toContain("aria-pressed={picked() === example.sentence}");
+  });
+
+  test("这一步不替她结束向导：还是她点「开始使用」才进去", () => {
+    expect(WIZARD).toContain("onClick={finish}");
+    expect(WIZARD).toContain("{WIZARD.doneButton}");
+    expect(bodyOf(WIZARD, "pickExample")).not.toContain("finish");
+  });
+});
+
+describe("两处界面说的是同一批例子", () => {
+  test("两边都从 copy-first-run.ts 取例子", () => {
+    expect(HOME).toContain('from "./copy-first-run.ts"');
+    expect(WIZARD).toContain('from "./copy-first-run.ts"');
+  });
+
+  test("例子的句子只在文案模块里写一次，组件里没有抄一份", () => {
+    for (const source of [HOME, WIZARD]) {
+      expect(source).not.toContain("把这个文件夹里的文件按月份分好");
+      expect(source).not.toContain("帮我把微信里那些接龙整理成一张表");
+    }
+  });
+});
