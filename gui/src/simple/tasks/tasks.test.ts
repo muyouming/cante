@@ -569,3 +569,136 @@ describe("接龙与报名两张新卡（r12）", () => {
     expect(copyModule).toContain("存成文件再选进来更稳");
   });
 });
+
+// ---------------------------------------------------------------------------
+// r21 — 风险巡查：不是空话还不够，还要有出路。
+//
+// 上面那条 #63 的测试只挡住了「仅供参考」这类填充话。但一条风险仍可能只描述现象、
+// 不告诉她出了事会怎样——她看完还是不知道该干什么。这一轮把三条判据里能机器化的
+// 两条写下来：
+//
+//   1. 具体：一条风险得说清这张卡、这种数据上真会发生的事（长度下界 + 不用兜底话，
+//      这两条只是底线；「说的是不是这张卡」由人来评审，见本轮报告）；
+//   2. 有出路：要么写清助手会怎么处置（停下来问、留空、跳过、标出来、单独列、
+//      写明），要么把判断交回给她（请你核对、由你决定、按原样留着）。两者都没有的，
+//      她读完不知道下一步做什么。
+//
+// 只扫本轮的卡片。excel.ts 的四张归另一个 workstream，等它落地再一起接进来。
+// ---------------------------------------------------------------------------
+
+import { ADMIN_TASKS } from "./admin.ts";
+import { BY_MONTH_TASKS } from "./bymonth.ts";
+import { CHECK_TASKS } from "./check.ts";
+import { DOCUMENT_TASKS } from "./document.ts";
+import { FILE_TASKS } from "./files.ts";
+import { INVOICE_TASKS } from "./invoice.ts";
+import { RESEARCH_TASKS } from "./research.ts";
+import { SHEET_TASKS } from "./sheet.ts";
+import { SUMMARY_TASKS } from "./summary.ts";
+import { VISION_TASKS } from "./vision.ts";
+
+const R21_CARDS: TaskDef[] = [
+  ...SHEET_TASKS,
+  ...FILE_TASKS,
+  ...BY_MONTH_TASKS,
+  ...DOCUMENT_TASKS,
+  ...SUMMARY_TASKS,
+  ...CHECK_TASKS,
+  ...INVOICE_TASKS,
+  ...ADMIN_TASKS,
+  ...VISION_TASKS,
+  ...RESEARCH_TASKS,
+  ...WECHAT_ALL_TASKS,
+];
+
+/**
+ * 一条风险必须带出路。只认两种写法：
+ *   * 助手会做的处置——停下来问、留空、跳过、标出来、单独列、写明；
+ *   * 交回给她判断——请你核对、由你决定、按原样留着。
+ * 这张清单只许加长（发现新的正当写法），不许缩短来放一条现象描述过关。
+ */
+const DISPOSITION = [
+  // 助手会做的处置
+  "停下来",
+  "先停",
+  "留空",
+  "留出",
+  "留成",
+  "跳过",
+  "标出",
+  "标黄",
+  "标注",
+  "点出",
+  "单独列",
+  "单独提醒",
+  "列在",
+  "列成",
+  "列进",
+  "列出来",
+  "写出来",
+  "写清",
+  "写明",
+  "说明",
+  "提醒",
+  "告诉你",
+  "问你",
+  "跟你确认",
+  // 按原样保住，不替她做决定
+  "按原样",
+  "照原样",
+  "原样抄",
+  "照抄",
+  "原样保留",
+  "不会替你",
+  "不替你",
+  "不会硬",
+  // 交回给她判断
+  "由你决定",
+  "留给你",
+  "你自己",
+  "请你",
+  "让你",
+  "先说一声",
+  "可以直接改",
+];
+
+describe("风险巡查（r21）：每一条都要具体、能核对、有出路", () => {
+  test("这一轮的卡片都还在目录里，没有被漏接线", () => {
+    for (const task of R21_CARDS) {
+      expect(TASKS.filter((item) => item.id === task.id)).toHaveLength(1);
+    }
+    // 卡片 id 在这一组里唯一。
+    const ids = R21_CARDS.map((task) => task.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  test("每条风险都带一条出路，而且不是一句兜底话", () => {
+    const FILLER = ["仅供参考", "可能有误", "如有误差", "不保证", "不一定完全准确"];
+    for (const task of R21_CARDS) {
+      const risks = task.risks ?? [];
+      expect(risks.length).toBeGreaterThan(0);
+      for (const risk of risks) {
+        // 短到一句话说不清的情况，多半是把「仅供参考」换了个说法。
+        expect(risk.length).toBeGreaterThanOrEqual(15);
+        for (const word of FILLER) expect(risk).not.toContain(word);
+        // 出了事会怎样、或者她能怎么做——两条至少写到一条。
+        expect(DISPOSITION.some((word) => risk.includes(word))).toBe(true);
+      }
+    }
+  });
+
+  test("会挪文件的卡把「挪走就回原来那里找不到了」说出来", () => {
+    // 真实风险，不是免责声明：整理文件夹是「移动」，和改名卡（复制）不是一回事。
+    for (const id of ["files.archive", "files.by-date"]) {
+      const risks = (taskById(id)?.risks ?? []).join("");
+      expect(risks).toContain("挪");
+      expect(risks).toContain("撤销");
+    }
+  });
+
+  test("改名卡说清是复制一份新的，原来那份还在", () => {
+    const risks = (taskById("files.rename")?.risks ?? []).join("");
+    expect(risks).toContain("复制");
+    expect(risks).toContain("多出一份");
+  });
+});

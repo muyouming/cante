@@ -7,9 +7,11 @@
 //
 //   bun test gui/src
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { join } from "node:path";
 import { createRoot } from "solid-js";
 
-import type { EventMsg } from "./protocol.ts";
+import { eventName, type EventMsg } from "./protocol.ts";
+import { describeApproval } from "./simple/approval.ts";
 import { SCHEDULE_STORAGE_KEY } from "./simple/schedule.ts";
 
 // ---------------------------------------------------------------------------
@@ -638,6 +640,22 @@ describe("replyToRun", () => {
     expect(text).toContain("原来的文件一张都不要改");
     // 卡片提示词是有结构的（要做的事 / 文件 / 怎么做），不可能只有一句话那么短。
     expect(text.length).toBeGreaterThan(200);
+    dispose();
+  });
+
+  test("store 暴露的 composedInstruction 就是真正发出去的那段（r20 隐私面板据此展示）", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这两张表合成一张");
+    const exposed = store.composedInstruction(store.currentRun()!);
+    await store.confirmRun();
+
+    const sent = opCalls("send_input") as Array<{ text: string }>;
+    // 逐字一致：面板拿这个展示，就不会和真正发出去的那份漂移。
+    expect(sent.at(-1)?.text).toBe(exposed);
+    // 旧任务（卡片已经不在）退回她那一句话，不凭空拼一份。
+    expect(store.composedInstruction({ ...store.currentRun()!, taskId: "gone.forever" })).toBe(
+      "把这两张表合成一张",
+    );
     dispose();
   });
 
@@ -1296,5 +1314,197 @@ describe("有意忽略的事件（#107 的定论）", () => {
     expect(store.session()?.skills).toEqual([]);
     assertInvariants(store);
     dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 夹具驱动的关键界面状态：没有守护进程的机器（CI 就是）也要能跑。
+//
+// 上面那些用例把事件形状手写在测试里；这一节换成**真的把 `fixtures/fake-cante.ts`
+// 跑起来**，把它吐出的 JSONL 事件原样喂进 store。这样「夹具能演什么」与「界面读它
+// 读成什么样」就是同一份证据，而不是两份各自维护的假设。
+// ---------------------------------------------------------------------------
+describe("夹具驱动的关键界面状态（没有守护进程也能跑）", () => {
+  const FAKE_CANTE = join(import.meta.dir, "../fixtures/fake-cante.ts");
+
+  interface FakeCante {
+    send(op: unknown): Promise<void>;
+    /** Read frames up to and including the named event, returning all of them. */
+    until(end: string): Promise<EventMsg[]>;
+    close(): Promise<void>;
+  }
+
+  function startFakeCante(env: Record<string, string> = {}): FakeCante {
+    const proc = Bun.spawn([process.execPath, FAKE_CANTE], {
+      stdin: "pipe",
+      stdout: "pipe",
+      stderr: "pipe",
+      env: { ...process.env, ...env },
+    });
+    const buffered: string[] = [];
+    const waiters: Array<(line: string | null) => void> = [];
+    let closed = false;
+
+    void (async () => {
+      const reader = proc.stdout.getReader();
+      const decoder = new TextDecoder();
+      let pending = "";
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          pending += decoder.decode(value, { stream: true });
+          let nl: number;
+          while ((nl = pending.indexOf("\n")) >= 0) {
+            const line = pending.slice(0, nl);
+            pending = pending.slice(nl + 1);
+            if (!line.trim()) continue;
+            const waiter = waiters.shift();
+            if (waiter) waiter(line);
+            else buffered.push(line);
+          }
+        }
+      } finally {
+        closed = true;
+        for (const waiter of waiters.splice(0)) waiter(null);
+      }
+    })();
+
+    async function nextLine(): Promise<string> {
+      if (buffered.length > 0) return buffered.shift()!;
+      if (closed) throw new Error("fake-cante closed stdout");
+      return await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("fake-cante: timed out waiting for a line")), 5_000);
+        waiters.push((line) => {
+          clearTimeout(timer);
+          if (line === null) reject(new Error("fake-cante closed stdout"));
+          else resolve(line);
+        });
+      });
+    }
+
+    return {
+      async send(op: unknown): Promise<void> {
+        proc.stdin.write(JSON.stringify({ op, id: `op_FIXTURE${Math.random().toString(36).slice(2, 8)}` }) + "\n");
+        await proc.stdin.flush();
+      },
+      async until(end: string): Promise<EventMsg[]> {
+        const out: EventMsg[] = [];
+        for (;;) {
+          const frame = JSON.parse(await nextLine()) as EventMsg;
+          out.push(frame);
+          if (eventName(frame.event) === end) return out;
+        }
+      },
+      async close(): Promise<void> {
+        try {
+          proc.kill();
+        } catch {
+          // already gone
+        }
+        await proc.exited;
+      },
+    };
+  }
+
+  function replay(store: Store, frames: EventMsg[]): void {
+    for (const frame of frames) emit("event", frame);
+  }
+
+  test("一批两个工具：审批卡一次列出两条，各自翻译成中文动作", async () => {
+    const { store, dispose } = await setup();
+    const fake = startFakeCante({ FAKE_CANTE_APPROVAL_BATCH: "2" });
+    try {
+      await fake.send({ StartSession: {} });
+      await fake.send({ UserInput: "整理这两份表格" });
+      replay(store, await fake.until("TurnPause"));
+
+      const approval = store.approval();
+      expect(approval?.tools.map((tool) => tool.id)).toEqual(["tool_1", "tool_2"]);
+      expect(store.daemonStatus()).toBe("awaiting");
+      // 审批卡渲染的就是 describeApproval：两条都在，且都不是原始工具名。
+      const described = describeApproval(approval!.tools);
+      expect(described.map((tool) => tool.action)).toEqual(["运行一条命令", "写一个新文件"]);
+      expect(store.rows().filter((row) => row.kind === "tool")).toHaveLength(2);
+      assertInvariants(store);
+    } finally {
+      await fake.close();
+      dispose();
+    }
+  });
+
+  test("审批被拒：卡片收起，被拒的那条以警示色留在记录里，且没有出现过 ToolStart", async () => {
+    const { store, dispose } = await setup();
+    const fake = startFakeCante({ FAKE_CANTE_APPROVAL_BATCH: "2" });
+    try {
+      await fake.send({ StartSession: {} });
+      await fake.send({ UserInput: "整理这两份表格" });
+      replay(store, await fake.until("TurnPause"));
+      expect(store.approval()?.tools).toHaveLength(2);
+
+      await fake.send({
+        ApprovalResponse: {
+          turn_id: "turn_1",
+          responses: [
+            { tool_use_id: "tool_1", decision: "Deny" },
+            { tool_use_id: "tool_2", decision: "Accept" },
+          ],
+        },
+      });
+      const after = await fake.until("TurnEnd");
+      // 拒绝的效果：resume 之后守护进程没有再发 ToolStart（那一步从未开始）。
+      expect(after.map((frame) => eventName(frame.event))).not.toContain("ToolStart");
+      replay(store, after);
+
+      expect(store.approval()).toBeNull();
+      expect(store.daemonStatus()).toBe("idle");
+      const toolRows = store.rows().filter((row) => row.kind === "tool");
+      expect(toolRows.map((row) => [row.label, row.tone, row.streaming])).toEqual([
+        ["Bash", "warn", false],
+        ["Write", "ok", false],
+      ]);
+      assertInvariants(store);
+    } finally {
+      await fake.close();
+      dispose();
+    }
+  });
+
+  test("中途出错：Error 加非 Completed 的 TurnEnd 让失败记录拿到可核对的原因", async () => {
+    const { store, dispose } = await setup();
+    const fake = startFakeCante({ FAKE_CANTE_TURN_ERROR: "1" });
+    try {
+      await fake.send({ StartSession: {} });
+      // 先让一件活跑起来：失败要落到运行记录上，出错页读的就是它。
+      await store.startRun(
+        { id: "excel.merge", title: "把两张表合成一张", plan: ["打开这两张表", "合成一张新表"] },
+        ["/work/report.xlsx"],
+        "把这两张表合成一张",
+      );
+      await store.confirmRun();
+
+      await fake.send({ UserInput: "run the job" });
+      replay(store, await fake.until("TurnEnd"));
+      await Bun.sleep(30);
+
+      expect(store.daemonStatus()).toBe("error");
+      expect(store.rows().some((row) => row.kind === "error" && row.text.includes("429"))).toBe(true);
+      expect(store.rows().some((row) => row.kind === "turn" && row.label === "failed")).toBe(true);
+      // TurnEnd 的结构化说明（headline）走到提示里，不是被吞掉。
+      expect(store.notice()).toBe("rate limited");
+
+      const run = store.currentRun();
+      expect(run?.state).toBe("failed");
+      const error = run?.error as { what: string; how: string; detail: string; cause?: string } | null;
+      // 可核对的原因来自守护进程原话；给她看的两句仍是平实中文。
+      expect(error?.cause).toContain("429");
+      expect(error?.what).toBe("这件事没有做完。");
+      expect(error?.what).not.toContain("429");
+      expect(error?.how).toContain("原来的文件都还在");
+      assertInvariants(store);
+    } finally {
+      await fake.close();
+      dispose();
+    }
   });
 });

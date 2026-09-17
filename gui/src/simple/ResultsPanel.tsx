@@ -7,11 +7,12 @@
 //   * 排序、搜索、四种现状的判断在 results.ts（纯逻辑，有单测）；
 //   * 面向用户的中文在 copy-results.ts；
 //   * 这个文件只负责渲染，以及从本机问一次 file_facts。
-import { For, Show, createEffect, createMemo, createSignal, onMount } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
 import { RESULTS } from "./copy-results.ts";
+import { useFocusLayer } from "./FocusLayer.tsx";
 import { canOpen, collectResults, resultPaths, searchResults, type ResultEntry } from "./results.ts";
 import { formatSize, formatWhen } from "./run.ts";
 import { fetchFileFacts, normalizeFacts, type FileFact } from "./verify.ts";
@@ -40,10 +41,19 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
   // null 表示「这次没能核对」——不是「文件都不在」，两者在界面上说得很不一样。
   const [facts, setFacts] = createSignal<FileFact[] | null>(null);
   let searchInput: HTMLInputElement | undefined;
+  let closeButton: HTMLButtonElement | undefined;
 
-  // 打开就落在搜索框上：这个面板的意义就是「用一句话把上次那张表找回来」。
-  onMount(() => {
-    queueMicrotask(() => searchInput?.focus());
+  const entries = createMemo(() => collectResults(props.store.runs(), facts()));
+  const shown = createMemo(() => searchResults(entries(), query()));
+  const searching = () => query().trim().length > 0;
+
+  // 打开就落在搜索框上：这个面板的意义就是「用一句话把上次那张表找回来」；一个结果
+  // 都还没有的时候落在「关掉」上（那时屏幕上只有它）。焦点进得来、Tab 在这一层里
+  // 循环、Esc 关掉——三件事都在 FocusLayer 里做（别的浮层走同一条路）。
+  const layer = useFocusLayer({
+    open: () => true,
+    initialFocus: () => searchInput ?? closeButton,
+    onEscape: () => props.onClose(),
   });
 
   // 问本机一次：这些结果文件现在还在不在。问不到就保持 null，绝不假装它们还在。
@@ -67,10 +77,6 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
     };
   });
 
-  const entries = createMemo(() => collectResults(props.store.runs(), facts()));
-  const shown = createMemo(() => searchResults(entries(), query()));
-  const searching = () => query().trim().length > 0;
-
   function clearSearch(): void {
     setQuery("");
     searchInput?.focus();
@@ -78,13 +84,11 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
 
   return (
     <div
+      ref={layer}
       class="fixed inset-0 z-50 flex flex-col bg-[#0b0f14]"
       role="dialog"
       aria-modal="true"
       aria-label={RESULTS.ariaSection}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") props.onClose();
-      }}
     >
       <header class="flex shrink-0 items-start justify-between gap-3 border-b border-slate-800 px-5 pt-5 pb-4 sm:px-8">
         <div>
@@ -93,6 +97,7 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
         </div>
         <button
           type="button"
+          ref={(element: HTMLButtonElement) => (closeButton = element)}
           onClick={() => props.onClose()}
           class="min-h-[44px] shrink-0 rounded-xl border border-slate-600 px-4 text-[16px] font-semibold text-slate-200 hover:bg-slate-800"
         >
@@ -117,7 +122,10 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
               onInput={(event) => setQuery(event.currentTarget.value)}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
+                  // 先清掉搜索词，空了再关掉面板；这里的 Esc 到此为止（否则关掉
+                  // 面板和清搜索会一起发生）。
                   event.preventDefault();
+                  event.stopPropagation();
                   if (query()) clearSearch();
                   else props.onClose();
                 }

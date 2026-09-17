@@ -151,6 +151,12 @@ export interface Store {
   ): Promise<void>;
   /** The user pressed 开始. `allowOverwrite` only after the red checkbox. */
   confirmRun(allowOverwrite?: boolean): Promise<void>;
+  /**
+   * r20 — 这次到底把我的什么内容发出去了。真正发出去的那段文字 = 卡片里写好的
+   * 提示词 + 她的那一句话，由 `instructionFor` 在**本机**拼出来，完全可展示。
+   * 暴露它只为隐私面板如实展示；不改发送行为，也不读任何本地文件内容。
+   */
+  composedInstruction(run: TaskRun): string;
   /** #42 "先试跑给我看": ask the assistant to explain, never to touch files. */
   dryRun(): Promise<void>;
   cancelRun(): void;
@@ -1563,6 +1569,7 @@ export function createStore(): Store {
     runs,
     startRun,
     confirmRun,
+    composedInstruction,
     dryRun,
     cancelRun,
     dismissRun,

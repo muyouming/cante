@@ -220,3 +220,116 @@ msedgedriver must match the machine's WebView2 runtime, and GitHub's
 WebView2 runtime's registry `pv`, then Edge's, then the exact build or
 `LATEST_RELEASE_<major>`) and prints what it picked. Nothing here pins a
 version: a mismatch does not error, it makes the WebDriver session hang.
+
+## Measure startup cost
+
+```sh
+cd gui
+bash scripts/measure-web.sh                # build and measure, ~20s
+SKIP_BUILD=1 bash scripts/measure-web.sh   # reuse the dist/ already on disk
+```
+
+"How long does it take to open, and does it react when I click" is the whole of
+a first impression, and nothing in this repo measured it before this script. It
+prints numbers and exits 0 — it is a scale, not a gate. Chrome is the one hard
+requirement (exit 2 without it, after the bundle sizes have still been printed);
+`CHROME=…` points at another binary, `RUNS=…` changes the runs per screen, and
+`SKIP_BROWSER=1` prints bundle sizes only.
+
+It measures three things:
+
+| what | how | where the number comes from |
+| --- | --- | --- |
+| bundle weight | every `dist/assets/*.js` and `*.css`, raw and `gzip -9` | `wc -c`, `gzip -9 -c` |
+| first screen | headless Chrome loads the built app from a local static server; a probe injected into `<head>` stamps `performance.now()` the moment the screen's key sentence is in the DOM, and counts the elements | `--dump-dom` |
+| helper binaries | `src-tauri/target/release/cante-gui` and `cante-sheets`, when a release build is already on disk (the script does not build them) | `wc -c` |
+
+Two screens are measured, because a first launch and a normal launch are two
+different first impressions: `home` (a provisioned machine, the documented
+`__CANTE_PROVISIONED__` marker, key sentence 需要我帮你做什么) and `wizard` (a
+machine that has never run Cante, key sentence 欢迎使用 Cante).
+
+### How to read the output
+
+- **All milliseconds are counted from navigation start, inside the page.** The
+  probe runs before the app bundle, so the number covers HTML parse, JS
+  parse/compile and the render that puts the sentence in the DOM. It starts at
+  the document, not at the double-click.
+- **"Key sentence in the DOM" is not "pixels on screen".** Chrome in
+  `--dump-dom` mode never records paint timing, so there is no
+  first-contentful-paint to print (`performance.getEntriesByType("paint")` comes
+  back empty).
+  The `load` column is the nearest proxy: on `home` it lands ~35 ms after
+  DOMContentLoaded while the wizard's lands immediately. That gap stays the same
+  with the stylesheet stripped, so it is the cost of putting 192 elements on
+  screen rather than the CSS or a round-trip — and it is still tens of ms.
+- **The `resources` column counts what the first screen actually fetched.** The
+  `webview-*.js` chunk is imported on demand, so it is not in it; the initial
+  set is the main bundle plus the stylesheet. The local test server does not
+  compress, so that byte count is raw, not gzip.
+- **Raw bytes overstate the JS.** In the main bundle, 38% of the bytes are
+  non-ASCII — about 36k Chinese characters at three bytes each — so the same
+  file is 284 kB on disk and 212 kB in character terms. Judge weight by gzip,
+  not raw bytes.
+- **A snapshot, not a target.** These numbers move with every build; re-run them
+  rather than trusting a figure quoted anywhere. As of 2026-09 on the macOS dev
+  machine (M4 Max), for scale: initial JS 284 kB raw / 88 kB gzip, CSS 37 kB /
+  7 kB, `home` key sentence at ~12 ms over 192 DOM elements, `wizard` at ~14 ms
+  over 35, `cante-gui` 9.5 MB, `cante-sheets` 2.5 MB.
+
+### What this cannot tell you
+
+The numbers come from an M4 Max and a local static server. They answer "is there
+code-side fat" — a dependency that doubles the bundle, a screen that renders
+thousands of nodes, a render that takes hundreds of ms — and they are the right
+thing to diff across rounds. They do **not** predict the person's machine:
+WebView2 process start, Windows Defender scanning an unsigned install and a cold
+disk all happen before the first line of JavaScript and none of them is visible
+here. For the number she actually feels, measure on Windows (see
+`WINDOWS-ACCEPTANCE-3.md` and the WebDriver smoke above); do not quote these as
+her startup time.
+
+## How big is the instruction we send
+
+Every card hands the assistant one Chinese instruction, assembled by
+`instructionFor(taskId, files, instruction)` — the same call
+`store.composedInstruction` makes, so it is what actually goes out. Its length is
+part of what she waits on and what we pay for: a normal card is 30–60 s, 7–8 model
+round-trips and ~7,000 output tokens (`scripts/sweep/README.md` has the real
+measurements), and **the context is resent on every round**, so the bill is
+instruction size × round-trips.
+
+Measure it:
+
+```sh
+cd gui
+bun scripts/measure-prompts.ts
+```
+
+For every card in `TASKS` the script composes the real instruction (one
+placeholder file, one fixed sentence) and prints characters plus an estimated
+token count, split by segment: the card's own text (要做的事 / 怎么做 /
+做完告诉我 / 补充规矩), the file list, the seven shared safety rules, her
+sentence, the capability sections (cante-sheets / cante-pdf / 看图) and the
+需要你核对 block. Then the totals, the smallest / median / largest card, the
+round-trip arithmetic, what selecting more files costs, and two duplication scans
+(whole lines, and ≥16-character sentences shared between two blocks). It exits 0,
+and it warns — without failing — if a card grows a block heading that is not
+registered in `SEGMENT_BY_HEADER`, so a silent change to the envelope shape is
+visible to the next person.
+
+**The token count is a heuristic, not a billing figure.** CJK characters count as
+one token each, every other non-space character as a quarter token. Tokenisers
+disagree on Chinese by roughly ±20%, whitespace is counted as free (optimistic),
+and the part that matters most: the host's own system prompt, tool schemas and
+prior rounds are *not* in these numbers — they live outside this repository, so
+the real input is always larger than what the script reports. Use it to compare
+before/after, not to predict an invoice.
+
+Run it before and after a prompt change and put both numbers in the pull request.
+The numbers as of 2026-09, for 32 cards with one selected file: **1,288 characters
+/ ~1,179 tokens** per card with no capability sections, **2,616 / ~2,101** with
+them. The capability sections alone are 1,328 characters (≈51% of the
+instruction) and the cante-sheets manual (753) is the single largest block —
+larger than the card's own instructions (569). Both duplication scans come back
+empty: nothing is written twice inside an instruction.

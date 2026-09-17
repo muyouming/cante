@@ -411,3 +411,72 @@ schtasks /delete /tn CanteWeeklySweep /f
   所以一次跑几十分钟是正常的。想缩短就 `-Cards excel.diff`（那样报告只覆盖这几张）。
 - **报告里的结论仍然是"模型 + WSL"下的结论**，不能当画像机（16GB 无独显）的体感证据。
 - **这台机器上的普查不是 CI**：它是我们自己的回归预警，不挡合并。
+
+## 用桥在没有守护进程的 Windows 上跑真实任务（不需要 WSL）
+
+上面那条 WSL 路能跑真任务，但它要装 WSL、要做 Windows↔Linux 的路径映射。还有一条更短的路：
+**把运行时会话换成 `pi`** —— 上游 `cante`/`ante` 没有 Windows 构建，而 **`pi` 在 Windows 上原生能跑**，
+所以「`cante-bridge` + `pi`」这条链上 **Windows 不需要 WSL**。
+
+细节、平台假设的逐条检查、以及哪一条到今天我们仍然没验证，都在
+`gui/docs/BRIDGE-windows.md`（那一份是权威；这里只留怎么用）。
+
+### 前提
+
+1. 那台机器上**装着 `pi`**（原生，`pi --version` 能打印版本）；
+2. `pi` **自己**知道用哪个网关与凭据 —— 前端在简单模式里**不传** provider/model，所以
+   模型和密钥读的是 pi 自己的配置（`~\.pi\agent\` 下的 `auth.json` / `models.json`，或各家
+   的 `*_API_KEY` 环境变量）。先单独跑一次 `pi -p "只回复两个字：可以"`，它能说话再往下走。
+3. 有 Cante 的安装包（桥是随包发布的，躺在主程序旁边）。
+
+> ⚠️ **先看这一条再动手**：`PI_BIN` 必须指到一个**真 `.exe`**。npm 装的 `pi` 在 Windows 上
+> 是 `pi.cmd`，而 Rust 起进程用的 `CreateProcess` **起不了 `.cmd`**（和当初 npm 版 `bun`
+> 让 4 个测试红掉是同一个坑）。用 `Get-Command pi` 看 `Source` 结尾：`.exe` 才行。
+
+### 步骤
+
+1. **找到桥**（`cante-bridge.exe` 就躺在主程序旁边）：
+
+   ```powershell
+   Get-ChildItem $env:LOCALAPPDATA -Recurse -Filter cante-bridge.exe -ErrorAction SilentlyContinue |
+     Select-Object -First 3 FullName
+   ```
+
+2. **把 `CANTE_BIN` 指向它**（桥不是路径，是"命令"；`daemon.rs` 会自己补 `serve`）：
+
+   ```powershell
+   $env:CANTE_BIN = "$env:LOCALAPPDATA\Cante\cante-bridge.exe"
+   $env:PI_BIN    = 'C:\path\to\pi.exe'    # 真 .exe，不是 .cmd
+   ```
+
+   只对当前窗口生效（验收最省事）。要长期生效就设成用户级环境变量，并**重新登录**。
+
+3. **从同一个窗口启动应用**，走一遍要验收的卡：
+
+   ```powershell
+   & "$env:LOCALAPPDATA\Cante\Cante.exe"     # 换成实际安装位置
+   ```
+
+### 怎么确认真的连上了（别只看窗口在不在）
+
+| 看什么 | 通过的标准 |
+| --- | --- |
+| 应用首次检查 | 走到"准备好了"，**不是**"干活需要的组件还没装好" |
+| 流式文字 | 回答是**一个字一个字**出来的，不是最后一次性冒出来 |
+| 审批 | 助手要用工具时出现审批页；选"不允许"后它确实不做那件事 |
+| 真跑一张卡 | 挑一张**只读**卡（例如合并两张表），结果文件落在**原文件旁边** |
+| 日志 | 没有"组件没装好"、没有意外的 `cante://exit`；stderr 里没有一堆非 JSON 行 |
+
+一条卡至少留 **1800 秒**（慢模型实测 850 秒；设 600 会把成功误判成失败）。
+
+### 明确的边界（这不是给用户的方案）
+
+- **用户机器上没有 `pi`**。这条路是**我们自己的验收手段**，不是交付形态；用户那边"没有守护
+  进程"这件事仍然要靠安装包和面向用户的说明去解决，这条替代不了它。
+- 它同时是**将来可能的产品形态的雏形**：如果哪天真要把运行时换成自己的（不再依赖上游
+  守护进程的 Windows 构建），这条链就是起点 —— 但要成为正规路径，还得解决「pi 从哪来、
+  怎么起（`.cmd` 那个坑）」「凭据怎么配、界面对『谁来处理』的说法怎么统一」「审批语义与
+  `cante` 对齐」三件事，见 `BRIDGE-windows.md` §7。
+- **SSH 会话里看不到窗口**（同前面那条限制）：要看窗口、要截图，必须 **RDP**。
+- 桥的门禁在 macOS 上跑通过（真 `pi` + 假端点），**Windows 上的真跑交给那台机器**；
+  要它执行的完整命令清单（含每一步的期望输出）在 `BRIDGE-windows.md` §5。

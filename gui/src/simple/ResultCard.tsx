@@ -12,6 +12,10 @@ import { For, Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { FOLLOWUP, TRUST } from "./copy.ts";
+// r20 — 结果卡片上的入口：她刚做完一件事，最想问的就是「刚才发出去了什么」。
+import { SENT } from "./copy-privacy-audit.ts";
+// 入口点开的就是隐私面板里同一节（同一个组件，不另做一份）。
+import { SentContentSection } from "./PrivacyPanel.tsx";
 // r17 — 结果卡片上补一句：这些文件以后在首页也能找回来。
 import { RESULTS } from "./copy-results.ts";
 // 两轮各自的文案模块都要（核对 + 复制成微信能贴的文字）。
@@ -75,6 +79,8 @@ async function copyText(text: string): Promise<boolean> {
 
 export default function ResultCard(props: ResultCardProps): JSX.Element {
   const [showDetail, setShowDetail] = createSignal(false);
+  // 默认折叠：先让她看到结果，想追问「刚才发了什么」时再打开。
+  const [showSent, setShowSent] = createSignal(false);
   const [reply, setReply] = createSignal("");
   const [sending, setSending] = createSignal(false);
   const run = () => props.run ?? props.store.currentRun();
@@ -272,6 +278,21 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
           </div>
         </header>
 
+        {/* r20 — 她刚做完一件事时的追问入口：点开就是隐私面板里「这次发出去了什么」
+            那一节。只展示发出去的文字，不读本地文件内容。 */}
+        <div class="flex flex-col gap-3">
+          <button
+            type="button"
+            onClick={() => setShowSent((value) => !value)}
+            class="min-h-[44px] self-start rounded-xl border border-slate-600 px-4 text-[16px] font-semibold text-slate-200 hover:bg-slate-800"
+          >
+            {showSent() ? SENT.entryHide : SENT.entryShow}
+          </button>
+          <Show when={showSent()}>
+            <SentContentSection store={props.store} run={run()} />
+          </Show>
+        </div>
+
         <Show when={run()?.dryRun}>
           <p class="rounded-2xl border border-sky-700 bg-sky-950/50 px-4 py-3 text-[16px] text-sky-100">
             这是一次试跑。它只说明了打算怎么做，没有改动任何文件。
@@ -403,7 +424,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
             <textarea
               id="run-reply"
               rows={3}
-              class="mt-2 min-h-[96px] w-full resize-y rounded-xl border border-slate-600 bg-slate-900/70 px-3 py-2 text-[16px] leading-relaxed text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+              class="mt-2 min-h-[96px] w-full resize-y rounded-xl border border-slate-600 bg-slate-900/70 px-3 py-2 text-[16px] leading-relaxed text-slate-100 placeholder:text-slate-500 focus:border-sky-500"
               placeholder={FOLLOWUP.placeholder}
               value={reply()}
               disabled={sending()}
