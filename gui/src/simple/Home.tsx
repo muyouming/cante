@@ -17,6 +17,7 @@ import { HOME, TASK_GROUPS, taskGroupRank } from "./copy.ts";
 import {
   FIRST_RUN,
   SAY_EXAMPLES,
+  exampleClick,
   exampleForSentence,
   firstWinHintFor,
   firstWinRun,
@@ -59,6 +60,8 @@ export default function Home(props: HomeProps): JSX.Element {
   const [hint, setHint] = createSignal<string | null>(null);
   // 点了一条例子之后，光标要落进框里（她接着改几个字就是自己的事了）。
   let input: HTMLInputElement | undefined;
+  // F4 — 框里已经有她自己打的字时，先问她一句（这一句就是那条例子），她说换才换。
+  const [pendingExample, setPendingExample] = createSignal<string | null>(null);
   // #58 — 「技术同事设了什么」默认收起，只有她主动点开才展开。
   const [adminOpen, setAdminOpen] = createSignal(false);
   // #74 — the ability centre is a local overlay; the shell does not need to know.
@@ -123,13 +126,37 @@ export default function Home(props: HomeProps): JSX.Element {
   });
 
   /**
-   * r24 — 点一条例子：这句话进框，光标也进框。
+   * r24 / F4 — 点一条例子：这一句进框，光标也进框。
    *
    * 例子只是起点，不是模板：框里的字随她改，所以她点完得能直接往下接着打。
+   * 框里已经有她自己打的字时，先问一句（见 copy-first-run.ts 的 exampleClick）：
+   * 她那半句不是垃圾，静默清掉是数据丢失。
    */
   function pickExample(sentence: string): void {
-    setText(sentence);
     setHint(null);
+    const action = exampleClick(text(), sentence);
+    if (action.kind === "confirm") {
+      // 她打的字一个字不动：只把这一句挂起来，等她点头。
+      setPendingExample(action.text);
+      return;
+    }
+    setPendingExample(null);
+    setText(action.text);
+    input?.focus();
+  }
+
+  /** 她说「换」：这时才替掉她原来的字——是她点的，不是我们替她清的。 */
+  function useExample(): void {
+    const sentence = pendingExample();
+    if (!sentence) return;
+    setText(sentence);
+    setPendingExample(null);
+    input?.focus();
+  }
+
+  /** 她说「不换」：她打的字留着，我们一个字都不动。 */
+  function keepMyWords(): void {
+    setPendingExample(null);
     input?.focus();
   }
 
@@ -409,6 +436,29 @@ export default function Home(props: HomeProps): JSX.Element {
             <p class="text-[16px] text-amber-400" role="alert">
               {hint()}
             </p>
+          </Show>
+          {/* F4 — 框里有她自己打的字时，点例子不能静默把它清掉：就在这里问一句，
+              她说换才换（换不换都是她点的）。 */}
+          <Show when={pendingExample()}>
+            <div class="rounded-xl border border-amber-600 bg-amber-950/30 px-4 py-3">
+              <p class="text-[16px] leading-relaxed text-amber-100">{FIRST_RUN.exampleAsk}</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={useExample}
+                  class="min-h-[44px] rounded-xl bg-sky-600 px-5 text-[16px] font-semibold text-white hover:bg-sky-500"
+                >
+                  {FIRST_RUN.exampleUse}
+                </button>
+                <button
+                  type="button"
+                  onClick={keepMyWords}
+                  class="min-h-[44px] rounded-xl border border-slate-600 px-5 text-[16px] font-semibold text-slate-200 hover:bg-slate-800"
+                >
+                  {FIRST_RUN.exampleKeep}
+                </button>
+              </div>
+            </div>
           </Show>
           {/* r24 — 「该怎么说」才是第一次用的人真正的门槛：三句人话就摆在输入框
               下面，点一下就跑进框里。它们是唯一的口子，不是一份功能清单。 */}

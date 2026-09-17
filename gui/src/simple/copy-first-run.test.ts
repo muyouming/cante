@@ -11,6 +11,8 @@ import {
   FIRST_RUN_SENTENCE_KEY,
   FREE_TEXT_RUN_ID,
   SAY_EXAMPLES,
+  beginFirstRun,
+  exampleClick,
   exampleForSentence,
   firstWinHintFor,
   firstWinRun,
@@ -98,6 +100,32 @@ describe("照着例子原样提交", () => {
     // 卡片要的是「贴进去的文字」，所以不再卡在「先选一个」。
     expect(task!.needs).toBe("text");
     expect(task!.group).toBe("微信");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// F4（#139）：点例子不能把她已经打好的字静默清掉
+// ---------------------------------------------------------------------------
+
+describe("点例子时，框里已经有的字怎么办", () => {
+  const sentence = SAY_EXAMPLES[0]!.sentence;
+
+  test("输入框为空时点例子：直接填进去（最常见的那条路，保持顺手）", () => {
+    expect(exampleClick("", sentence)).toEqual({ kind: "fill", text: sentence });
+    expect(exampleClick("   ", sentence)).toEqual({ kind: "fill", text: sentence });
+  });
+
+  test("框里正好就是这一句：也算直接填，不用再问一遍", () => {
+    expect(exampleClick(sentence, sentence)).toEqual({ kind: "fill", text: sentence });
+    expect(exampleClick(`  ${sentence}  `, sentence)).toEqual({ kind: "fill", text: sentence });
+  });
+
+  test("输入框非空时点例子：不会丢掉她已经打好的字（只挂一句，等她点头）", () => {
+    const half = "帮我把上个月的表格";
+    // 她打了半句就点例子：决定必须不是 fill —— 界面不会拿例子盖掉她那半句
+    expect(exampleClick(half, sentence)).toEqual({ kind: "confirm", text: sentence });
+    // 而且 confirm 里带的是那条例子，不是她那半句被改过的样子
+    expect(exampleClick(half, sentence).text).toBe(sentence);
   });
 });
 
@@ -251,8 +279,35 @@ describe("向导点的那一句，交到首页", () => {
   test("记住 → 取走 → 再取就没有了（只填一次）", () => {
     const store = fakeStore();
     rememberSentence("  把这个文件夹里的文件按月份分好  ", store);
-    expect(store.items[FIRST_RUN_SENTENCE_KEY]).toBe("把这个文件夹里的文件按月份分好");
+    expect(store.items[FIRST_RUN_SENTENCE_KEY]).toContain("把这个文件夹里的文件按月份分好");
     expect(takeSentence(store)).toBe("把这个文件夹里的文件按月份分好");
+    expect(takeSentence(store)).toBeNull();
+  });
+
+  // F5（#139）— 她在向导最后一步点了例子、没点「开始使用」就退出了。那一次记下
+  // 的那句话她并没有要；下一次打开，即使她什么都没点，首页的框也必须是空的。
+  test("上一轮暂存了句子、这一轮没选任何东西：首页取不到，框是空的", () => {
+    const store = fakeStore();
+    // 上一次打开写下的（趟号是上一次的）
+    rememberSentence(SAY_EXAMPLES[0]!.sentence, store, "上一趟");
+    // 这一次打开，向导一开始先清一次
+    beginFirstRun(store);
+    // 首页来取：没有 → 框就空着
+    expect(takeSentence(store)).toBeNull();
+    expect(store.items[FIRST_RUN_SENTENCE_KEY]).toBeUndefined();
+  });
+
+  test("就算向导这一趟根本没出现（上一次已经做完），上一趟那句也不算数", () => {
+    const store = fakeStore();
+    rememberSentence(SAY_EXAMPLES[1]!.sentence, store, "上一趟");
+    // 没有向导来清，首页直接来取
+    expect(takeSentence(store)).toBeNull();
+    // 取的时候顺手清掉，别一直躺在那里
+    expect(store.items[FIRST_RUN_SENTENCE_KEY]).toBeUndefined();
+  });
+
+  test("旧版本留下的裸字符串（没有趟号）同样不认", () => {
+    const store = fakeStore({ [FIRST_RUN_SENTENCE_KEY]: "上一趟留下的那句话" });
     expect(takeSentence(store)).toBeNull();
   });
 

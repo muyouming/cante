@@ -28,13 +28,37 @@ describe("首页：三句例子点一下就填进输入框", () => {
     expect(HOME).toContain("onClick={() => pickExample(example.sentence)}");
   });
 
-  test("点下去真的把句子写进输入框，而且光标也进框", () => {
+  test("输入框为空时点例子：真的把句子写进输入框的值，而且光标也进框", () => {
     const body = bodyOf(HOME, "pickExample");
-    expect(body).toContain("setText(sentence)");
+    // 决定走纯函数（exampleClick 的单测钤的是具体内容），界面照它做
+    expect(body).toContain("exampleClick(text(), sentence)");
+    expect(body).toContain('action.kind === "confirm"');
+    // 空框那一支：fill → setText(action.text)，框里显示的就是这个 text
+    expect(body).toContain("setText(action.text)");
     expect(body).toContain("input?.focus()");
     // 框里显示的就是这个 text，所以 setText 之后她真的看得见
     expect(HOME).toContain("value={text()}");
     expect(HOME).toContain("ref={input}");
+  });
+
+  // F4（#139）— 她先打了半句再点例子：不能无条件拿例子盖掉她那半句（无撤销、无确认）。
+  test("输入框非空时点例子：不静默清掉，先问一句（她那半句一个字不动）", () => {
+    const body = bodyOf(HOME, "pickExample");
+    // 非空那一支只把例子挂起来，等她点头
+    expect(body).toContain("setPendingExample(action.text)");
+    // 旧写法是 setText(sentence)：那会无条件盖掉她已经打的字
+    expect(body).not.toContain("setText(sentence)");
+    // 确认与拒绝两条路都在，而且只有她说「换」才动输入框
+    expect(HOME).toContain("onClick={useExample}");
+    expect(HOME).toContain("onClick={keepMyWords}");
+    expect(bodyOf(HOME, "useExample")).toContain("setText(sentence)");
+    expect(bodyOf(HOME, "keepMyWords")).not.toContain("setText");
+    // 问的那一句与两个按钮都在同一个 form 里（就在她打字的地方边上）
+    const formStart = HOME.indexOf("<form");
+    const formEnd = HOME.indexOf("</form>", formStart);
+    const ask = HOME.indexOf("{FIRST_RUN.exampleAsk}");
+    expect(ask).toBeGreaterThan(formStart);
+    expect(ask).toBeLessThan(formEnd);
   });
 
   test("例子和输入框在同一个框里（她开口的地方，不是要翻页去找的地方）", () => {
@@ -97,6 +121,18 @@ describe("向导最后一步：三件事 + 三句能点的话", () => {
     expect(body).toContain("setPicked(example.sentence)");
     expect(body).toContain("rememberSentence(example.sentence)");
     expect(WIZARD).toContain("aria-pressed={picked() === example.sentence}");
+  });
+
+  // F5（#139）— 上一次打开时她在这点了例子却没点「开始使用」，那句话不能留到下一趟。
+  test("向导一开始（mount）就把上一次留下的暂存清掉", () => {
+    expect(WIZARD).toContain("beginFirstRun();");
+    const mount = WIZARD.indexOf("onMount(() => {");
+    const clear = WIZARD.indexOf("beginFirstRun();");
+    const provision = WIZARD.indexOf("if (isProvisioned()) props.onDone();");
+    expect(mount).toBeGreaterThan(-1);
+    // 就在 mount 里、在其它分支前面：向导一露面就先清
+    expect(clear).toBeGreaterThan(mount);
+    expect(clear).toBeLessThan(provision);
   });
 
   test("这一步不替她结束向导：还是她点「开始使用」才进去", () => {
