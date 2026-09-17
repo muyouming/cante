@@ -42,17 +42,28 @@ APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP_DIR"
 
 CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
-PORT="${PORT:-8099}"
+# 0 = let the kernel pick a free port; serve.py writes the real one to
+# $WORK/port. The old fixed 8099 was shared by every worktree on a machine, so
+# two agents running the smoke at once silently attached to each other's server
+# — and a worktree whose serve.py predates a probe flag then produced
+# "no report" (#154). Set PORT=… only if you need a known port; if it is taken
+# this script now stops instead of testing somebody else's build.
+PORT="${PORT:-0}"
 
 WORK="$(mktemp -d)"
 SERVER_PID=""
+KEEP_WORK=0
 
 cleanup() {
   if [ -n "$SERVER_PID" ]; then
     kill "$SERVER_PID" 2>/dev/null || true
     wait "$SERVER_PID" 2>/dev/null || true   # silence bash's "Terminated" report
   fi
-  rm -rf "$WORK"
+  if [ "$KEEP_WORK" = "1" ]; then
+    echo "dom-smoke: artifacts kept in $WORK" >&2
+  else
+    rm -rf "$WORK"
+  fi
 }
 trap cleanup EXIT
 
@@ -75,12 +86,13 @@ bun run build:web >/dev/null
 cat > "$WORK/serve.py" <<'PY'
 import http.server, os, socketserver, sys, urllib.parse
 
-root, port, probe, layout, firstrun = (
+root, port, portfile, probe, layout, firstrun = (
     sys.argv[1],
     int(sys.argv[2]),
     sys.argv[3],
     sys.argv[4],
     sys.argv[5],
+    sys.argv[6],
 )
 
 
@@ -118,15 +130,43 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         pass
 
 
-socketserver.TCPServer.allow_reuse_address = True
-with socketserver.TCPServer(("127.0.0.1", port), Handler) as httpd:
+# Threaded: Chrome opens several sockets at once (the document, the bundle, a
+# speculative preconnect). A single-threaded server serves them one at a time,
+# and a preconnect that never sends a request can stall the queue behind it.
+class Server(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+with Server(("127.0.0.1", port), Handler) as httpd:
+    # With port 0 the kernel picks one; write it down so the shell can read it.
+    with open(portfile, "w") as handle:
+        handle.write(str(httpd.server_address[1]))
     httpd.serve_forever()
 PY
 
-echo "==> serving $APP_DIR/dist on :$PORT"
-python3 "$WORK/serve.py" "$APP_DIR/dist" "$PORT" "$WORK/probe.js" "$WORK/layout.js" "$WORK/firstrun.js" >/dev/null 2>&1 &
+echo "==> serving $APP_DIR/dist (requested PORT=$PORT; 0 = let the kernel choose)"
+python3 "$WORK/serve.py" "$APP_DIR/dist" "$PORT" "$WORK/port" \
+  "$WORK/probe.js" "$WORK/layout.js" "$WORK/firstrun.js" \
+  >"$WORK/server.out" 2>"$WORK/server.err" &
 SERVER_PID=$!
-sleep 1
+
+# Wait for the server to write down the port it bound, and fail loudly if it
+# never comes up: the old script sent the bind error to /dev/null and then ran
+# every dump against whichever server already held the port.
+for _ in $(seq 1 100); do
+  [ -s "$WORK/port" ] && break
+  kill -0 "$SERVER_PID" 2>/dev/null || break
+  sleep 0.1
+done
+if [ ! -s "$WORK/port" ]; then
+  echo "dom-smoke: the local server did not come up (PORT=$PORT). Its output was:" >&2
+  sed 's/^/  | /' "$WORK/server.err" >&2 || true
+  echo "dom-smoke: leave PORT unset to let the kernel pick a free port (a fixed port can be held by another worktree)." >&2
+  exit 2
+fi
+PORT="$(cat "$WORK/port")"
+echo "==> serving $APP_DIR/dist on 127.0.0.1:$PORT"
 
 # The keyboard probe (r20). It is a plain script in a real page: it finds the
 # buttons by their Chinese text, clicks them, presses Tab/Shift+Tab/Escape with
@@ -768,16 +808,39 @@ JS
 # than the number asked for. The probes report the measured viewport, and the
 # checker asserts against that: the 800×560 window is checked at roughly
 # 800×473, i.e. never a looser claim than the contract.
+#
+# Chrome writes the serialized document in one go and then stays alive (the app
+# keeps an interval running, so it never reaches "idle"). Wait for the condition
+# that means the dump is complete — the document ends with `</html>` — instead
+# of sleeping a fixed 40s and hoping; `DUMP_TIMEOUT` is the ceiling for the case
+# where it never shows up at all. Chrome's stderr and the timing go to disk so a
+# failure can be read without another run.
+DUMP_LOG="$WORK/dump-log.txt"
 dump() {
+  local url="$1" out="$2" tag="$3" size="$4"
+  local start=$SECONDS timed_out=yes
+  : > "$out"
   "$CHROME" --headless=new --disable-gpu --no-first-run \
-    --user-data-dir="$WORK/chrome-$3" --window-size="$4" --dump-dom "http://127.0.0.1:$PORT$1" > "$2" 2>/dev/null &
+    --user-data-dir="$WORK/chrome-$tag" --window-size="$size" \
+    --dump-dom "http://127.0.0.1:$PORT$url" \
+    > "$out" 2>"$WORK/chrome-$tag.stderr" &
   local pid=$!
-  for _ in $(seq 1 40); do
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 1
+  local deadline=$((SECONDS + ${DUMP_TIMEOUT:-60}))
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ -s "$out" ] && tail -c 32 "$out" | tr -d '[:space:]' | grep -q '</html>$'; then
+      timed_out=no
+      break
+    fi
+    [ "$SECONDS" -ge "$deadline" ] && break
+    sleep 0.2
   done
+  kill -0 "$pid" 2>/dev/null || timed_out=no
   kill -9 "$pid" 2>/dev/null || true
-  wait "$pid" 2>/dev/null || true
+  local rc=0
+  wait "$pid" 2>/dev/null || rc=$?
+  printf '%s\t%s\twindow=%s\tseconds=%s\ttimed_out=%s\trc=%s\tbytes=%s\n' \
+    "$tag" "$url" "$size" "$((SECONDS - start))" "$timed_out" "$rc" \
+    "$(wc -c < "$out" | tr -d ' ')" >> "$DUMP_LOG"
 }
 
 echo "==> dumping the first-run DOM"
@@ -1177,6 +1240,47 @@ if failed:
 PY
 
 if [ "$exit_code" -ne 0 ]; then
+  # Leave enough behind that the next person does not need an A/B run: what each
+  # dump weighed, whether it ended at all, whether its probe report was there,
+  # and what the page said. A bare "no report" is not a diagnosis.
+  echo "dom-smoke: --- raw evidence ---" >&2
+  [ -f "$DUMP_LOG" ] && sed 's/^/  dump | /' "$DUMP_LOG" >&2
+  python3 - "$WORK" <<'PY' >&2 || true
+import html, os, re, sys
+
+work = sys.argv[1]
+FILES = [
+    ("dom-first-run.html", "first run (wizard)", None),
+    ("dom-home.html", "home 1180×760", "layout-report"),
+    ("dom-probe.html", "keyboard probe", "probe-report"),
+    ("dom-home-small.html", "home 800×560", "layout-report"),
+    ("dom-firstrun-large.html", "wizard driven 1180×760", "firstrun-report"),
+    ("dom-firstrun-small.html", "wizard driven 800×560", "firstrun-report"),
+]
+for name, label, report_id in FILES:
+    path = os.path.join(work, name)
+    if not os.path.exists(path):
+        print(f"  {label}: no dump file ({name})")
+        continue
+    raw = open(path, encoding="utf-8", errors="replace").read()
+    ended = raw.rstrip().endswith("</html>")
+    has_report = report_id is not None and f'id="{report_id}"' in raw
+    error_page = bool(re.search(r"ERR_[A-Z_]+|neterror|This site can.?t be reached", raw))
+    body = re.sub(r"<script.*?</script>", " ", raw, flags=re.S)
+    text = html.unescape(re.sub(r"<[^>]+>", "\n", body))
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    print(
+        f"  {label}: {len(raw)} bytes; dump ended {ended}; probe report present {has_report}; "
+        f"browser error page {error_page}; first text: " + " / ".join(lines[:6])
+    )
+    tag = name[len("dom-"):-len(".html")]
+    err = os.path.join(work, f"chrome-{tag}.stderr")
+    if os.path.exists(err):
+        tail = [line for line in open(err, encoding="utf-8", errors="replace") if "ERROR" in line]
+        if tail:
+            print("    chrome stderr (last 3): " + " | ".join(line.strip()[:120] for line in tail[-3:]))
+PY
+  KEEP_WORK=1
   exit "$exit_code"
 fi
 echo "dom-smoke: OK — every screen rendered, the keyboard walk stayed inside, and both window sizes are usable"
