@@ -10,7 +10,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { ERRORS, explainError } from "./copy.ts";
-import { actionsFor } from "./recovery.ts";
+import { actionsFor, causeOf } from "./recovery.ts";
 import type { RecoveryAction, RecoveryError } from "./recovery.ts";
 
 function err(detail: string, what = "", how = ""): RecoveryError {
@@ -102,6 +102,84 @@ describe("actionsFor：常见失败各给一条能走的路", () => {
     const full = actionsFor(err("ENOSPC: no space left on device"));
     expect(full[0]?.kind).toBe("retry");
     expect(full[0]?.label).toContain("清理");
+  });
+});
+
+describe("actionsFor：可核对的原因（cause）也参与判断", () => {
+  /** 出错界面上真正会给她的形状：what/how 是平实中文，原文只在 cause 里。 */
+  function runFailure(cause: string): RecoveryError {
+    return {
+      what: "这件事没有做完。",
+      how: "原来的文件都还在。可以再试一次，或者换一种说法告诉我要做什么。",
+      detail: "没有更多说明。",
+      cause,
+    };
+  }
+
+  test("cause 说文件被占用：关掉 Excel 里那个窗口", () => {
+    const busy = actionsFor(runFailure("EBUSY: resource busy or locked, open 'C:\\报表.xlsx'"));
+    expect(busy[0]?.kind).toBe("close-file");
+    expect(busy[0]?.label).toContain("关掉");
+    expect(busy[0]?.label).toContain("Excel");
+  });
+
+  test("cause 里带着表格的临时锁文件：也算表格开着它，不给「换一份文件」", () => {
+    // 原文里只有个 `~$报表.xlsx` 时，旧判断会因为 .xlsx 后缀把它归成「格式看不懂」。
+    const locked = actionsFor(runFailure("无法写入 C:\\工作\\~$报表.xlsx"));
+    expect(locked[0]?.kind).toBe("close-file");
+    expect(locked[0]?.label).toContain("Excel");
+    expect(kinds(locked)).not.toContain("pick-files");
+  });
+
+  test("cause 说找不到文件：重新选一次文件", () => {
+    const missing = actionsFor(runFailure("ENOENT: no such file or directory"));
+    expect(missing[0]?.kind).toBe("pick-files");
+    expect(missing[0]?.label).toContain("选");
+  });
+
+  test("cause 说没有权限：另存到能写的位置", () => {
+    const denied = actionsFor(runFailure("os error 13: Permission denied"));
+    expect(kinds(denied)).toContain("save-elsewhere");
+    expect(kinds(denied)).not.toContain("close-file");
+  });
+
+  test("cause 认不出来：老老实实退回通用三个出口", () => {
+    expect(kinds(actionsFor(runFailure("something very strange happened")))).toEqual([
+      "retry",
+      "pick-files",
+      "copy-detail",
+    ]);
+  });
+
+  test("老形状（没有 cause）行为一模一样", () => {
+    // 不传 cause 时判断只吃 what/how/detail，结果与加这个字段之前完全一致。
+    expect(kinds(actionsFor(err("EBUSY: resource busy or locked")))).toEqual([
+      "close-file",
+      "copy-detail",
+    ]);
+    expect(kinds(actionsFor(err("ENOENT: no such file")))).toEqual(["pick-files", "copy-detail"]);
+    expect(kinds(actionsFor(err("something unknown")))).toEqual([
+      "retry",
+      "pick-files",
+      "copy-detail",
+    ]);
+  });
+
+  test("cause 认出来时也要留住「复制详情」那条后路", () => {
+    for (const cause of ["EBUSY", "ENOENT", "Permission denied", "~$报表.xlsx", "unknown"]) {
+      const list = actionsFor(runFailure(cause));
+      expect(list.at(-1)?.kind).toBe("copy-detail");
+      expect(list.filter((item) => item.kind === "copy-detail")).toHaveLength(1);
+    }
+  });
+
+  test("causeOf 只认对象上的 cause，字符串和 Error 都没有", () => {
+    expect(causeOf({ what: "", how: "", detail: "", cause: "EBUSY" })).toBe("EBUSY");
+    expect(causeOf({ what: "", how: "", detail: "EBUSY" })).toBeUndefined();
+    expect(causeOf("EBUSY")).toBeUndefined();
+    expect(causeOf(new Error("EBUSY"))).toBeUndefined();
+    expect(causeOf(null)).toBeUndefined();
+    expect(causeOf({ cause: "   " })).toBeUndefined();
   });
 });
 
