@@ -9,6 +9,10 @@
 // nothing, and neither does clicking outside, so the turn can never be left in
 // a state where the window looks frozen — which is exactly what happened before
 // this screen existed.
+//
+// r20（键盘）：这几个字面意思现在真的成立。这张卡不传 onEscape（MUST-ANSWER，
+// 原因写在 FocusLayer.tsx 的文件头），打开时焦点落在安全答案「拒绝」上，Tab 在这
+// 张卡里循环——不会跑到卡片底下那些看不见的按钮上。
 import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -16,6 +20,7 @@ import type { ReviewDecision } from "../protocol.ts";
 import type { Store } from "../store.ts";
 import { describeApproval } from "./approval.ts";
 import { APPROVAL } from "./copy.ts";
+import { useFocusLayer } from "./FocusLayer.tsx";
 
 export interface ApprovalSheetProps {
   store: Store;
@@ -26,6 +31,14 @@ const secondary = "min-h-[52px] rounded-lg px-5 text-[17px] font-semibold";
 
 export default function ApprovalSheet(props: ApprovalSheetProps): JSX.Element {
   const [showDetail, setShowDetail] = createSignal(false);
+  let denyButton: HTMLButtonElement | undefined;
+
+  // MUST-ANSWER：审批卡不响应 Esc（原因写在 FocusLayer.tsx 的文件头）。安全答案是
+  // 「拒绝」，所以打开时焦点就落在它上面——回车不加思索也是安全的那个。
+  const layer = useFocusLayer({
+    open: () => props.store.approval() !== null,
+    initialFocus: () => denyButton,
+  });
 
   const tools = () => props.store.approval()?.tools ?? [];
   const described = () => describeApproval(tools());
@@ -40,8 +53,11 @@ export default function ApprovalSheet(props: ApprovalSheetProps): JSX.Element {
   return (
     <Show when={props.store.approval()}>
       <section
-        class="mx-auto mt-6 max-w-2xl rounded-2xl border-2 border-amber-600 bg-[#1b1508] px-6 py-6"
+        ref={layer}
+        role="alertdialog"
+        aria-modal="true"
         aria-label={APPROVAL.title}
+        class="mx-auto mt-6 max-w-2xl rounded-2xl border-2 border-amber-600 bg-[#1b1508] px-6 py-6"
       >
         <h2 class="text-[22px] font-bold text-amber-100">{APPROVAL.title}</h2>
         <p class="mt-2 text-[17px] leading-relaxed text-amber-200">{APPROVAL.lead(tools().length)}</p>
@@ -75,7 +91,7 @@ export default function ApprovalSheet(props: ApprovalSheetProps): JSX.Element {
           {/* The safe answer holds the focus, so Enter without thinking is safe. */}
           <button
             type="button"
-            autofocus
+            ref={(element: HTMLButtonElement) => (denyButton = element)}
             class={`${primary} border border-slate-500 bg-slate-800 text-slate-100 hover:bg-slate-700`}
             onClick={() => answer("Deny")}
           >
