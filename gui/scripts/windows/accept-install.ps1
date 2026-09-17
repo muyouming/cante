@@ -8,7 +8,8 @@
 # 它做五件事，每一步都打印实际耗时：
 #   1. 取安装包（给路径就用它；给 -Version 就从 GitHub Release 下载）
 #   2. 静默安装，并列出安装目录（断言三个自带 exe + 卸载器都在、没有 .d / 0 字节垃圾）
-#   3. 启动应用（CANTE_BIN 指向**包里那个** cante-bridge.exe、PI_BIN 指向这台机器上的 pi），
+#   3. 启动应用（默认：CANTE_BIN 指向**包里那个** cante-bridge.exe、PI_BIN 指向这台机器上的 pi；
+#      加了 -ZeroEnv 就**什么都不设**，让应用自己在旁边找 —— 那是 #150 第二步的验收模式），
 #      用 UI Automation 读窗口文字，断言第一屏是中文简单模式向导第 1 步，并把文字原样贴出来
 #   4. 真的干成一件活：tauri-driver + WebDriver 在真实 WebView2 里点卡片 → 选文件
 #      （原生对话框由 accept-file-dialog.ps1 填）→ 写一句话 → 生成计划 → 开始，
@@ -16,8 +17,9 @@
 #      读回产出文件核对内容，并比对原文件 sha256（没被改动）
 #   5. 静默卸载，并列出卸载后检查的位置
 #
-# 为什么要替她设 CANTE_BIN / PI_BIN：这是**脚本替她做的**，从她的角度看仍然是「双击就行」。
-# #150 之后连这一层都不需要（执行组件随包发），那时这两个变量就该从这个脚本里删掉。
+# 默认为什么要替她设 CANTE_BIN / PI_BIN：这是**脚本替她做的**，从她的角度看仍然是「双击就行」；
+# 但环境变量一设，就盖住了“包里根本没带执行组件”这种错。所以 #150 第二步之后，正式验收
+# 应该用 `-ZeroEnv`（不设任何环境变量）；不带这个开关时保留老路径，方便对照与定位。
 #
 # 注意：本文件必须保存为 UTF-8 with BOM（Windows PowerShell 5.1 否则按 GBK 解析中文）。
 
@@ -29,7 +31,11 @@ param(
     [string]$Instruction = "把华东区的记录挑出来，另存成一张新表",
     [int]$JobTimeoutSec = 1200,
     [switch]$SkipUninstall,
-    [switch]$KeepArtifacts
+    [switch]$KeepArtifacts,
+    # #150 第二步：零环境变量模式。不替她设 CANTE_BIN / PI_BIN，让**应用自己**在它旁边
+    # 找桥与执行组件（包里已随包发）。这是“她双击一次就能干活”最接近的一次验收：
+    # 环境变量一设，就盖住了“包里根本没带组件”这种错。
+    [switch]$ZeroEnv
 )
 
 $ErrorActionPreference = 'Stop'
@@ -137,8 +143,13 @@ function Resolve-TauriDriver {
     Fail "找不到 tauri-driver。先跑：cargo install tauri-driver --locked"
 }
 
-$piBin = Resolve-PiBin
-Say ("pi：" + $piBin)
+$piBin = if ($ZeroEnv) { "" } else { Resolve-PiBin }
+if ($ZeroEnv) {
+    Say '零环境变量模式（-ZeroEnv）：不设 CANTE_BIN / PI_BIN，也不替她指 pi。'
+    Say '  验收的是：应用自己在旁边找到桥与执行组件（#150）。'
+} else {
+    Say ("pi：" + $piBin)
+}
 
 $node = (Get-Command node.exe -ErrorAction SilentlyContinue).Source
 if (-not $node) { Fail '找不到 node.exe。' }
@@ -240,13 +251,18 @@ Record-Step '3. 启动应用 + 读第一屏（UI Automation）' {
     # 全新档案：向导才会出现（也保证跑第二遍看到的是同一屏）。
     if (Test-Path $script:ProfileDir) { Remove-Item $script:ProfileDir -Recurse -Force }
 
-    # 脚本替她设的两个环境变量。PI_* 里属于「我这个 agent 的会话」的一律清掉，
-    # 免得子 pi 继承了一个无关的会话文件。
+    # 脚本替她设的两个环境变量（-ZeroEnv 时**不设**：要证的正是“不靠它们也能干活”）。
+    # PI_* 里属于「我这个 agent 的会话」的一律清掉，免得子 pi 继承了一个无关的会话文件。
     Get-ChildItem env: | Where-Object { $_.Name -like 'PI_*' -and $_.Name -ne 'PI_BIN' } | ForEach-Object {
         Remove-Item ("env:" + $_.Name) -ErrorAction SilentlyContinue
     }
-    $env:CANTE_BIN = $bridgeBin
-    $env:PI_BIN = $piBin
+    if ($ZeroEnv) {
+        Remove-Item Env:CANTE_BIN -ErrorAction SilentlyContinue
+        Remove-Item Env:PI_BIN -ErrorAction SilentlyContinue
+    } else {
+        $env:CANTE_BIN = $bridgeBin
+        $env:PI_BIN = $piBin
+    }
 
     $dump = Join-Path $script:Here 'dump-window-text.ps1'
     $result = Run-Command 'powershell.exe' @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $dump, '-Exe', $guiExe, '-WaitSeconds', '20', '-ForceAccessibility') 180
@@ -309,8 +325,15 @@ Record-Step '4. 真的干成一件活（WebDriver + 桥 + pi）' {
     Say ("  tauri-driver：" + $tauriDriver)
 
     $env:ACCEPT_APP = $guiExe
-    $env:ACCEPT_CANTE_BIN = $bridgeBin
-    $env:ACCEPT_PI_BIN = $piBin
+    if ($ZeroEnv) {
+        $env:ACCEPT_ZERO_ENV = '1'
+        Remove-Item Env:ACCEPT_CANTE_BIN -ErrorAction SilentlyContinue
+        Remove-Item Env:ACCEPT_PI_BIN -ErrorAction SilentlyContinue
+    } else {
+        $env:ACCEPT_ZERO_ENV = '0'
+        $env:ACCEPT_CANTE_BIN = $bridgeBin
+        $env:ACCEPT_PI_BIN = $piBin
+    }
     $env:ACCEPT_MSEDGEDRIVER = $script:msedge
     $env:ACCEPT_TAURI_DRIVER = $tauriDriver
     $env:ACCEPT_WORKDIR = $jobDir
@@ -394,4 +417,8 @@ $total = ($script:Timings | Measure-Object Seconds -Sum).Sum
 Say ('  {0,-32} {1,7} s' -f '合计', $total)
 Say ''
 Say ('证据都在：' + $WorkDir)
-Say 'accept-install: OK — 装好的应用 + 包里的桥 + 这台机器上的 pi，点一张卡真的出了一份文件。'
+if ($ZeroEnv) {
+    Say 'accept-install: OK — 零环境变量、装好的应用，自己找到包里的桥与执行组件，点一张卡真的出了一份文件。'
+} else {
+    Say 'accept-install: OK — 装好的应用 + 包里的桥 + 这台机器上的 pi，点一张卡真的出了一份文件。'
+}

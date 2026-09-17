@@ -166,14 +166,21 @@ pub fn locate_assistant(
     home: Option<&Path>,
     path_var: Option<&str>,
 ) -> Located {
-    let single = locate(env_bin, ASSISTANT_CANDIDATES, ASSISTANT_BARE, exe_dir, home, path_var);
-    if single.from_env() || single.path().is_some() {
-        return single;
+    // 顺序：环境变量 → 应用旁边/家目录里的单文件 pi → **随包发的那一组** → PATH。
+    //
+    // PATH 必须排在最后，而且这一条是被真机验收抓出来的：王姐的机器上 `where pi` 很可能
+    // 找到 npm 落的 `pi`（一个 **shell 脚本**，不是 .exe）——Windows 上 `CreateProcess`
+    // 起不来（os error 193）。如果让 PATH 上的它盖过随包的那一组，就等于随包白发了：
+    // 应用找得到、桥起不来，她能看到的只是一句“动手的组件没能启动”。
+    let nearby = locate(env_bin, ASSISTANT_CANDIDATES, ASSISTANT_BARE, exe_dir, home, None);
+    if nearby.from_env() || nearby.path().is_some() {
+        return nearby;
     }
 
-    // 单文件形态没找到：看随包发的组合。`searched` 沿用单文件那次的（同一个目录），
-    // 追加一行这一组文件的名字，让「复制详情」说得清到底看过什么。
-    let mut searched = single.searched;
+    // 单文件形态没找到：看随包发的组合（`<目录>/pi/bun.exe` + 入口脚本）。
+    // `searched` 沿用单文件那次的（同一个目录），追加一行这一组文件的名字，
+    // 让「复制详情」说得清到底看过什么。
+    let mut searched = nearby.searched;
     for dir in nearby_dirs(exe_dir, home) {
         let bundle = dir.join(ASSISTANT_DIR);
         let label = bundle.to_string_lossy().into_owned();
@@ -191,6 +198,16 @@ pub fn locate_assistant(
                         from_env: false,
                     };
                 }
+            }
+        }
+    }
+
+    // 最后一处：PATH 上的裸名字。走到这里说明前面都没东西。
+    if let Some(raw) = path_var {
+        searched.push(PATH_LABEL.to_string());
+        for dir in std::env::split_paths(raw) {
+            if let Some(found) = existing_candidate(&dir, &[ASSISTANT_BARE]) {
+                return Located::at(found);
             }
         }
     }
@@ -503,6 +520,27 @@ mod tests {
         assert_eq!(found.spec(), "pi");
         assert!(found.from_env());
         assert!(found.path().is_none(), "PATH 上没有 pi 就如实说没有，不许假装旁边的组合能用");
+    }
+
+    #[test]
+    fn a_pi_on_path_does_not_shadow_the_bundled_pair() {
+        // 真机验收抓到的那个：`where pi` 找到 npm 落的 `pi`（一个 shell 脚本，Windows 上
+        // CreateProcess 起不来，os error 193）。如果它盖过随包的那一组，包就白发了。
+        let app = TempDir::new("path-shadow-app");
+        let npm = TempDir::new("path-shadow-npm");
+        place(&npm.0, "pi"); // 脚本形态的 pi（有扩展名也认，这里就是不带扩展名的那个）
+        let pi_dir = app.0.join("pi");
+        let bun = place(&pi_dir, "bun.exe");
+        let entry = place(&pi_dir.join("dist").join("bundle"), "cli.js");
+        let path_var = npm.0.to_string_lossy().into_owned();
+
+        let found = locate_assistant(None, Some(&app.0), None, Some(&path_var));
+        assert_eq!(
+            found.path(),
+            Some(bun.as_str()),
+            "随包发的那一组必须赢过 PATH 上的 pi（否则王姐机器上就是起不来）",
+        );
+        assert_eq!(found.spec(), format!("\"{bun}\" \"{entry}\""));
     }
 
     #[test]

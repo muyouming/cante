@@ -191,17 +191,25 @@ test("三个自带程序必须在 Cargo.toml 里是 [[bin]]，且不许再写进
         `少查一个文件它就挡不住下一轮的漏包。`,
     ).toBe(true);
   }
+  // #150 第二步：执行组件也进了包，闸门就必须也查它 —— 否则"装完能开窗口、一件活也干不了"
+  // 这类漏包会再次只能等人真机点到才发现。
+  for (const name of ["pi/bun.exe", "pi/dist/bundle/cli.js", "THIRD-PARTY-NOTICES.md"]) {
+    expect(
+      verifySrc.includes(name),
+      `verify-bundle.sh 里没检查 ${name}：执行组件随包发之后，少了它用户就干不了活（#150）。`,
+    ).toBe(true);
+  }
 });
 
 // 桥的"进包"与"被找到"是两件事：它和两个工具一样躺在主程序旁边，但守护进程的解析
 // 只看 `CANTE_BIN`（或 PATH 上的 `cante`）—— 所以包里有 `cante-bridge.exe`，而要用
 // 它必须把 `CANTE_BIN` 指过去。这条把差异钉在明处，免得以后有人以为装进包就等于
 // "Windows 上自动有干活组件了"（第三次真机验收的结论，`WINDOWS-ACCEPTANCE-3.md` §6）。
-test("cante-bridge 进包，但只有 CANTE_BIN 会用到它", () => {
+test("cante-bridge 进包，应用会在自己旁边找到它（#150）", () => {
   const cargo = readFileSync(path.join(SRC_TAURI, "Cargo.toml"), "utf8");
   expect(
     binaryNames(cargo),
-    "cante-bridge 必须是 [[bin]]：它是包里的第三个程序，少一个就没人能把它指给应用。",
+    "cante-bridge 必须是 [[bin]]：它是包里的第三个程序，少了它应用就没有能拉起来的守护进程。",
   ).toContain("cante-bridge");
 
   // 反面：两个工具的解析器**不该**顺手认领它 —— 桥的命令行是「守护进程替身」，
@@ -216,12 +224,61 @@ test("cante-bridge 进包，但只有 CANTE_BIN 会用到它", () => {
       "混进工具解析会让界面上的能力提示与真正的启动路径不一致。",
   ).toBe(false);
 
-  // 而守护进程侧确实只认 CANTE_BIN（或默认的 cante）——这是桥现在唯一被用到的入口。
+  // 而守护进程侧的解析顺序在 program.rs（#150 第一步）：环境变量 → **应用旁边**（cante /
+  // cante-bridge）→ ~/.cante/bin → PATH。这里只钉住那条老入口还在（CANTE_BIN 仍然优先，
+  // 开发与真机验收都靠它指别处）。
   const daemon = readFileSync(path.join(SRC_TAURI, "src", "daemon.rs"), "utf8");
   expect(
     daemon.includes("CANTE_BIN"),
-    "daemon.rs 里没有 CANTE_BIN：桥就没有任何入口，安装包里的 cante-bridge.exe 是摆设。",
+    "daemon.rs 里没有 CANTE_BIN：开发/验收就指不了别处了。",
   ).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// #150 第二步：执行组件（pi + bun）怎么进包
+// ---------------------------------------------------------------------------
+//
+// 第一步（#163）已经把"应用在旁边找它"这件事统一成一份实现（src-tauri/src/program.rs）：
+//   <应用旁边>\pi\bun.exe + <应用旁边>\pi\dist\bundle\cli.js
+// 这一步把它真的随包发。配置层只有两句话：
+//   * 打壳前跑 `gui/scripts/stage-executor.ts`（下载 + 验 sha256 + 摆成那个形状）；
+//   * **Windows 的** `bundle.resources` 把 `executor/pi` 映射到 `pi/`（安装目录里就是应用旁边）。
+//
+// 为什么映射写在 `tauri.windows.conf.json` 而不是共用的那份：这一包是给 Windows 的，
+// macOS 用上游 cante 守护进程 —— 不该为一个用不上的组件把 dmg 撑大 ~30 MB。
+//
+// 配置对不对仍然不等于"真的进包了"：那样的话由 `verify-bundle.sh` 打开产物回答（见上）。
+test("执行组件的接线：打壳前取回并校验，Windows 的 resources 映射到应用旁边", () => {
+  const build = (tauriConfig().build ?? {}) as Record<string, unknown>;
+  expect(
+    String(build.beforeBuildCommand ?? ""),
+    "beforeBuildCommand 没跑 stage-executor：包里的 pi\\ 会缺席（或者拿到一份旧的）。",
+  ).toContain("scripts/stage-executor.ts");
+
+  const windows = JSON.parse(
+    readFileSync(path.join(SRC_TAURI, "tauri.windows.conf.json"), "utf8"),
+  ) as Record<string, unknown>;
+  const resources = ((windows.bundle ?? {}) as Record<string, unknown>).resources ?? {};
+  expect(
+    resources,
+    "tauri.windows.conf.json 的 bundle.resources 必须把 executor/pi 映射到 pi —— " +
+      "应用就是按 <应用旁边>\\pi\\ 去找的（program.rs 的 locate_assistant）。",
+  ).toEqual({ "executor/pi": "pi" });
+
+  // 共用配置里不许带执行组件：macOS 的 dmg 不该因为一个它不用的组件变大。
+  expect(
+    resourceEntries(bundleConfig()),
+    "共用的 tauri.conf.json 里不该有 resources：执行组件只随 Windows 包发。",
+  ).toEqual([]);
+
+  // 取回的那一份必须按校验值验过 —— 版本、地址、sha256 都在仓库里（可审计）。
+  const manifest = JSON.parse(
+    readFileSync(path.join(SRC_TAURI, "..", "executor", "versions.json"), "utf8"),
+  ) as { pi?: { sha256?: string; url?: string }; bun?: { sha256?: string; url?: string } };
+  for (const [name, part] of Object.entries({ pi: manifest.pi, bun: manifest.bun })) {
+    expect(part?.sha256, `${name} 的 sha256 缺失：构建期就没法验校验值了`).toMatch(/^[0-9a-f]{64}$/);
+    expect(part?.url, `${name} 的下载地址缺失`).toMatch(/^https:\/\//);
+  }
 });
 
 // 打包后的落点必须与 Rust 解析器查的第一条候选**一致**：装上以后工具就躺在

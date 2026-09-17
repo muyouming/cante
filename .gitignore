@@ -33,3 +33,9 @@ target
 # Python bytecode (cante-harbor agent adapter)
 __pycache__/
 *.pyc
+gui/executor/.cache/
+# 执行组件是构建产物（#150）：只有占位说明进版本库，其余由 stage-executor.ts 在打包前填。
+gui/src-tauri/executor/pi/*
+!gui/src-tauri/executor/pi/README.md
+gui/src-tauri/executor/.staged.json
+gui/src-tauri/executor/.unpack-*/
