@@ -115,6 +115,20 @@ bash scripts/dom-smoke.sh                 # render the shell in Chrome, read it 
 `scripts/e2e.sh` runs all of the above in order, stops at the first failure and
 prints a one-line summary; it is the same gate CI runs.
 
+### Secret scan
+
+`bash scripts/secret-scan.sh` scans every **git-tracked** file (never build
+output, `node_modules` or `target`) for API-key shapes, private-network
+addresses and machine-specific home directories, and fails with
+`path:line: what matched`. It runs first in both CI jobs, before anything is
+built, because this repository is public: once a key is in the history it
+cannot be washed out. When it hits, move the value into a local config or
+environment file, or write it as a placeholder (`sk-…`, `<用户名>`); a key that
+was already pushed has to be revoked at the provider — a force push does not
+undo it. The only place to record a reviewed exception is
+`scripts/secret-scan.allow`, and every entry must carry a `#` reason on the line
+above it.
+
 The Rust tests drive the fixture through `CANTE_BIN="bun <script>"`, because
 Windows cannot execute a `#!` script directly — the spec may carry leading
 arguments, and it is what makes the same test suite pass on `windows-latest`,
