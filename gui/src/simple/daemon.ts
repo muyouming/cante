@@ -68,6 +68,19 @@ export async function probeDaemon(): Promise<DaemonCapability | null> {
 }
 
 /**
+ * 向导那个绿勾的**唯一**判据（#177）。
+ *
+ * 只认后端 `daemon_capability` 的答案（它走 `program.rs` 那条查找线，桥在、动手的
+ * 组件不在时就是「不在」）。以前的绿勾看的是桥的 `--version`：随包的动手组件被挪走
+ * 之后桥照样报得出版本号，界面仍然说「已经就绪」——先告诉她准备好了，她一动手就失败。
+ *
+ * `null`（探测失败 / 浏览器预览）不是「就绪」：没问出答案就不能替她打包票。
+ */
+export function daemonReady(cap: DaemonCapability | null): boolean {
+  return cap?.available === true;
+}
+
+/**
  * 探测成功、但组件不在时，向导该显示的那一节；否则 null。
  *
  * `null`（探测失败）和「可用」都不显示：前者是没答案，后者不用她操心。

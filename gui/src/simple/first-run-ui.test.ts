@@ -103,6 +103,36 @@ describe("首页：三句例子点一下就填进输入框", () => {
   });
 });
 
+// #177（P0）— 「就绪」曾经有两份实现：向导自己探桥的 `--version` 说得出话就算就绪，
+// 而「动手的组件在不在」在另一处（daemon_capability）。真机上把随包的 pi\ 挪走，
+// 向导仍然显示「已经就绪」，她一动手就失败。方向是收敛成一份——这里钉住向导那一份
+// 真的走的是 daemon_capability，而不是又补了一个 if。
+describe("向导「检查电脑」的绿勾只有一个来源（#177）", () => {
+  test("ready() 走 daemonReady(daemon())，不再看桥的 --version", () => {
+    // 先钉文件层面的那两处，红了也看得出断的是哪一根线。
+    expect(WIZARD).toContain("daemonReady(daemon())");
+    // 旧写法：health()?.ok === true && !!health()?.cante —— 桥报得出 --version 就算
+    // 就绪，正是这次的 P0。
+    expect(WIZARD).not.toContain("health()?.cante");
+    const body = bodyOf(WIZARD, "ready");
+    expect(body).toContain("daemonReady(daemon())");
+    expect(body).not.toContain("health");
+  });
+
+  test("向导整个文件不再自己探桥：health 是 store 的探活，组件在不在归 daemon_capability", () => {
+    expect(WIZARD).not.toContain('invoke("health")');
+    expect(WIZARD).not.toContain("Health");
+    expect(WIZARD).toContain("probeDaemon()");
+  });
+
+  test("缺组件时她看得到「发生了什么 + 能做的一步 + 复制详情」（#175 的按钮还在）", () => {
+    expect(WIZARD).toContain("{section().what}");
+    expect(WIZARD).toContain("{section().action}");
+    expect(WIZARD).toContain("onClick={() => void onCopyDaemon()}");
+    expect(WIZARD).toContain("section().copyLabel");
+  });
+});
+
 describe("向导最后一步：三件事 + 三句能点的话", () => {
   test("三条承诺都渲染出来了", () => {
     expect(WIZARD).toContain("<For each={FIRST_RUN.promises}>");
