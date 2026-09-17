@@ -86,6 +86,55 @@ function lineText(text: string, index: number): string {
  * just past the closing brace. Quote-aware, so braces inside strings (and
  * template literals with `${}`) do not end it early.
  */
+/** 把注释剥掉，再交给扫描器。
+ *
+ * 2026-09-17 修：JSX 里到处是解释性注释（花括号里带星号那种），里面的引号和花括号
+ * 会让"引号=字符串"的假设跑飞，于是 skipGroup / openingTagEnd 一路扫到很远 —— 对
+ * TaskRunner.tsx（36K）就是平方级的活儿：整个 a11y 测试从"秒级"变成 **9 分 22 秒**，
+ * 把本地门禁拖成不可用。注释不是界面，剥掉既更快也更对（copy-guard.test.ts 早就用
+ * 同一招处理注释）。
+ *
+ * 只剥**字符串外面**的注释：字符串里的两个斜杠（网址之类）不是注释。
+ */
+function stripComments(text: string): string {
+  let out = "";
+  let quote: string | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (quote) {
+      out += ch;
+      if (ch === "\\") {
+        out += text[i + 1] ?? "";
+        i++;
+      } else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      out += ch;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "/") {
+      const nl = text.indexOf("\n", i);
+      i = nl < 0 ? text.length : nl - 1;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      if (end < 0) {
+        i = text.length;
+        continue;
+      }
+      // 保留换行，行号才对得上。
+      out += (text.slice(i, end + 2).match(/\n/g) ?? []).join("");
+      i = end + 1;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
 function skipGroup(text: string, start: number): number {
   let depth = 0;
   let quote: string | null = null;
@@ -293,7 +342,7 @@ function report(violations: readonly Violation[]): string {
 
 /** Files and their sources, read once. */
 const SCANNED: ReadonlyArray<{ file: string; rel: string; text: string }> = componentFiles(SIMPLE_DIR).map(
-  (file) => ({ file, rel: relative(SIMPLE_DIR, file), text: readFileSync(file, "utf8") }),
+  (file) => ({ file, rel: relative(SIMPLE_DIR, file), text: stripComments(readFileSync(file, "utf8")) }),
 );
 
 /** Walk every opening tag in every component, with its file context. */
