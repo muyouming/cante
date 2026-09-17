@@ -10,7 +10,7 @@ import { buildPrompt } from "./prompt.ts";
 const rename: TaskDef = {
   id: "files.rename",
   title: "按规则改成新名字（原来的留着）",
-  example: "把这些照片复制一份，按「2024年5月_序号」重新命名",
+  example: "把这些照片复制一份，名字改成 2024年5月_1、2024年5月_2 这样",
   group: "文件",
   needs: "files",
   plan: [

@@ -75,7 +75,7 @@ export const WIZARD = {
   progressLabel: "进度",
   welcomeTitle: "欢迎使用 Cante",
   welcomeBody:
-    "我帮你把表格、文件这些麻烦事做完。原文件我不会乱动，动手前会先让你确认。先花十秒钟检查一下你的电脑，好吗？",
+    "我帮你把表格、文件这些麻烦事做完。原文件我不会乱动，动手前会先让你确认。先检查一下你的电脑，好吗？",
   welcomeButton: "开始检查",
   checkTitle: "检查你的电脑",
   checking: "正在检查，请稍等……",
