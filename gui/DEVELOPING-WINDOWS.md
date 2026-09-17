@@ -484,3 +484,31 @@ schtasks /delete /tn CanteWeeklySweep /f
 - **SSH 会话里看不到窗口**（同前面那条限制）：要看窗口、要截图，必须 **RDP**。
 - 桥的门禁在 macOS 上跑通过（真 `pi` + 假端点），**Windows 上的真跑交给那台机器**；
   要它执行的完整命令清单（含每一步的期望输出）在 `BRIDGE-windows.md` §5。
+
+## 在这台机器上别跑完整门禁（实测：省 30 分钟）
+
+这台机器的硬件**不慢**（i5-13500H / 40GB / NVMe），网络也健康（crates 下载源握手 44ms、实测 5.6 MB/s）。
+慢的是**我们让它做的事**：`gui/scripts/e2e.sh` 是完整门禁（`bun install` + `vite build` + 全量 `cargo test`），
+在那儿实测要 **30 分钟以上**（首次编译 Tauri 依赖树是大头）——**而 CI 已经在 windows-latest 上跑同一份**。
+
+所以：**推分支之前在 Windows 上跑快检，完整门禁交给 CI。**
+
+```powershell
+# 几秒到十几秒：前端测试 + 类型检查
+powershell -NoProfile -ExecutionPolicy Bypass -File gui\scripts\check-windows.ps1
+
+# 暖缓存下一两分钟：再加上 Rust lib 单测
+powershell -NoProfile -ExecutionPolicy Bypass -File gui\scripts\check-windows.ps1 -IncludeCargo
+```
+
+这台机器真正独有的价值是**CI 做不到的事**：装真安装包、开真窗口（WebView2）、跑真任务、
+出 Windows 安装包。把时间花在这些上面。
+
+### 几个已知的时间陷阱
+
+- **首次 `cargo` 编译是一次性成本**（Tauri 依赖树，十几分钟）；之后 `cargo test` 暖缓存约 3 分钟。
+  所以别因为"第一次很慢"就以为机器不行 ✗。
+- **别在 SSH 会话里挂长命令**：进程会被回收（WMI 与 schtasks 都试过），而且**卡住的命令会堵死整轮**。
+  要用后台跑，就用计划任务（每周普查就是这么做的 ✓）。
+- **磁盘要留余量**：`target\` + 安装包能吃掉十几 GB；C: 只剩 40 多 GB 时该清一清
+  （`cargo clean` 或删旧的 `bundle\`）。
