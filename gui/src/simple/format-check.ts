@@ -5,13 +5,18 @@
 // `.dps`（演示）**不是 Excel / Word 格式**，装了什么工具都读不了；`.pages` /
 // `.numbers`（苹果）同理。原来她只会在跑了一会儿之后才知道，等于白等一场。
 //
+// 关于成本（#88 要求把这件事写死，而不是拿「另存为」当永久借口）：WPS 的 .et/.wps/
+// .dps 没有公开规范，读它们等于自己写解析器并跟着 WPS 的版本走；而 xls / xlsx / xlsm /
+// xlsb / ods 都有公开格式，已经能读。所以现在先用「一步另存为」；真机上若证明它是
+// 高频入口，再按解析成本重新评估（#88 的待办里就写着这一条）。
+//
 // 这个模块只做判断，不碰文件系统、不弹任何东西：纯逻辑，好测。
 //   * 空选择 → ok（没选文件就谈不上读不了）；
 //   * 全是能读的 → ok；
 //   * **全部**都读不了 → convert-first（这时不该开跑，给一个另存为的动作）；
 //   * **部分**读不了 → some-unreadable（跳过这几份，其余照做）；
 //   * 全部读不了、但 WPS 的和苹果的混在一起 → mixed-nothing-readable
-//     （给不出一条统一的另存为，所以没有 blocked 名单）。
+//     （给不出一条统一的另存为，但名单照给）。
 // 给用户看的话一律来自 copy-capability.ts 的 FORMAT_COPY，这里不写字面文案。
 import { FORMAT_COPY } from "./copy-capability.ts";
 
@@ -23,8 +28,13 @@ export type SelectionVerdict =
   | { kind: "convert-first"; blocked: string[]; advice: string }
   /** 混着能读的文件：跳过读不了的，其余的照做。 */
   | { kind: "some-unreadable"; blocked: string[]; advice: string }
-  /** 一个都读不了，而且是好几种读不了的格式混在一起：给不出一条统一的另存为。 */
-  | { kind: "mixed-nothing-readable"; advice: string };
+  /**
+   * 一个都读不了，而且是好几种读不了的格式混在一起：给不出一条统一的另存为。
+   *
+   * `blocked` 照样要给：两个界面（选文件处、确认页）都要能把「是哪几份」列出来，
+   * 名单只能有一份，不然一处列了、另一处空着，她不知道该拿哪份去另存。
+   */
+  | { kind: "mixed-nothing-readable"; blocked: string[]; advice: string };
 
 /** WPS 自己的格式：`.et` 表格、`.ett` 表格模板、`.wps` 文字、`.dps` 演示。 */
 const WPS_EXTENSIONS: readonly string[] = [".et", ".ett", ".wps", ".dps"];
@@ -84,7 +94,7 @@ export function inspectSelection(paths: string[]): SelectionVerdict {
 
   // 一个都读不了，而且混着 WPS 和苹果：没有一条统一的另存为可给。
   if (wps.length > 0 && apple.length > 0) {
-    return { kind: "mixed-nothing-readable", advice: FORMAT_COPY.mixedConvertAdvice };
+    return { kind: "mixed-nothing-readable", blocked, advice: FORMAT_COPY.mixedConvertAdvice };
   }
 
   // 一个都读不了，但都是同一家：给一条明确的另存为。
@@ -93,4 +103,25 @@ export function inspectSelection(paths: string[]): SelectionVerdict {
     blocked,
     advice: wps.length > 0 ? FORMAT_COPY.wpsConvertAdvice : FORMAT_COPY.appleConvertAdvice,
   };
+}
+
+/**
+ * 一个都读不了：这时不该开跑，得先让她另存一份。
+ *
+ * 选文件处和确认页都调这一个函数（确认页用它决定要不要禁用「开始」，选文件处用它
+ * 决定提示要不要说得重一点），免得两处各写一遍判断、日后只改了一处。
+ */
+export function nothingReadable(verdict: SelectionVerdict): boolean {
+  return verdict.kind === "convert-first" || verdict.kind === "mixed-nothing-readable";
+}
+
+/**
+ * 选文件那一步的一句话：这次选的里有几份打不开。都不用提的时候返回 null。
+ *
+ * 只报数，出路交给「怎么办」那个展开（展开里放的就是确认页那句 advice）——选文件
+ * 这一步是轻量提示，真正拦住「开始」的是确认页。
+ */
+export function pickStepLine(verdict: SelectionVerdict, selectedCount: number): string | null {
+  if (verdict.kind === "ok") return null;
+  return FORMAT_COPY.pickLine(verdict.blocked.length, selectedCount);
 }

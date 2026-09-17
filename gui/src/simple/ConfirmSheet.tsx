@@ -24,7 +24,7 @@ import {
   visionFallbackNote,
 } from "./capabilities.ts";
 import { FORMAT_COPY, hasExcelFile, hasImageFile, hasPdfFile } from "./copy-capability.ts";
-import { inspectSelection } from "./format-check.ts";
+import { inspectSelection, nothingReadable as nothingReadableVerdict } from "./format-check.ts";
 import { evidenceFor, failureFor } from "./evidence.ts";
 import { fileName, folderName, hasActiveRisk, planRisks } from "./run.ts";
 import { risksForTask } from "./tasks/index.ts";
@@ -73,13 +73,11 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   const verdictNote = () => formatAdviceNote(verdict());
   // 一个都读不了时，开始按钮旁边要写清为什么现在别点。
   const startBlockNote = () => formatStartBlockNote(verdict());
-  const nothingReadable = (): boolean => {
-    const now = verdict();
-    return now.kind === "convert-first" || now.kind === "mixed-nothing-readable";
-  };
+  // 上面那条判断只有一份（format-check.ts），选文件处用的是同一个函数。
+  const nothingReadable = (): boolean => nothingReadableVerdict(verdict());
   const blockedFiles = (): string[] => {
     const now = verdict();
-    return now.kind === "convert-first" || now.kind === "some-unreadable" ? now.blocked : [];
+    return now.kind === "ok" ? [] : now.blocked;
   };
 
   function focusCancel(element: HTMLButtonElement): void {
