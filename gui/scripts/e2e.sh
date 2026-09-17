@@ -15,7 +15,7 @@ source "$here/toolchain.sh"
 cd "$gui_root"
 
 # 步骤总数（加/删步骤时改这里；它只影响最后那行统计的显示）
-total=7
+total=8
 current=0
 
 step() {
@@ -33,6 +33,10 @@ step() {
 # 之所以本地也要跑：本地判据必须与 CI 一致——"本地绿、CI 红"我们已经踩过。
 step "secret scan" bash scripts/secret-scan.sh
 step "bun install" bun install
+# 第三方组件清单：清单过期就红（并点名是哪些组件变了）。它必须排在 `bun install`
+# 之后 —— npm 那半的许可证/版权行只存在于已安装包自己的 package.json 里，bun.lock
+# 不带这两个字段。这是它能跑的最早位置，仍在秘密扫描之后。
+step "third-party licenses are current" bash scripts/license-inventory.sh --check
 step "bun test src" bun test src
 step "bunx tsc --noEmit" bunx tsc --noEmit
 step "bun run build:web" bun run build:web

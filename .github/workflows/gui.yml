@@ -66,6 +66,8 @@ jobs:
       - name: Run the app's e2e gate
         run: bash gui/scripts/e2e.sh
 
+      - run: bash gui/scripts/license-inventory.sh --check
+
   windows:
     name: GUI gate (Windows)
     runs-on: windows-latest
