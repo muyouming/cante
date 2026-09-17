@@ -104,11 +104,11 @@ describe("collectResults：清单和顺序", () => {
 
   test("Windows 的反斜杠位置也能拆出文件名和文件夹", () => {
     const entries = collectResults(
-      [run({ id: "a", state: "done", result: result("C:\\Users\\王姐\\Desktop\\报表.xlsx") })],
+      [run({ id: "a", state: "done", result: result("C:\\Users\\<用户名>\\Desktop\\报表.xlsx") })],
       null,
     );
     expect(entries[0]!.name).toBe("报表.xlsx");
-    expect(entries[0]!.folder).toBe("C:\\Users\\王姐\\Desktop");
+    expect(entries[0]!.folder).toBe("C:\\Users\\<用户名>\\Desktop");
   });
 });
 
