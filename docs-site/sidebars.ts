@@ -94,6 +94,7 @@ const sidebars: SidebarsConfig = {
         'configuration/preference',
         'configuration/permission',
         'configuration/coding-plan',
+        'configuration/windows',
       ],
     },
     {
