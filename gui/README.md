@@ -288,3 +288,48 @@ disk all happen before the first line of JavaScript and none of them is visible
 here. For the number she actually feels, measure on Windows (see
 `WINDOWS-ACCEPTANCE-3.md` and the WebDriver smoke above); do not quote these as
 her startup time.
+
+## How big is the instruction we send
+
+Every card hands the assistant one Chinese instruction, assembled by
+`instructionFor(taskId, files, instruction)` — the same call
+`store.composedInstruction` makes, so it is what actually goes out. Its length is
+part of what she waits on and what we pay for: a normal card is 30–60 s, 7–8 model
+round-trips and ~7,000 output tokens (`scripts/sweep/README.md` has the real
+measurements), and **the context is resent on every round**, so the bill is
+instruction size × round-trips.
+
+Measure it:
+
+```sh
+cd gui
+bun scripts/measure-prompts.ts
+```
+
+For every card in `TASKS` the script composes the real instruction (one
+placeholder file, one fixed sentence) and prints characters plus an estimated
+token count, split by segment: the card's own text (要做的事 / 怎么做 /
+做完告诉我 / 补充规矩), the file list, the seven shared safety rules, her
+sentence, the capability sections (cante-sheets / cante-pdf / 看图) and the
+需要你核对 block. Then the totals, the smallest / median / largest card, the
+round-trip arithmetic, what selecting more files costs, and two duplication scans
+(whole lines, and ≥16-character sentences shared between two blocks). It exits 0,
+and it warns — without failing — if a card grows a block heading that is not
+registered in `SEGMENT_BY_HEADER`, so a silent change to the envelope shape is
+visible to the next person.
+
+**The token count is a heuristic, not a billing figure.** CJK characters count as
+one token each, every other non-space character as a quarter token. Tokenisers
+disagree on Chinese by roughly ±20%, whitespace is counted as free (optimistic),
+and the part that matters most: the host's own system prompt, tool schemas and
+prior rounds are *not* in these numbers — they live outside this repository, so
+the real input is always larger than what the script reports. Use it to compare
+before/after, not to predict an invoice.
+
+Run it before and after a prompt change and put both numbers in the pull request.
+The numbers as of 2026-09, for 32 cards with one selected file: **1,288 characters
+/ ~1,179 tokens** per card with no capability sections, **2,616 / ~2,101** with
+them. The capability sections alone are 1,328 characters (≈51% of the
+instruction) and the cante-sheets manual (753) is the single largest block —
+larger than the card's own instructions (569). Both duplication scans come back
+empty: nothing is written twice inside an instruction.
