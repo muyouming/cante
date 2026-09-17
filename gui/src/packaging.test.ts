@@ -52,10 +52,17 @@ function packageField(cargo: string, key: string): string | null {
 }
 
 /** tauri.conf.json 的 `bundle` 段。 */
-function bundleConfig(): Record<string, unknown> {
-  const config = JSON.parse(readFileSync(path.join(SRC_TAURI, "tauri.conf.json"), "utf8"));
-  return (config?.bundle ?? {}) as Record<string, unknown>;
+function tauriConfig(): Record<string, unknown> {
+  return JSON.parse(readFileSync(path.join(SRC_TAURI, "tauri.conf.json"), "utf8")) as Record<
+    string,
+    unknown
+  >;
 }
+
+function bundleConfig(): Record<string, unknown> {
+  return (tauriConfig().bundle ?? {}) as Record<string, unknown>;
+}
+
 
 /** `bundle.resources` 的条目（对象写法与数组写法都算）。 */
 function resourceEntries(bundle: Record<string, unknown>): string[] {
@@ -113,16 +120,24 @@ test("多个 binary 时必须声明 default-run，否则打安装包会失败", 
 // 装完只有 5 个文件 —— cante-gui/cante-bridge/cante-pdf/cante-sheets/uninstall，
 // 没有 `.d`、没有 0 字节文件。而"主程序旁边"正好是解析器的第一条候选。
 //
-// 为什么不用 `bundle.externalBin`（那才是"官方"的辅助程序写法）：它要求文件叫
-// `<名字>-<target-triple>[.exe]`，校验发生在 **build script** 里，而 crate 自己的
-// bin 是在那次 cargo 调用里**稍后**才编译出来的 —— 真机上直接报
-// `resource path target\release\cante-sheets-x86_64-pc-windows-msvc.exe doesn't exist`，
-// 包都出不来。要让它成立得额外加一步"先编译再改名"的打包前脚本，代价大于收益。
+// 第四次（#141）：**前三次的结论都成立**，但"我们怎么知道它是真的"这件事被补上了一层。
+//
+// #141 一开始是个**误报**：有人（我）打开 v0.2.1 的 dmg 只看到 `cante-gui`，
+// 就以为两个自带工具没进包 —— 实际上那是**对一个已强制卸载的挂载**读出来的残缺内容 ✗。
+// 重新挂载后：四个可执行文件都在、都能跑、版本一致、没有垃圾 ✓。
+//
+// 教训不是"配置不对"，而是**"打开产物看"这件事本身也要做可靠**：挂载要确定、要重挂一次复核 ✗。
+// 所以这一轮的产出不是改配置，而是把那次检查**变成脚本**：`gui/scripts/verify-bundle.sh`
+// 打开 dmg / .app / 安装目录，逐条检查四个可执行文件在不在、能不能跑、版本一不一致、有没有垃圾 ✓。
+//
+// 静态断言到此为止：**"真的进包了"由那个脚本回答**（配置对不对不能代替产物）。
 test("三个自带程序必须在 Cargo.toml 里是 [[bin]]，且不许再写进 bundle.resources", () => {
   const cargo = readFileSync(path.join(SRC_TAURI, "Cargo.toml"), "utf8");
   const bins = binaryNames(cargo);
 
   // 1) 它们是 crate 的额外 bin —— 这正是 tauri 把"辅助程序装到主程序旁边"的依据。
+  //    真机验过（#112/#115/#117）与发布产物验过（#141 复核）：装完只有 5 个文件，
+  //    四个可执行文件都在，没有 `.d`、没有 0 字节文件。
   for (const tool of BUNDLED_BINARIES) {
     expect(
       bins,
@@ -160,6 +175,20 @@ test("三个自带程序必须在 Cargo.toml 里是 [[bin]]，且不许再写进
           `真机上直接打包失败。`,
       ).toBe(false);
     }
+  }
+
+  // 4) 但"配置层"到这里就结束了 —— **产物**由 `gui/scripts/verify-bundle.sh` 验 ✓。
+  //
+  //    这条断言的存在本身就是提醒：配置对不上"真的进包了"（v0.2.1 那次误报就是反面教材 ✗），
+  //    而#141 真正留下的东西就是这道产物闸门。少查一个文件名，它就挡不住下一轮的漏包。
+  const verify = path.resolve(import.meta.dir, "..", "scripts", "verify-bundle.sh");
+  const verifySrc = readFileSync(verify, "utf8");
+  for (const name of ["cante-gui", ...BUNDLED_BINARIES]) {
+    expect(
+      verifySrc.includes(name),
+      `verify-bundle.sh 里没检查 ${name}：这道闸门的价值就在于"打开产物看"，` +
+        `少查一个文件它就挡不住下一轮的漏包。`,
+    ).toBe(true);
   }
 });
 

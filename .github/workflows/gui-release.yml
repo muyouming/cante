@@ -61,6 +61,23 @@ jobs:
           bun install --frozen-lockfile
           bun run build
 
+      # 「打开产物看」这一步以前只在真机上人工做过，于是出现过两种错：配置对了但产物没进
+      # （误报，v0.2.1 复核后排除），以及**没人打开过 macOS 的 dmg**。这条把它变成每次发布
+      # 都跑的闸门：四个可执行文件在不在、能不能跑、版本一不一致、有没有垃圾（AGENTS.md §3.6）。
+      - name: 检查产物里真的有那四个可执行文件
+        shell: bash
+        working-directory: gui
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            DMG=$(ls src-tauri/target/release/bundle/dmg/*.dmg | head -1)
+            echo "检查 $DMG"
+            bash scripts/verify-bundle.sh --dmg "$DMG"
+          else
+            # Windows：这里查的是构建输出（安装包里的落点由真机验收负责，见
+            # gui/WINDOWS-ACCEPTANCE-*.md）——构建目录本来就躺着 .d，用 --build-dir 跳过垃圾那条。
+            bash scripts/verify-bundle.sh --build-dir src-tauri/target/release
+          fi
+
       - name: Upload the bundles
         uses: actions/upload-artifact@v7
         with:
