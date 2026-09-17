@@ -6,9 +6,9 @@
 // signals below by one reducer — the same shape the reverted bridge used.
 //
 // This store is the simple surface's only state. The pro shell (palette, model
-// picker, density, capability panel, goal bar, terminal, catalogs) is gone; the
-// remaining members are the task/run flow, the safety record and the daemon
-// mirror that reducer keeps.
+// picker, density, capability panel, goal bar, terminal, catalogs) is gone; what
+// stays is the task/run flow, the safety record, and the few members the simple
+// surface actually reads. Nothing here is kept "just in case".
 import { batch, createSignal, onCleanup, type Accessor } from "solid-js";
 
 import type { Row, RowTone } from "./rows.ts";
@@ -89,7 +89,6 @@ import {
   onCanteExit,
   onCanteState,
   type BridgeState,
-  type DaemonStatus,
   type ToolDecision,
   type UnlistenFn,
 } from "./tauri.ts";
@@ -100,19 +99,17 @@ import {
  */
 export type Connection = "connecting" | "online" | "offline";
 
-export type { PrivacyState } from "./simple/privacy.ts";
 // ---------------------------------------------------------------------------
 // #41–#43 — one job a simple-mode user handed over, and how to undo it.
 // The shape is frozen; `gui/src/simple/tasks/index.ts` mirrors it.
 // ---------------------------------------------------------------------------
 
 /** The only session override the simple flow uses: open cante in `Auto`. */
-export interface SessionOverrides {
+interface SessionOverrides {
   permission_mode?: PermissionMode;
 }
 
 export interface Store {
-  daemonStatus: Accessor<DaemonStatus>;
   session: Accessor<SessionInfo | null>;
   approval: Accessor<PendingApproval | null>;
   /**
@@ -128,13 +125,10 @@ export interface Store {
    * reads rows, so the reducer stays only because those two promises do.
    */
   rows: Accessor<Row[]>;
-  steps: Accessor<number>;
   /** #62 — the plan as a live checklist while a job runs, plus its clock. */
   progress: Accessor<RunProgressView>;
   notice: Accessor<string | null>;
   connect(): void;
-  startSession(overrides?: SessionOverrides): Promise<void>;
-  interrupt(): Promise<void>;
   respond(decisions: ReviewDecision[], message?: string): Promise<void>;
   /**
    * r25 — 把界面上的回答翻成 `Op::QuestionResponse` 发出去。
@@ -391,7 +385,7 @@ function toneForStatus(status: string): RowTone {
   }
 }
 
-export function providerLabel(session: SessionInfo | null): string {
+function providerLabel(session: SessionInfo | null): string {
   if (!session) return "—";
   return session.provider?.display_name || session.provider?.id || "—";
 }
@@ -404,11 +398,13 @@ function describe(error: unknown): string {
 }
 
 export function createStore(): Store {
-  const [daemonStatus, setDaemonStatus] = createSignal<DaemonStatus>("offline");
   const [session, setSession] = createSignal<SessionInfo | null>(null);
   const [approval, setApproval] = createSignal<PendingApproval | null>(null);
   const [question, setQuestion] = createSignal<PendingQuestion | null>(null);
   const [rows, setRows] = createSignal<Row[]>([]);
+  // `TurnEnd` 带来的步数：只用于把“这一回合走了几步”写进那一行记录。它不是给
+  // 界面读的（界面读 `progress()` 那份清单），所以没有对外读数——专业模式的
+  // 步数计数器已随界面删除。
   const [steps, setSteps] = createSignal(0);
   const [notice, setNotice] = createSignal<string | null>(null);
   const [localOnly, setLocalOnlySignal] = createSignal<boolean>(readLocalOnly());
@@ -547,11 +543,9 @@ export function createStore(): Store {
   async function ping(): Promise<void> {
     if (disposed) return;
     try {
-      const health = await invoke("health");
+      // `health` 只是探活：桥不可达时下面的 catch 会把话说清楚。
+      await invoke("health");
       if (disposed) return;
-      batch(() => {
-        if (health.status) setDaemonStatus(health.status);
-      });
       // A reachable host with no session yet: open one.
       //
       // `Auto` on purpose (#60): cante then runs everything except what it can
@@ -590,7 +584,6 @@ export function createStore(): Store {
   function handleExit(payload: { code: number | null }): void {
     if (disposed) return;
     batch(() => {
-      setDaemonStatus("offline");
       setApproval(null);
       setQuestion(null);
       setNotice(`cante daemon exited (${payload?.code ?? "signal"})`);
@@ -623,7 +616,6 @@ export function createStore(): Store {
 
   function applyState(state: Partial<BridgeState> | null | undefined): void {
     if (!state) return;
-    if (state.status) setDaemonStatus(state.status);
     if (state.session !== undefined) setSession(state.session ?? null);
     if (state.pending_approval !== undefined) setApproval(normalizeApproval(state.pending_approval));
     // `pending_question` 是 r25 新增的字段，`tauri.ts` 的 `BridgeState` 还没带上它
@@ -634,48 +626,32 @@ export function createStore(): Store {
     }
   }
 
+  /**
+   * 事件对**待办状态**的转换：什么事件把审批卡 / 提问卡收起或换掉。
+   * 专业模式那个状态胶囊（thinking / streaming / awaiting…）删除后，这里不再
+   * 维护任何状态读数——每个分支都必须真的动到界面读得到的东西。
+   */
   function transition(name: string, event: unknown): void {
     switch (name) {
       case "SessionStart":
       case "SessionUpdated": {
-        setDaemonStatus("idle");
         setApproval(null);
         setQuestion(null);
         const info = eventPayload<SessionInfo>(event, name);
         if (info) setSession(info);
         return;
       }
-      case "TurnStart":
-        setDaemonStatus("thinking");
-        return;
-      case "Thinking":
-      case "ThinkingDelta":
-        if (daemonStatus() !== "awaiting") setDaemonStatus("thinking");
-        return;
-      case "AgentMessage":
-      case "MessageDelta":
-      case "ToolStart":
-      case "ToolUpdate":
-      case "ToolEnd":
-        if (daemonStatus() !== "awaiting") setDaemonStatus("streaming");
-        return;
       case "TurnResume":
-        setDaemonStatus("streaming");
         setApproval(null);
         // 协议：提问 UI 必须在 resume 上清掉。
         setQuestion(null);
         return;
       case "TurnEnd":
-        if (daemonStatus() !== "error") setDaemonStatus("idle");
         // 协议：也要在 end 上清掉——被取消的回合可能**不发** resume。
         setQuestion(null);
         return;
-      case "Error":
-        setDaemonStatus("error");
-        return;
       case "SessionEnd":
       case "Goodbye":
-        setDaemonStatus("offline");
         setSession(null);
         setApproval(null);
         setQuestion(null);
@@ -830,7 +806,6 @@ export function createStore(): Store {
         // 有题目就摆按钮，没题目才回到审批。两者不会同时挂在一个 reason 上。
         const asked = readPendingQuestion(payload);
         if (asked) {
-          setDaemonStatus("awaiting");
           setQuestion(asked);
           return;
         }
@@ -843,7 +818,6 @@ export function createStore(): Store {
           tools: gateRecord.tools,
         });
         if (!pending) return;
-        setDaemonStatus("awaiting");
         setApproval(pending);
         return;
       }
@@ -881,7 +855,6 @@ export function createStore(): Store {
         setNotice("session ended");
         return;
       case "Goodbye":
-        setDaemonStatus("offline");
         setSession(null);
         return;
       default:
@@ -906,10 +879,6 @@ export function createStore(): Store {
     lastUserText = "";
     const ok = await attempt(() => invoke("start_session", { ...overrides }));
     if (ok) setNotice("starting session…");
-  }
-
-  async function interrupt(): Promise<void> {
-    await attempt(() => invoke("interrupt"));
   }
 
   async function respond(decisions: ReviewDecision[], message?: string): Promise<void> {
@@ -1633,17 +1602,13 @@ export function createStore(): Store {
   }
 
   return {
-    daemonStatus,
     session,
     approval,
     question,
     rows,
-    steps,
     progress,
     notice,
     connect,
-    startSession,
-    interrupt,
     respond,
     answerQuestion,
     privacy,
@@ -1679,4 +1644,3 @@ export function createStore(): Store {
 }
 
 export type { TaskRun } from "./simple/run.ts";
-export type { QueuedJob, QueueInput } from "./simple/queue.ts";

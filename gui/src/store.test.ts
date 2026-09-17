@@ -259,13 +259,15 @@ describe("the reducer", () => {
     dispose();
   });
 
-  test("tracks failures and marks the daemon offline on exit", async () => {
+  test("tracks failures and drops what was waiting when the daemon exits", async () => {
     const { store, dispose } = await setup();
     emit("event", event("Error", "rate limited"));
-    expect(store.daemonStatus()).toBe("error");
     expect(store.rows().some((row) => row.kind === "error" && row.text === "rate limited")).toBe(true);
+    // 退出时真正做的是把等着她的两张卡收起来（状态胶囊已随专业模式删除）。
+    emit("event", event("TurnPause", { turn_id: "t1", reason: { Approval: { tools: [{ id: "tool_1", name: "Bash", args: { command: "ls" } }], message: "Allow?" } } }));
+    expect(store.approval()).not.toBeNull();
     emit("exit", { code: 1 });
-    expect(store.daemonStatus()).toBe("offline");
+    expect(store.approval()).toBeNull();
     dispose();
   });
 });
@@ -365,8 +367,6 @@ describe("structured questions", () => {
     expect(store.question()?.turn_id).toBe("t1");
     expect(store.question()?.tool_use_id).toBe("toolu_1");
     expect(store.question()?.questions[0]!.options[0]!.label).toBe("就是它");
-    // 和审批暂停一样：窗口停下来等她了，不能看起来像卡死。
-    expect(store.daemonStatus()).toBe("awaiting");
     dispose();
   });
 
@@ -526,8 +526,6 @@ describe("adversarial: wire shapes", () => {
     ];
     for (const message of hostile) emit("event", message);
     assertInvariants(store);
-    // The bare unit variant still drives the status machine.
-    expect(store.daemonStatus()).toBe("offline");
     expect(store.rows().some((row) => row.label === "compact")).toBe(true);
     dispose();
   });
@@ -1387,13 +1385,11 @@ describe("有意忽略的事件（#107 的定论）", () => {
     const { store, dispose } = await setup();
     emit("event", event("TurnStart", { turn_id: "t1" }));
     const rowsBefore = store.rows().length;
-    const statusBefore = store.daemonStatus();
     const sessionBefore = store.session();
 
     emit("event", event(name, payload));
 
     expect(store.rows().length, `${name} 不该出行`).toBe(rowsBefore);
-    expect(store.daemonStatus(), `${name} 不该改状态`).toBe(statusBefore);
     expect(store.session(), `${name} 不该换会话`).toBe(sessionBefore);
     assertInvariants(store);
     dispose();
@@ -1551,7 +1547,6 @@ describe("夹具驱动的关键界面状态（没有守护进程也能跑）", (
 
       const approval = store.approval();
       expect(approval?.tools.map((tool) => tool.id)).toEqual(["tool_1", "tool_2"]);
-      expect(store.daemonStatus()).toBe("awaiting");
       // 审批卡渲染的就是 describeApproval：两条都在，且都不是原始工具名。
       const described = describeApproval(approval!.tools);
       expect(described.map((tool) => tool.action)).toEqual(["运行一条命令", "写一个新文件"]);
@@ -1587,7 +1582,6 @@ describe("夹具驱动的关键界面状态（没有守护进程也能跑）", (
       replay(store, after);
 
       expect(store.approval()).toBeNull();
-      expect(store.daemonStatus()).toBe("idle");
       const toolRows = store.rows().filter((row) => row.kind === "tool");
       expect(toolRows.map((row) => [row.label, row.tone, row.streaming])).toEqual([
         ["Bash", "warn", false],
@@ -1617,7 +1611,6 @@ describe("夹具驱动的关键界面状态（没有守护进程也能跑）", (
       replay(store, await fake.until("TurnEnd"));
       await Bun.sleep(30);
 
-      expect(store.daemonStatus()).toBe("error");
       expect(store.rows().some((row) => row.kind === "error" && row.text.includes("429"))).toBe(true);
       expect(store.rows().some((row) => row.kind === "turn" && row.label === "failed")).toBe(true);
       // TurnEnd 的结构化说明（headline）走到提示里，不是被吞掉。
