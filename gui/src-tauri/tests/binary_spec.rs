@@ -139,6 +139,63 @@ fn a_quoted_windows_program_can_be_probed() {
 }
 
 // ---------------------------------------------------------------------------
+// The Windows bridge: `cante-bridge.exe` in front of `pi`
+// ---------------------------------------------------------------------------
+//
+// On a Windows machine without the upstream daemon, the value we hand people is
+// the path of this crate's own bridge binary — `C:\path\cante-bridge.exe` — and
+// nothing else. The daemon still appends its own `serve` and still probes
+// `--version` / `catalog` in front of the subcommand, so all three shapes are
+// spelled out here on the exact string a Windows user will set. Pure parsing,
+// so these run on any host (the executable itself cannot be spawned here).
+
+/// The bare spec: a Windows path with no arguments. The daemon's one `serve`
+/// must be the only argument — a doubled `serve` is what a parser that treats
+/// `.exe` specially would produce.
+#[test]
+fn a_windows_bridge_exe_gets_exactly_one_serve() {
+    let (program, args) = serve_argv(r"C:\tools\cante\cante-bridge.exe");
+    assert_eq!(program, r"C:\tools\cante\cante-bridge.exe");
+    assert_eq!(args, ["serve"]);
+}
+
+/// The same spec has to answer the two helper subcommands: `health` needs a
+/// version the moment the app starts, and `catalog` is the provider list.
+#[test]
+fn a_windows_bridge_exe_can_be_probed() {
+    let (program, args) = helper_argv(r"C:\tools\cante\cante-bridge.exe", &["--version"]);
+    assert_eq!(program, r"C:\tools\cante\cante-bridge.exe");
+    assert_eq!(args, ["--version"]);
+    let (program, args) = helper_argv(r"C:\tools\cante\cante-bridge.exe", &["catalog"]);
+    assert_eq!(program, r"C:\tools\cante\cante-bridge.exe");
+    assert_eq!(args, ["catalog"]);
+}
+
+/// Windows paths may contain spaces, so the spec will often be quoted. The
+/// token must survive as one argument and still gain exactly one `serve`.
+#[test]
+fn a_quoted_windows_bridge_path_with_spaces_stays_one_token() {
+    let spec = r#""C:\Program Files\Cante\cante-bridge.exe""#;
+    let (program, args) = serve_argv(spec);
+    assert_eq!(program, r"C:\Program Files\Cante\cante-bridge.exe");
+    assert_eq!(args, ["serve"]);
+    let (program, args) = helper_argv(spec, &["--version"]);
+    assert_eq!(program, r"C:\Program Files\Cante\cante-bridge.exe");
+    assert_eq!(args, ["--version"]);
+}
+
+/// Someone who copies the `serve` from the WSL example onto the Windows spec
+/// must not end up with `cante-bridge.exe serve serve`.
+#[test]
+fn a_windows_bridge_spec_that_names_serve_is_not_doubled() {
+    let (program, args) = serve_argv(r"C:\tools\cante\cante-bridge.exe serve");
+    assert_eq!(program, r"C:\tools\cante\cante-bridge.exe");
+    assert_eq!(args, ["serve"]);
+    let (_, args) = helper_argv(r"C:\tools\cante\cante-bridge.exe serve", &["--version"]);
+    assert_eq!(args, ["--version"]);
+}
+
+// ---------------------------------------------------------------------------
 // The spawned child, for real
 // ---------------------------------------------------------------------------
 
