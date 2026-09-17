@@ -218,3 +218,102 @@ bash probes/rpc/with-timeout.sh 1200 cargo test \
   不是漏做）。
 - 没有改 `daemon.rs`/`commands.rs`/前端/`tasks/**`/`gui/probes/**`/
   `DECISION-windows-runtime.md`/`BRIDGE-spike.md`（任务只许改列出的文件）。
+
+---
+
+## 8. 用量（`UsageUpdate`）：这一段补上了（追加一节，§1–§7 的结论不改）
+
+`DECISION-windows-runtime.md` §3 的适配清单里，「用量」是最后一项没做的。本节表 C 行
+那份「仍然缺」说的是**闸门那一段**的状态；本节把这一项补上，改动落在下面这些文件
+（本文档除外）：
+
+| 文件 | 改动 |
+| --- | --- |
+| `gui/src-tauri/src/bridge.rs` | `message_end.message.usage` / `compaction_end.result.usage` → `UsageUpdate`；`get_state` 的 `model.contextWindow` 存进翻译器，供 `context` 除用 |
+| `gui/src-tauri/tests/bridge.rs` | `bridge_streams_a_turn_from_pi` 加用量断言；Windows 上 `canonicalize` 的 `\\?\` 前缀在比对前剥掉 |
+
+### 8.1 `pi` 到底给不给（实测，`pi 0.85.1`）
+
+**给，而且不止一处。** 起真 `pi --mode rpc`、端点用 localhost 假服务，把原始 JSONL 逐行打出来看：
+
+| 来源 | 带什么 | 用了没有 |
+| --- | --- | --- |
+| `message_end.message.usage` | `{input, output, cacheRead, cacheWrite, reasoning, totalTokens, cost:{…}}` | **用了**：这是「一次模型回答」的权威用量，桥从这里取 |
+| `message_update.usage` | 同一形状，但流式期间**恒为 0** | 没用（探针 §3 C 已量过，别信流中的） |
+| `compaction_end.result.usage` | 摘要那一次回答的用量，同形状 | **用了**：摘要也是模型回答，也要计 |
+| `get_session_stats` | 整会话累计 `tokens{}`、`cost`、`contextUsage{tokens,contextWindow,percent}` | 没用：桥只翻事件、不额外发 RPC；`context` 的窗口从 `get_state` 拿 |
+
+`message_end` 原始行（节选）：
+
+```json
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"命令跑完了，事情办好了。"}],
+ "api":"openai-completions","provider":"probe","model":"probe-model",
+ "usage":{"input":100,"output":20,"cacheRead":0,"cacheWrite":0,"reasoning":0,"totalTokens":120,
+          "cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},
+ "stopReason":"stop"}}
+```
+
+桥真正发出去的那一行（同一台机器，`cante-bridge serve` 的 stdout，原样）：
+
+```json
+{"event":{"UsageUpdate":{"context":{"limit_tokens":32000,"used_tokens":120},
+ "usage":{"cache_creation_tokens":0,"cache_read_tokens":0,"input_tokens":100,"output_tokens":20}}},
+ "id":"evt_…","parent":"op_input","timestamp":"…Z"}
+```
+
+### 8.2 翻译里两个必须做对的地方
+
+1. **`pi` 的 `input` 不含缓存，我们的 `input_tokens` 含缓存。** 实测（`pi 0.85.1` 的
+   `openai-completions` 映射）：`input = prompt_tokens − cacheRead − cacheWrite`，且
+   `totalTokens = input + output + cacheRead + cacheWrite`。而 `crates/protocol-shape`
+   写明我们的 `input_tokens` 是**完整、含缓存**的 prompt 大小，`cache_read_tokens` 是它的子集。
+   所以桥把两个缓存桶**加回** `input_tokens`（`input + cacheRead + cacheWrite`），两个桶
+   照原值落在 `cache_read_tokens` / `cache_creation_tokens` 上。照抄 `pi` 的数字会让
+   「缓存命中的 prompt」看起来很小，`context.used_tokens` 跟着小。
+2. **没量到就不发，不是发 0。** `usage` 全 0 是 `pi` 在说「这次 provider 没报用量」
+   （流式期间恒为 0，探针 §3 C）。桥对这种**不发 `UsageUpdate`** —— 没有测量不等于测到 0。
+   `context` 也只在 `get_state` 真给了 `model.contextWindow` 时才带；没给就整段省掉，不编分母。
+   `context.used_tokens` 的算法照 `crates/protocol-shape` 的定义：最近一次回答的
+   含缓存 input + output。
+
+### 8.3 测试
+
+| 测试 | 断言的是哪件事实 |
+| --- | --- |
+| `a_reported_response_becomes_a_cache_inclusive_usage_update`（单测） | 缓存桶加回 `input_tokens`；`context.used_tokens = input_tokens + output_tokens` |
+| `an_unreported_usage_is_never_invented`（单测） | 全 0 / 没有 `usage` 字段 → 只有 `AgentMessage`，没有 `UsageUpdate` |
+| `context_needs_a_limit_and_tool_only_replies_still_report_usage`（单测） | 没有窗口就不带 `context`；只有工具调用、没有文字的回答照样报用量 |
+| `compaction_reports_the_summary_call_it_paid_for`（单测） | `compaction_end.result.usage` 也翻成一条 `UsageUpdate` |
+| `bridge_streams_a_turn_from_pi`（真 pi + 假端点） | 端到端：假端点报 `prompt=100/completion=20`，桥发出 `input_tokens=100, output_tokens=20`、`context={120, 32000}`，位置在收尾 `AgentMessage` 之后、`TurnEnd` 之前；工具调用那条全 0 的回答**不发** |
+
+本机结果（Windows，`pi 0.85.1` 经原生 `pi.exe` 起，原因见 §8.5）：`cargo test --lib`
+桥的单测 **29/29**，`--test bridge`（真 pi + 假端点）**10/10**，其中含上面这条用量断言。
+
+### 8.4 这一项还缺什么（诚实说）
+
+- **钱的数字过不来。** `pi` 的 `usage.cost.total` 有，但我们的 `UsageUpdate` 只有 token 计数 ——
+  `crates/protocol-shape` 的 `Usage` 里没有 cost 字段，`CONTRACT.md` 也没有。所以「这次花了多少」
+  今天只能用 token 回答，要显示钱得先改协议（前后端一起），**没有把 cost 硬塞进别的字段**。
+- **前端还是没读。** `store.ts` 里没有 `case "UsageUpdate"`，落到 `default: return`；只有夹具与
+  随机流测试引用过它。桥发得出来，界面上暂时看不到 —— 接界面是另一段。
+- **没在真模型上量过缓存桶。** 全套用 localhost 假端点，它的 `cacheRead/cacheWrite` 恒为 0；
+  「缓存命中时加回去对不对」是靠读 `pi` 的映射代码 + 单测钉的，**没有真 provider 的缓存命中样本**。
+- **`reasoning` 桶丢掉了。** `pi` 报 `usage.reasoning`，我们的 `Usage` 没有这一格，直接不翻；
+  它是否已被算进 `output`（**没验证**），所以两种口径下都可能少算或多算。
+- **`get_session_stats` 的累计值没用上。** 桥发的是「一次回答」的用量（`UsageUpdate` 的语义），
+  不是会话累计；`SessionEnd.usage` 仍然没人发（会话持久化这一段没做）。
+
+### 8.5 Windows 上的一个实现事实（量到的）
+
+Windows 原生**跑得了真 `pi`**：`where pi` 给的是 npm 的 `pi.cmd`，而 Rust 的
+`Command::new("pi")` 走 `CreateProcess`、只认 `.exe`，所以它看不见那个 shim，
+`binary_answers` 判「没装」→ 需要 `pi` 的测试全 SKIP。同一台机器上 bun 的全局 bin 目录里
+另有一份**原生** `pi.exe`（`~/.bun/bin/pi.exe`，`pi --version` 回 `0.85.1`）；把它指给
+`PI_BIN`，同一套测试就跑起来了 —— 上面那些数字就是这么量的：
+
+```
+PI_BIN=~/.bun/bin/pi.exe cargo test --manifest-path src-tauri/Cargo.toml --test bridge -- --nocapture --test-threads=1
+```
+
+**这不改测试对「没装 `pi` 就 SKIP」的既有口径**，也不是交付物；只是说明那台机器上
+「SKIP」的原因是 shim 形态，不是 `pi` 不在。

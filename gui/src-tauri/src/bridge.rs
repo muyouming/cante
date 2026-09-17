@@ -108,6 +108,11 @@ struct TurnState {
     gate: Option<PendingGate>,
     /// The reason attached to the current denial, echoed to the model.
     deny_reason: String,
+    /// The model's context window (`get_state` → `model.contextWindow`), the
+    /// divisor for `UsageUpdate.context`. Session-scoped, so `begin_turn` must
+    /// not clear it. `None` means pi did not report a limit, and the context
+    /// snapshot is then left out rather than guessed.
+    context_limit: Option<u32>,
 }
 
 /// One `extension_ui_request` from the gate extension, waiting for the
@@ -282,6 +287,62 @@ fn str_field<'a>(value: &'a Value, key: &str) -> &'a str {
     value.get(key).and_then(Value::as_str).unwrap_or("")
 }
 
+/// One token counter out of a `pi` usage report, clamped to the `u32` the wire
+/// shape carries.
+fn token_count(usage: &Value, key: &str) -> u32 {
+    usage
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(|count| u32::try_from(count).ok())
+        .unwrap_or(0)
+}
+
+/// Translate one `pi` usage report into a `UsageUpdate`, or `None` when `pi`
+/// reported nothing.
+///
+/// pi's `input` **excludes** the cache buckets — measured on `pi 0.85.1`: the
+/// `openai-completions` mapping computes `input = prompt_tokens − cacheRead −
+/// cacheWrite`, and `totalTokens = input + output + cacheRead + cacheWrite` —
+/// while Cante's `input_tokens` is the full, cache-inclusive prompt size
+/// (`crates/protocol-shape`). The buckets are added back rather than passed
+/// through, or a mostly-cached prompt would read as a tiny one and the context
+/// snapshot would come out too small.
+///
+/// An all-zero report is pi saying "the provider sent no usage" (it stays zero
+/// during streaming, PROBE §3 C). That must not become a `UsageUpdate` full of
+/// zeros: no measurement is not a measurement of zero.
+fn usage_event(usage: Option<&Value>, context_limit: Option<u32>) -> Option<Value> {
+    let usage = usage.filter(|usage| usage.is_object())?;
+    let cache_read = token_count(usage, "cacheRead");
+    let cache_write = token_count(usage, "cacheWrite");
+    let output = token_count(usage, "output");
+    let input = token_count(usage, "input")
+        .saturating_add(cache_read)
+        .saturating_add(cache_write);
+    if input == 0 && output == 0 {
+        return None;
+    }
+    let mut update = Map::new();
+    update.insert(
+        "usage".to_string(),
+        json!({
+            "input_tokens": input,
+            "output_tokens": output,
+            "cache_read_tokens": cache_read,
+            "cache_creation_tokens": cache_write,
+        }),
+    );
+    // The occupancy snapshot describes the response that just finished, so it
+    // is only meaningful together with a limit pi actually reported.
+    if let Some(limit) = context_limit.filter(|limit| *limit > 0) {
+        update.insert(
+            "context".to_string(),
+            json!({ "used_tokens": input.saturating_add(output), "limit_tokens": limit }),
+        );
+    }
+    Some(json!({ "UsageUpdate": Value::Object(update) }))
+}
+
 /// Translate one `pi` RPC event into Cante `Evt` payloads.
 ///
 /// Events that are part of the RPC sub-protocol (`response`,
@@ -331,11 +392,15 @@ fn translate(event: &Value, state: &mut TurnState) -> Vec<Value> {
                 return Vec::new();
             }
             state.record_stop_reason(message);
+            let mut out = Vec::new();
             let text = text_of_content(message.get("content"));
-            if text.is_empty() {
-                return Vec::new();
+            if !text.is_empty() {
+                out.push(json!({ "AgentMessage": text }));
             }
-            vec![json!({ "AgentMessage": text })]
+            // Usage rides the same authoritative message; a tool-call-only
+            // reply has no text but still accounts for its own tokens.
+            out.extend(usage_event(message.get("usage"), state.context_limit));
+            out
         }
         "tool_execution_start" => {
             let id = str_field(event, "toolCallId").to_string();
@@ -427,12 +492,19 @@ fn translate(event: &Value, state: &mut TurnState) -> Vec<Value> {
         }
         "compaction_start" => vec![json!("CompactStart")],
         "compaction_end" => {
-            let summary = event
-                .get("result")
+            let result = event.get("result");
+            let summary = result
                 .and_then(|result| result.get("summary"))
                 .cloned()
                 .unwrap_or(Value::Null);
-            vec![json!({ "CompactEnd": { "summary": summary } })]
+            let mut out = vec![json!({ "CompactEnd": { "summary": summary } })];
+            // Summarizing is a model response too, so its tokens count; pi
+            // reports them under `result.usage` (`rpc.md` §compaction_end).
+            out.extend(usage_event(
+                result.and_then(|result| result.get("usage")),
+                state.context_limit,
+            ));
+            out
         }
         _ => Vec::new(),
     }
@@ -1047,6 +1119,16 @@ impl Session {
             &cwd.to_string_lossy(),
             self.args.permission_mode.as_deref(),
         );
+        // The context snapshot needs the model's window, and pi reports it in
+        // the same `get_state`. `None` (no model, or no `contextWindow`) keeps
+        // the snapshot out of every `UsageUpdate` instead of inventing one.
+        lock(&self.shared).turn.context_limit = data
+            .as_ref()
+            .and_then(|data| data.get("model"))
+            .and_then(|model| model.get("contextWindow"))
+            .and_then(Value::as_u64)
+            .and_then(|limit| u32::try_from(limit).ok())
+            .filter(|limit| *limit > 0);
         emit(&self.sink, json!({ "SessionStart": info }), Some(op_id));
         self.started.store(true, Ordering::SeqCst);
         if data.is_none() {
@@ -1448,6 +1530,90 @@ mod tests {
             &mut state,
         );
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn a_reported_response_becomes_a_cache_inclusive_usage_update() {
+        let mut state = TurnState { context_limit: Some(200_000), ..TurnState::default() };
+        let out = translate(
+            &json!({ "type": "message_end", "message": {
+                "role": "assistant",
+                "content": [{ "type": "text", "text": "好了" }],
+                "stopReason": "stop",
+                // pi's own counters: `input` is net of the cache buckets, and
+                // totalTokens is their sum (`pi 0.85.1`, measured live).
+                "usage": { "input": 80, "output": 20, "cacheRead": 100, "cacheWrite": 5, "totalTokens": 205 },
+            }}),
+            &mut state,
+        );
+        assert_eq!(out[0], json!({ "AgentMessage": "好了" }));
+        assert_eq!(out[1], json!({ "UsageUpdate": {
+            "usage": {
+                "input_tokens": 185,
+                "output_tokens": 20,
+                "cache_read_tokens": 100,
+                "cache_creation_tokens": 5,
+            },
+            "context": { "used_tokens": 205, "limit_tokens": 200_000 },
+        }}));
+    }
+
+    #[test]
+    fn an_unreported_usage_is_never_invented() {
+        let mut state = TurnState { context_limit: Some(200_000), ..TurnState::default() };
+        // pi leaves `usage` all-zero when the provider sends none (PROBE §3 C):
+        // that is "no measurement", so no `UsageUpdate` may claim zero tokens.
+        let empty = translate(
+            &json!({ "type": "message_end", "message": {
+                "role": "assistant", "content": [{ "type": "text", "text": "这是" }],
+                "usage": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+            }}),
+            &mut state,
+        );
+        assert_eq!(empty, vec![json!({ "AgentMessage": "这是" })]);
+        // No `usage` key at all is the same thing.
+        let missing = translate(
+            &json!({ "type": "message_end", "message": {
+                "role": "assistant", "content": [{ "type": "text", "text": "这是" }],
+            }}),
+            &mut state,
+        );
+        assert_eq!(missing, vec![json!({ "AgentMessage": "这是" })]);
+    }
+
+    #[test]
+    fn context_needs_a_limit_and_tool_only_replies_still_report_usage() {
+        // No `get_state` yet, so no window is known.
+        let mut state = TurnState::default();
+        let out = translate(
+            &json!({ "type": "message_end", "message": {
+                "role": "assistant",
+                "content": [{ "type": "toolCall", "id": "call_1", "name": "bash", "arguments": {} }],
+                "stopReason": "toolUse",
+                "usage": { "input": 30, "output": 4, "cacheRead": 0, "cacheWrite": 0 },
+            }}),
+            &mut state,
+        );
+        assert_eq!(out.len(), 1, "a tool-call-only reply has no text to send");
+        let update = &out[0]["UsageUpdate"];
+        assert_eq!(update["usage"]["input_tokens"], json!(30));
+        assert_eq!(update["usage"]["output_tokens"], json!(4));
+        assert!(update.get("context").is_none(), "an unknown window must not be invented");
+    }
+
+    #[test]
+    fn compaction_reports_the_summary_call_it_paid_for() {
+        let mut state = TurnState { context_limit: Some(32_000), ..TurnState::default() };
+        let out = translate(
+            &json!({ "type": "compaction_end", "result": {
+                "summary": "短一点",
+                "usage": { "input": 3_000, "output": 200, "cacheRead": 0, "cacheWrite": 0 },
+            }}),
+            &mut state,
+        );
+        assert_eq!(out[0], json!({ "CompactEnd": { "summary": "短一点" } }));
+        assert_eq!(out[1]["UsageUpdate"]["usage"]["input_tokens"], json!(3_000));
+        assert_eq!(out[1]["UsageUpdate"]["context"]["used_tokens"], json!(3_200));
     }
 
     #[test]

@@ -313,6 +313,11 @@ impl BridgeRun {
         // On macOS /var is a symlink to /private/var; the child reports the
         // resolved path from `current_dir()`, so compare against that.
         let work = fs::canonicalize(&work).expect("canonicalize work dir");
+        // Windows `canonicalize` hands back a verbatim (`\\?\`) path while the
+        // child's `current_dir()` reports the plain one, so the two would never
+        // match. Strip it: both describe the same directory.
+        #[cfg(windows)]
+        let work = PathBuf::from(work.to_string_lossy().trim_start_matches(r"\\?\"));
 
         let mut child = Command::new(env!("CARGO_BIN_EXE_cante-bridge"))
             .arg("serve")
@@ -789,6 +794,23 @@ fn bridge_streams_a_turn_from_pi() {
     assert_eq!(run.deltas(), "我先看一下，然后用工具。完成了。");
     assert!(run.received.iter().any(is("UserInput")), "the prompt must be echoed as UserInput");
     assert_eq!(run.turn_ends().len(), 1, "exactly one TurnEnd per user turn");
+
+    // Usage: the fake endpoint only reports tokens on the closing chunk, so the
+    // tool-call reply's all-zero report must produce nothing while the final
+    // response produces exactly one update that matches what was sent.
+    let updates = run.events_named("UsageUpdate");
+    assert_eq!(updates.len(), 1, "only the accounted response may report usage: {:?}", run.names());
+    let usage = &updates[0]["event"]["UsageUpdate"];
+    assert_eq!(usage["usage"]["input_tokens"], json!(100), "the endpoint reported 100 prompt tokens");
+    assert_eq!(usage["usage"]["output_tokens"], json!(20));
+    assert_eq!(usage["usage"]["cache_read_tokens"], json!(0));
+    assert_eq!(usage["usage"]["cache_creation_tokens"], json!(0));
+    assert_eq!(usage["context"]["used_tokens"], json!(120));
+    assert_eq!(usage["context"]["limit_tokens"], json!(32000), "the window comes from get_state");
+    assert!(
+        run.index_of("UsageUpdate").unwrap() < run.index_of("TurnEnd").unwrap(),
+        "usage belongs to the response, so it lands before the turn closes"
+    );
 }
 
 #[test]
