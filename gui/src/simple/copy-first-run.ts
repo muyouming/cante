@@ -69,6 +69,31 @@ export function exampleForSentence(sentence: string): SayExample | null {
   return SAY_EXAMPLES.find((item) => item.sentence === value) ?? null;
 }
 
+/**
+ * 点一条例子时，框里已经有的字怎么办（F4）。
+ *
+ * 框是空的、或者正好就是这一句：**直接填进去**。那是她把例子当起点、接着改几个
+ * 字用的路，也是「点一下顺手」的那条路。
+ *
+ * 框里已经有她打的别的字：**一个字都不动**，只把这一句挂成「等她点头」。她很可能
+ * 先打了半句「帮我把上个月的表格」，再想参考一下例子怎么写；静默清掉她那半句是
+ * 数据丢失（没有撤销、没有确认），所以这里只回答「要不要换」，换不换由她说。
+ *
+ * 纯函数：界面照这个结果做（fill 就直接 setText，confirm 就先问一句），测试直接
+ * 断言这里返回的具体内容。
+ */
+export type ExampleClick =
+  | { kind: "fill"; text: string }
+  | { kind: "confirm"; text: string };
+
+export function exampleClick(current: string, sentence: string): ExampleClick {
+  const value = sentence.trim();
+  const existing = current.trim();
+  // 空的、或者和这一句一模一样：没什么可丢的，直接填。
+  if (!existing || existing === value) return { kind: "fill", text: value };
+  return { kind: "confirm", text: value };
+}
+
 /** 首页输入框旁、向导最后一步用的那些话。 */
 export const FIRST_RUN = {
   /** 首页：摆在三句例子上面。要说清「点一下会怎样」。 */
@@ -97,6 +122,12 @@ export const FIRST_RUN = {
   wizardExamplesTitle: "第一句话可以这么说：",
   /** 点了会发生什么——这句话就是「例子可以点」的全部说明。 */
   wizardExamplesHint: "点一句，进去它就填在框里了，你改几个字就能开始。",
+  /** F4 — 框里已经有她自己打的字时，点例子先问这一句，不静默清掉。 */
+  exampleAsk: "框里已经有你打的字了。要把它换成这句例子吗？",
+  /** 她说「换」：这时才动她原来那句话（是她点的，不是我们替她清的）。 */
+  exampleUse: "换成这句例子",
+  /** 她说「不换」：她打的字留着，我们一个字都不动。 */
+  exampleKeep: "保留我打的字",
   /** 第一次做成之后，首页上那句话的开头。 */
   firstWinTitle: "这件事做成了。下一次，话可以说得更细：",
   /**
@@ -118,6 +149,14 @@ export const FIRST_RUN = {
 // 向导和首页都由外壳直接挂载，中间没有可以传参数的地方；而「点一句，进去就填好
 // 了」是向导那边说的话，不能只是说说。所以中间放一处很小的暂存：向导点了就写下
 // 来，首页一打开就取走并清掉（只填一次，不会第二次打开又冒出来）。
+//
+// F5（#139）：暂存必须只属于「这一趟打开」。上一次打开时她在向导最后一步点了
+// 例子、却没点「开始使用」就退出了 —— 那句话她并没有要，下一次打开绝不能冒到
+// 首页的框里。所以存进去的东西带上「哪一趟写的」这个趟号；换一趟打开（模块重新
+// 加载就换一个）就不认它，取的时候顺带把它清掉。
+//
+// 为什么不是「只在向导开始时清一次」：向导不一定还会出现 —— 检查通过那一刻
+// 就会记下「向导做完了」，下一次打开直接进首页。只靠向导清，这一条路就漏了。
 // ---------------------------------------------------------------------------
 
 /** 暂存用的键；取走即删。 */
@@ -125,6 +164,15 @@ export const FIRST_RUN_SENTENCE_KEY = "cante:first-run:sentence";
 
 /** 只用到这三件事，测试里可以塞一个假的进来。 */
 export type SentenceStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+/** 这一趟打开的身份：模块加载时取一个，重开应用就换一个。 */
+const RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+/** 存进去的东西：哪一趟写的 + 那句话。 */
+interface StagedSentence {
+  run: string;
+  sentence: string;
+}
 
 function browserStore(): SentenceStore | null {
   try {
@@ -135,29 +183,70 @@ function browserStore(): SentenceStore | null {
   }
 }
 
-/** 记下她在向导里点的那一句。存不下就算了：不是出错，只是没这句话。 */
+/** 旧版本（或别的东西）可能往这里塞过裸字符串；没有趟号的一律不认。 */
+function parseStaged(raw: string): StagedSentence | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<StagedSentence> | null;
+    if (!parsed || typeof parsed.run !== "string" || typeof parsed.sentence !== "string") {
+      return null;
+    }
+    return { run: parsed.run, sentence: parsed.sentence };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 记下她在向导里点的那一句。存不下就算了：不是出错，只是没这句话。
+ *
+ * `run` 默认就是这一趟；测试里塞一个别的趟号来模拟「上一次打开时写的」。
+ */
 export function rememberSentence(
   sentence: string,
   target: SentenceStore | null = browserStore(),
+  run: string = RUN_ID,
 ): void {
   if (!target) return;
   const value = sentence.trim();
   if (!value) return;
   try {
-    target.setItem(FIRST_RUN_SENTENCE_KEY, value);
+    const staged: StagedSentence = { run, sentence: value };
+    target.setItem(FIRST_RUN_SENTENCE_KEY, JSON.stringify(staged));
   } catch {
     /* 存储满了或被禁止写入：当作没记下 */
   }
 }
 
-/** 取走向导里点的那一句；没有（或取过了）返回 null，那不是错误。 */
+/**
+ * 向导一开始清一次暂存：上一次打开可能留下了一句她没要的话，这一趟不能再用。
+ * 这是兜底的一条（首页取的时候也会按趟号不认它），不是唯一的一条。
+ */
+export function beginFirstRun(target: SentenceStore | null = browserStore()): void {
+  if (!target) return;
+  try {
+    target.removeItem(FIRST_RUN_SENTENCE_KEY);
+  } catch {
+    /* 存储不可用：当作没有暂存 */
+  }
+}
+
+/**
+ * 取走向导里点的那一句；没有（或取过了）返回 null，那不是错误。
+ *
+ * 上一次打开写下的那一句（趟号不是这一趟）也不认：取的时候顺手清掉，返回 null，
+ * 首页的框就空着。旧版本留下的裸字符串同样不认。
+ */
 export function takeSentence(source: SentenceStore | null = browserStore()): string | null {
   if (!source) return null;
   try {
-    const value = source.getItem(FIRST_RUN_SENTENCE_KEY);
-    if (value === null) return null;
+    const raw = source.getItem(FIRST_RUN_SENTENCE_KEY);
+    if (raw === null) return null;
+    // 取走即清：不管后面认不认它，都不该继续躺在这里。
     source.removeItem(FIRST_RUN_SENTENCE_KEY);
-    return value.trim() ? value : null;
+    const staged = parseStaged(raw);
+    if (!staged || staged.run !== RUN_ID) return null;
+    const value = staged.sentence.trim();
+    return value ? value : null;
   } catch {
     return null;
   }

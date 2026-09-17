@@ -16,6 +16,7 @@ import { COMMON, WIZARD, WIZARD_HEALTH } from "./copy.ts";
 import {
   FIRST_RUN,
   SAY_EXAMPLES,
+  beginFirstRun,
   rememberSentence,
   type SayExample,
 } from "./copy-first-run.ts";
@@ -170,6 +171,9 @@ export default function Wizard(props: WizardProps): JSX.Element {
   }
 
   onMount(() => {
+    // F5（#139）— 向导一开始就清一次暂存：上一次打开时她可能在此点了例子、却
+    // 没点「开始使用」就退出了，那句话她并没有要，不能留到这一趟。
+    beginFirstRun();
     // A provisioned machine should never see the wizard; App already checks,
     // but a late marker (config written between render and mount) is honoured.
     if (isProvisioned()) props.onDone();
