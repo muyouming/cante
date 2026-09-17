@@ -1,6 +1,10 @@
 // First-run wizard (#39): at most three steps, all Chinese, big buttons, and
 // nothing to type — no paths, no keys.
 //
+// r24 — 最后一步不只是「开始使用」：她第一次用这类工具，最该知道的三件事（两条
+// 路都行 / 动手前先问你 / 原来的东西不乱动）和第一句话可以怎么说的三句例子都在
+// 那里；点中哪一句，进去首页的框里就已经填好了（见 copy-first-run.ts）。
+//
 // Readiness comes from `invoke("health")`. “管理员配置存在时直接跳过” is a
 // browser-side check (`shouldShowWizard`): a machine an administrator has
 // already provisioned carries a marker, and the wizard never appears. See the
@@ -9,6 +13,12 @@ import { For, Show, createSignal, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { COMMON, WIZARD, WIZARD_HEALTH } from "./copy.ts";
+import {
+  FIRST_RUN,
+  SAY_EXAMPLES,
+  rememberSentence,
+  type SayExample,
+} from "./copy-first-run.ts";
 import { adminConfigured, initAdminConfig } from "./admin-config.ts";
 import { copyDaemonDetails, daemonNotice, probeDaemon } from "./daemon.ts";
 import type { DaemonCapability } from "./daemon.ts";
@@ -88,6 +98,8 @@ export default function Wizard(props: WizardProps): JSX.Element {
   const [daemon, setDaemon] = createSignal<DaemonCapability | null>(null);
   const [daemonCopied, setDaemonCopied] = createSignal(false);
   const [daemonCopyFailed, setDaemonCopyFailed] = createSignal(false);
+  // r24 — 她在最后一步点的那句例子（点了就暂存给首页的输入框）。
+  const [picked, setPicked] = createSignal<string | null>(null);
 
   const stepIndex = (): number => STEPS.indexOf(step());
   const ready = (): boolean =>
@@ -139,6 +151,17 @@ export default function Wizard(props: WizardProps): JSX.Element {
   function goCheck(): void {
     setStep("check");
     void runCheck();
+  }
+
+  /**
+   * r24 — 最后一步点一条例子：记下这一句，并暂存起来给首页的输入框。
+   *
+   * 这一步不结束向导（她还要点「开始使用」），所以点一下必须看得见地选中；
+   * 首页那边一打开就把它取走填进框里——「点一句，进去就填好了」不是空话。
+   */
+  function pickExample(example: SayExample): void {
+    setPicked(example.sentence);
+    rememberSentence(example.sentence);
   }
 
   function finish(): void {
@@ -272,8 +295,53 @@ export default function Wizard(props: WizardProps): JSX.Element {
           </Show>
 
           <Show when={step() === "done"}>
-            <h1 class="text-[24px] leading-tight font-bold text-slate-100">{WIZARD.doneTitle}</h1>
-            <p class="mt-3 text-[17px] leading-relaxed text-slate-300">{WIZARD.doneBody}</p>
+            {/* r24 — 最后一步不再只说「开始使用」：她第一次用这类工具，最需要知道
+                的三件事就在这里（两条路都行 / 动手前先问你 / 原来的东西不乱动），
+                加上三句照着改就能用的人话。 */}
+            <h1 class="text-[24px] leading-tight font-bold text-slate-100">
+              {FIRST_RUN.promisesTitle}
+            </h1>
+            <ul class="mt-3 space-y-2">
+              <For each={FIRST_RUN.promises}>
+                {(promise) => (
+                  <li class="text-[17px] leading-relaxed text-slate-300">
+                    <span class="font-semibold text-slate-100">{promise.lead}</span>
+                    {promise.body}
+                  </li>
+                )}
+              </For>
+            </ul>
+
+            <p class="mt-6 text-[17px] font-semibold text-slate-100">
+              {FIRST_RUN.wizardExamplesTitle}
+            </p>
+            <p class="mt-1 text-[16px] leading-relaxed text-slate-400">
+              {FIRST_RUN.wizardExamplesHint}
+            </p>
+            <ul class="mt-3 space-y-2">
+              <For each={SAY_EXAMPLES}>
+                {(example) => (
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() => pickExample(example)}
+                      aria-pressed={picked() === example.sentence}
+                      class="min-h-[52px] w-full rounded-xl border px-4 py-2 text-left"
+                      classList={{
+                        "border-sky-500 bg-sky-950/40": picked() === example.sentence,
+                        "border-slate-700 hover:border-slate-500": picked() !== example.sentence,
+                      }}
+                    >
+                      <span class="block text-[16px] text-slate-400">{example.level}</span>
+                      <span class="block text-[17px] leading-snug text-slate-100">
+                        {example.sentence}
+                      </span>
+                    </button>
+                  </li>
+                )}
+              </For>
+            </ul>
+
             <button
               type="button"
               onClick={finish}
