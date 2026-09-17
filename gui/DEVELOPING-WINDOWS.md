@@ -98,7 +98,7 @@ Apple Silicon 只能虚拟化**同架构**的客户机，所以跑的是 **Windo
 **完整报告：[WINDOWS-ACCEPTANCE-1.md](./WINDOWS-ACCEPTANCE-1.md)**（那份文档里每句结论都有命令或原始输出；
 可复跑的取证脚本在 `scripts/windows/`）。这里只留结论：
 
-- 机器：`HOMEWIN`，Windows 11 Home 25H2 / build 26200.9457 / x64 / 39.65GB 内存；WebView2 `153.0.4234.32` 已装。
+- 机器：`<机器名>`，Windows 11 Home 25H2 / build 26200.9457 / x64 / 39.65GB 内存；WebView2 `153.0.4234.32` 已装。
   验的是 SSH 会话（**没有交互桌面**），所以上面那份 8 条清单里的需要人眼看的部分**全部没走**。
 - 受测产物是 Release `gui-v0.1.0-rc1`，而它指向的提交 **比"简单模式成为唯一界面"早一个集成轮次**——
   所以这份安装包打开的是**英文的旧开发者界面**，不是王姐的中文简单模式。
@@ -321,6 +321,100 @@ Windows 11 + WSL（Ubuntu）上确认过能起来。
 
 一份能让别人复核的最小证据：`ante --version` 的输出、应用里那张"准备好了"的截图（或供应商列表）、
 **一张卡的结果文件**（含文件路径和内容），以及跑这一轮的 `CANTE_BIN` 原文。缺哪一样都算没跑。
+
+## 每周一次的真机普查（Windows 计划任务，2026-09）
+
+普查（`gui/scripts/sweep/`）本来只在有人手动跑的时候才跑。这台验收机有工具链、能连网关、
+反正开着，所以把它接成了**每周自动跑一次**，报告落在固定位置，发现回归可以在报告里直接看到。
+
+### 这台机器上怎么建的
+
+| 项 | 值 |
+| --- | --- |
+| 计划任务名 | `CanteWeeklySweep` |
+| 触发 | 每周日 03:30（`-Weekly -DaysOfWeek Sunday -At 03:30`）+ `StartWhenAvailable`（错过就补跑） |
+| 动作 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\cante\gui\scripts\windows\weekly-sweep.ps1` |
+| 以谁的身份 | 当前用户，登录类型 **Interactive**（原因见下面的限制） |
+| 报告 | `C:\cante-sweep\report-YYYYMMDD.md`（保留最近 **8** 份，按文件名排序删最旧的） |
+| 日志 | `C:\cante-sweep\logs\sweep-YYYYMMDD.log`（同样保留 8 份） |
+| 一行历史 | `C:\cante-sweep\history.log`（每次一行：时间 / 退出码 / 报告大小） |
+| 中间产物 | `C:\cante-sweep\wsl-work\`（每张卡的输入副本与产出、`results.json`） |
+
+跑的东西是 `gui/scripts/windows/weekly-sweep.ps1`，它在 **WSL 里**跑普查：
+
+```
+wsl.exe -e bash -lc 'export PATH=$HOME/.bun/bin:$PATH
+                      export CANTE_BIN=$HOME/cante-bin/ante
+                      export CANTE_SHEETS_BIN=<out>/bin/cante-sheets
+                      export CANTE_PDF_BIN=<out>/bin/cante-pdf
+                      cd /mnt/c/cante && bash gui/scripts/task-sweep.sh --work <out>/wsl-work --report <out>/report-<日期>.md'
+```
+
+**为什么在 WSL 里跑**：守护进程 `ante` 只有 Linux/macOS 构建，普查要驱动真守护进程；而普查自己
+产出的路径会被写进给助手的指令里，只有整个普查（连同它的 python/bun）都在 Linux 侧跑，
+那些路径才是 Linux 侧认得的。
+
+**两个 `bin/` 下的垫片是什么**："读回产出"用的 `cante-sheets` / `cante-pdf` 是 Windows 的 `.exe`，
+WSL 能执行（互操作），但参数里的 Linux 路径要先 `wslpath -w` 翻一次。所以 `weekly-sweep.ps1`
+每次运行时现场生成两个十行的垫片（LF 行尾、无 BOM），再用 `CANTE_SHEETS_BIN` / `CANTE_PDF_BIN`
+交给普查。不这么做的话，普查要么挑到 Windows 构建留下的 0 字节占位符（`Exec format error`），
+要么退回它内置的读取方式——报告里就不再是"产品自己的工具读回来的"。
+
+**密钥从哪来**：不落盘、不进命令行。`weekly-sweep.ps1` 运行时从
+`%USERPROFILE%\.pi\agent\models.json` 读服务方（默认 `9router`）的 `baseUrl` / `apiKey`，
+只放进程环境变量，再用 `WSLENV` 渡过 WSL 边界。要换服务方就 `-Provider <名字>`。
+
+### 怎么手工跑一次 / 改频率 / 停掉
+
+```powershell
+# 手工跑（等价于计划任务那次；只跑一张卡时加 -Cards）
+powershell -ExecutionPolicy Bypass -File gui\scripts\windows\weekly-sweep.ps1
+powershell -ExecutionPolicy Bypass -File gui\scripts\windows\weekly-sweep.ps1 -Cards excel.diff
+
+# 立刻触发计划任务一次（不手工跑上面那条）
+schtasks /run /tn CanteWeeklySweep
+schtasks /query /tn CanteWeeklySweep /v /fo LIST      # 看 Status / Last Run Time / Last Result
+
+# 改频率（例如改成每周一 04:00）：删掉重建，参数与上面表里的一致
+schtasks /delete /tn CanteWeeklySweep /f
+
+# 停掉（不再自动跑；历史报告不动）
+schtasks /change /tn CanteWeeklySweep /disable
+# 彻底删掉
+schtasks /delete /tn CanteWeeklySweep /f
+```
+
+注意 `schtasks` 在 Git Bash 里会把 `/tn` 当成路径，要么用 PowerShell，要么加 `MSYS_NO_PATHCONV=1`。
+
+### 它什么时候"真的跑了"
+
+别只看任务存在。三样一起看：
+
+1. `schtasks /query /tn CanteWeeklySweep /v /fo LIST` 里的 `Last Run Time` 与 `Last Result`（0 = 成功）；
+2. `C:\cante-sweep\report-YYYYMMDD.md` 存在且不是空的（**报告是跑完才写的**，跑到一半只有一份空壳，
+   所以"文件在"不等于"跑完了"——要看里面的卡片表）；
+3. `C:\cante-sweep\history.log` 每次一行。
+
+### 已知限制（都实测过，不是推测）
+
+- **登录类型只能是 Interactive**：这台机器上的用户没有"作为批处理作业登录"的权限，用
+  `-LogonType S4U`（"不管用户是否登录都运行"）注册会直接 `Access is denied`（0x80070005）；
+  而以 SYSTEM 跑又不行——WSL 发行版是**按用户**注册的，SYSTEM 看不到它。
+  实测 Interactive 的任务在"只有 SSH、没有交互桌面"的时候**照样会被触发**（我们用一次性探针任务
+  验过：没有手工触发，到点自己跑了、Last Result=0、文件写出来了）。
+  **但机器如果一直没人登录、又碰上 `StartWhenAvailable` 的处理，最坏情况是错过一次**——
+  每周报告断了一次就去看 `history.log` 和任务的 Last Run Time。
+- **WSL 里必须有原生 bun**（`$HOME/.bun/bin/bun`）。`/mnt/c` 上那份是 Windows 的，
+  在 WSL 里用它+Linux 路径会出问题。装法（WSL 里没有 unzip 时用 python 解压）见
+  `gui/WINDOWS-ACCEPTANCE-4.md`。
+- **一跑就是全部卡**（这个仓库的默认：30 多张）。单卡上限 1800 秒、卡住判据 300 秒，
+  所以一次跑几十分钟是正常的。想缩短就 `-Cards excel.diff`（那样报告只覆盖这几张）。
+- **文书那几张卡会把结果写到真实桌面**（提示词里写的"结果放桌面"），普查只在自己的按卡目录里找产出，
+  于是 `doc.notice` / `doc.leave` / `doc.report` 这几个场景每周都会报一次"失败（没有产出）"——
+  **那是普查的隔离没兜住绝对路径，不是产品回归**；同时真实桌面上会多出几个 `.docx` / `.txt`（要自己清）。
+  单子还没开，证据见 `gui/WINDOWS-ACCEPTANCE-4.md` 第 5.5 节。
+- **报告里的结论仍然是"模型 + WSL"下的结论**，不能当画像机（16GB 无独显）的体感证据。
+- **这台机器上的普查不是 CI**：它是我们自己的回归预警，不挡合并。
 
 ## 用桥在没有守护进程的 Windows 上跑真实任务（不需要 WSL）
 
