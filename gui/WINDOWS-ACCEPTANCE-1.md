@@ -190,7 +190,7 @@ Start-Process -FilePath 'Cante_0.1.0_x64-setup.exe' -ArgumentList '/S' -PassThru
 
 - **退出码 0**，而且在**没有提权**的会话里就装完了（`tauri.conf.json` 的
   `bundle.windows.nsis.installMode = "currentUser"`）。
-- 安装位置：`C:\Users\win11\AppData\Local\Cante`，里面只有两个文件（合计 9,009,370 字节）：
+- 安装位置：`C:\Users\<用户名>\AppData\Local\Cante`，里面只有两个文件（合计 9,009,370 字节）：
 
 ```
 cante-gui.exe   8930304
@@ -203,9 +203,9 @@ uninstall.exe     79066
 DisplayName     : Cante
 DisplayVersion  : 0.1.0
 Publisher       : cante
-InstallLocation : "C:\Users\win11\AppData\Local\Cante"
-UninstallString : "C:\Users\win11\AppData\Local\Cante\uninstall.exe"
-DisplayIcon     : "C:\Users\win11\AppData\Local\Cante\cante-gui.exe"
+InstallLocation : "C:\Users\<用户名>\AppData\Local\Cante"
+UninstallString : "C:\Users\<用户名>\AppData\Local\Cante\uninstall.exe"
+DisplayIcon     : "C:\Users\<用户名>\AppData\Local\Cante\cante-gui.exe"
 EstimatedSize   : 8798
 ```
 
@@ -290,17 +290,17 @@ msedgewebview2.exe  | pid=6688 | ppid=4448  | cmd="…\msedgewebview2.exe" --emb
    - 一方面，`daemon.rs` 的注释写明守护进程是"第一次发指令时懒启动"，我这次没点任何东西，
      所以即使装了守护进程它也不该在这 20 秒里出现；
    - 另一方面，就算触发了也起不来——`cante` 不在 PATH、`CANTE_BIN` 没设、
-     `C:\Users\win11\AppData\Local\Cante` 里也没有它。界面自己说的那句话（4.4）印证了这一点。
+     `C:\Users\<用户名>\AppData\Local\Cante` 里也没有它。界面自己说的那句话（4.4）印证了这一点。
 
 ### 4.3 它写出了什么文件 / 配置
 
 启动后新增的目录只有一个：
 
 ```
-C:\Users\win11\.cante        存在=False
-C:\Users\win11\.ante         存在=False
-C:\Users\win11\AppData\Roaming\Cante   存在=False
-C:\Users\win11\AppData\Local\Cante     存在=True（就是安装目录，里面只有那两个 exe）
+C:\Users\<用户名>\.cante        存在=False
+C:\Users\<用户名>\.ante         存在=False
+C:\Users\<用户名>\AppData\Roaming\Cante   存在=False
+C:\Users\<用户名>\AppData\Local\Cante     存在=True（就是安装目录，里面只有那两个 exe）
 + 新增：%LOCALAPPDATA%\dev.cante.gui\EBWebView（WebView2 档案，8.8 MB）
 ```
 
@@ -352,7 +352,7 @@ coding agent · graphical client
 Session — — start a new session
 Clear the transcript view / Compact history / Context report
 WORKSPACE
-C:\Users\win11\AppData\Local\Temp\cante-acc
+C:\Users\<用户名>\AppData\Local\Temp\cante-acc
 Bridge and daemon status
 bridge connected
 daemon / idle / steps / 0
@@ -511,7 +511,7 @@ rc1 的截图/UIA 是真 WebView2 里的真窗口。"今天的 main 打成 Windo
 
 前提：用 RDP（或物理坐在机器前）登录，**用 Explorer 双击**，不是 SSH。
 机器上现在装着 rc1（我最后重新装回来了），安装包在
-`C:\Users\win11\AppData\Local\Temp\cante-acc\Cante_0.1.0_x64-setup.exe`。
+`C:\Users\<用户名>\AppData\Local\Temp\cante-acc\Cante_0.1.0_x64-setup.exe`。
 
 1. **从浏览器下载安装包**（不要用命令行下载——命令行不带 Mark of the Web），
    **双击**运行，把 SmartScreen / 杀软弹窗的**原文**和截图记下来。这是"未签名提示的第一印象"。
