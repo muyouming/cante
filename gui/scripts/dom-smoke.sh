@@ -9,7 +9,7 @@
 # chrome that must always be there. It catches "the shell painted nothing" and
 # "the empty state disappeared" regressions in one second.
 #
-# It renders THREE things:
+# It renders FOUR things:
 #   1. a first run, which lands on the wizard;
 #   2. a provisioned machine (`window.__CANTE_PROVISIONED__`, the marker the
 #      packaging path already documents), which lands on the home screen — so the
@@ -20,6 +20,16 @@
 #      Shift+Tab through them, presses Escape, and writes down where the focus
 #      went. That is the only place where the focus trap is exercised in a real
 #      browser — `bun test` has no DOM (see src/simple/focus-guard.test.ts).
+#   4. the home screen at TWO window sizes (r24): 1180×760 and 800×560, with a
+#      layout probe that measures where things actually landed. App.tsx claims
+#      "usable at 800×560"; that claim used to be nobody's job to check. The
+#      probe clicks the history, privacy, ability-centre and results layers open,
+#      and reports which interactive things are unreachable (off the side, cut by
+#      an overflow-hidden box, or below the fold with nothing to scroll), whether
+#      the sentence box is really typeable, and whether the cards can be scrolled
+#      to. Note the measured viewport is ~87px SHORTER than --window-size in
+#      headless Chrome (it reserves a toolbar), so the 800×560 run is checked at
+#      about 800×473 — stricter than the contract, never looser.
 #
 # Outside Tauri the bridge is unavailable by design, so this also pins the
 # browser-preview fallback: the app must explain itself instead of going blank.
@@ -65,16 +75,17 @@ bun run build:web >/dev/null
 cat > "$WORK/serve.py" <<'PY'
 import http.server, os, socketserver, sys, urllib.parse
 
-root, port, probe = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+root, port, probe, layout = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
 
 
 def injected(query):
     flags = []
     if "provisioned=1" in query:
         flags.append("<script>window.__CANTE_PROVISIONED__=true;</script>")
-    if "probe=1" in query:
-        with open(probe, encoding="utf-8") as handle:
-            flags.append("<script>" + handle.read() + "</script>")
+    for flag, path in (("probe=1", probe), ("layout=1", layout)):
+        if flag in query:
+            with open(path, encoding="utf-8") as handle:
+                flags.append("<script>" + handle.read() + "</script>")
     return "".join(flags)
 
 
@@ -107,7 +118,7 @@ with socketserver.TCPServer(("127.0.0.1", port), Handler) as httpd:
 PY
 
 echo "==> serving $APP_DIR/dist on :$PORT"
-python3 "$WORK/serve.py" "$APP_DIR/dist" "$PORT" "$WORK/probe.js" >/dev/null 2>&1 &
+python3 "$WORK/serve.py" "$APP_DIR/dist" "$PORT" "$WORK/probe.js" "$WORK/layout.js" >/dev/null 2>&1 &
 SERVER_PID=$!
 sleep 1
 
@@ -265,12 +276,363 @@ cat > "$WORK/probe.js" <<'JS'
 })();
 JS
 
-# `$1` url path, `$2` output file. No --virtual-time-budget: the app keeps a
-# reconcile interval alive, so virtual time never settles and Chrome hangs.
-# --dump-dom after load is enough — Solid renders during module evaluation.
+# The layout probe (r24). Same idea as the keyboard probe — a plain script in a
+# real page, no test-only hook in the app — but it measures instead of pressing
+# keys. It writes raw geometry facts as JSON into <pre id="layout-report"> and
+# decides nothing: the assertions live in the python below, so a failure message
+# can say what the product needs ("a card is cut off") rather than "rect moved".
+#
+# What it does, in order:
+#   * reads the measured viewport (innerWidth/innerHeight) — the honest number,
+#     not the --window-size we asked for;
+#   * walks every visible, enabled control and classifies where it is. Below the
+#     fold inside something scrollable is fine (she can scroll); off the side,
+#     cut by an overflow-hidden box, or below the fold with nothing to scroll is
+#     a real "she cannot get to it";
+#   * scrolls the task-card list to the first and the last card and checks each
+#     one can be brought fully on screen;
+#   * focuses the sentence box, types a sentence through a real input event, and
+#     reads back whether the text stayed;
+#   * opens the history panel, the privacy panel, the ability centre and the
+#     results panel for real, measures the close/back button and the search box,
+#     runs the same unreachable-control scan inside each layer, and closes it.
+# Everything is restored, so the DOM this dump leaves behind is still the home
+# screen and the text assertions above still read it.
+cat > "$WORK/layout.js" <<'JS'
+(function () {
+  var out = {
+    error: null,
+    viewport: null,
+    home: {},
+    history: {},
+    privacy: {},
+    library: {},
+    results: {},
+  };
+
+  function label(el) {
+    if (!el || !el.tagName) return null;
+    var text = el.getAttribute("aria-label") || el.textContent || "";
+    return text.replace(/\s+/g, " ").trim().slice(0, 28);
+  }
+
+  function round(rect) {
+    return {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      w: Math.round(rect.width),
+      h: Math.round(rect.height),
+    };
+  }
+
+  function byText(text, scope) {
+    var list = Array.prototype.slice.call((scope || document).querySelectorAll("button"));
+    for (var i = 0; i < list.length; i++) {
+      if ((list[i].textContent || "").indexOf(text) >= 0) return list[i];
+    }
+    return null;
+  }
+
+  // Rendered at all? getClientRects() is empty for display:none, and Chrome
+  // keeps laid-out boxes for `visibility:hidden`, so the computed style is read
+  // too.
+  function shown(el) {
+    if (!el || el.getClientRects().length === 0) return false;
+    var style = getComputedStyle(el);
+    return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+  }
+
+  function controls(scope) {
+    var list = Array.prototype.slice.call(
+      (scope || document).querySelectorAll(
+        'a[href],button,input,select,textarea,[tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    return list.filter(function (el) {
+      return shown(el) && !el.disabled;
+    });
+  }
+
+  function insideViewport(el) {
+    var r = el.getBoundingClientRect();
+    return (
+      r.left >= -1 && r.top >= -1 && r.right <= window.innerWidth + 1 && r.bottom <= window.innerHeight + 1
+    );
+  }
+
+  function coversViewport(el) {
+    var r = el.getBoundingClientRect();
+    return (
+      r.left <= 1 && r.top <= 1 && r.right >= window.innerWidth - 1 && r.bottom >= window.innerHeight - 1
+    );
+  }
+
+  // The nearest ancestor she can scroll inside, or null. Only counts when there
+  // is more content than fit — a box that happens to be overflow:auto but has
+  // nothing to scroll does not make anything reachable.
+  function scrollerIn(el, scope) {
+    for (var p = el.parentElement; p; p = p.parentElement) {
+      var style = getComputedStyle(p);
+      if (
+        (style.overflowY === "auto" || style.overflowY === "scroll") &&
+        p.scrollHeight > p.clientHeight + 1
+      ) {
+        return p;
+      }
+      if (p === scope) break;
+    }
+    return null;
+  }
+
+  // Cut off by a box that clips and cannot be scrolled: the control is painted
+  // outside a hidden-overflow ancestor. The ancestor has to actually have
+  // clipped content (its scroll size exceeds its client size); otherwise the
+  // overflow-hidden shell (App.tsx's root, the full-screen layers) would be
+  // blamed for ordinary scrolling content, which is a false alarm.
+  function cutByHiddenBox(el, scope) {
+    var r = el.getBoundingClientRect();
+    for (var p = el.parentElement; p; p = p.parentElement) {
+      var style = getComputedStyle(p);
+      var clips = /hidden|clip/.test(style.overflow + " " + style.overflowX + " " + style.overflowY);
+      var scrolls = /(auto|scroll)/.test(style.overflowX + " " + style.overflowY);
+      var clippedContent = p.scrollHeight > p.clientHeight + 1 || p.scrollWidth > p.clientWidth + 1;
+      if (clips && !scrolls && clippedContent) {
+        var box = p.getBoundingClientRect();
+        if (
+          r.left < box.left - 1 ||
+          r.top < box.top - 1 ||
+          r.right > box.right + 1 ||
+          r.bottom > box.bottom + 1
+        ) {
+          return (p.className || p.tagName).toString().slice(0, 60);
+        }
+      }
+      if (p === scope) break;
+    }
+    return null;
+  }
+
+  // Text that does not fit its own box. Reported, never asserted: the `truncate`
+  // class (long task titles, file names) is deliberate, and pure geometry cannot
+  // tell a deliberate ellipsis from text that got cut. A reviewer reads the number;
+  // a real cut still shows up as a card that cannot be reached.
+  function textWiderThanBox(scope) {
+    var list = Array.prototype.slice.call(
+      (scope || document).querySelectorAll("p,span,h1,h2,h3,li,label,dt,dd"),
+    );
+    var count = 0;
+    for (var i = 0; i < list.length; i++) {
+      if (shown(list[i]) && list[i].scrollWidth > list[i].clientWidth + 1) count += 1;
+    }
+    return count;
+  }
+
+  // “Can she get to it?” — the only question this file asks about geometry.
+  function reachability(scope) {
+    var vw = window.innerWidth;
+    var vh = window.innerHeight;
+    var list = controls(scope);
+    var problems = [];
+    var belowFold = 0;
+    for (var i = 0; i < list.length; i++) {
+      var el = list[i];
+      var r = el.getBoundingClientRect();
+      var what = label(el);
+      if (r.width < 1 || r.height < 1) {
+        problems.push({ why: "zero-size", what: what });
+        continue;
+      }
+      if (r.left < -1 || r.right > vw + 1) {
+        problems.push({ why: "off-screen-x", what: what, rect: round(r), viewportW: vw });
+        continue;
+      }
+      var cut = cutByHiddenBox(el, scope);
+      if (cut) {
+        problems.push({ why: "cut-by-hidden-box", what: what, rect: round(r), box: cut });
+        continue;
+      }
+      if (r.top < -1 || r.bottom > vh + 1) {
+        if (scrollerIn(el, scope)) belowFold += 1;
+        else problems.push({ why: "off-screen-y-no-scroll", what: what, rect: round(r), viewportH: vh });
+      }
+    }
+    return {
+      checked: list.length,
+      problems: problems,
+      belowFoldInScroll: belowFold,
+      textWiderThanBox: textWiderThanBox(scope),
+    };
+  }
+
+  function visibleInScroller(sc, el) {
+    var r = el.getBoundingClientRect();
+    var sr = sc.getBoundingClientRect();
+    return r.left >= sr.left - 1 && r.right <= sr.right + 1 && r.top >= sr.top - 1 && r.bottom <= sr.bottom + 1;
+  }
+
+  function scrollTo(sc, el, alignEnd) {
+    var r = el.getBoundingClientRect();
+    var sr = sc.getBoundingClientRect();
+    var delta = alignEnd ? r.bottom - sr.bottom : r.top - sr.top;
+    sc.scrollTop = Math.max(0, sc.scrollTop + delta);
+  }
+
+  function probeHome() {
+    // TaskCard is the only button on the home screen with an aria-label, and that
+    // label is "title。example" — so the count here is the number of cards, not a
+    // number copied out of the catalogue.
+    var cards = Array.prototype.slice
+      .call(document.querySelectorAll("button[aria-label]"))
+      .filter(function (b) {
+        return (b.getAttribute("aria-label") || "").indexOf("。") >= 0;
+      });
+    var scroller = cards.length ? scrollerIn(cards[0], document) : null;
+    var home = {
+      cards: cards.length,
+      scroller: scroller ? { clientH: scroller.clientHeight, scrollH: scroller.scrollHeight } : null,
+      firstCard: cards.length ? round(cards[0].getBoundingClientRect()) : null,
+      firstCardReachable: false,
+      lastCardReachable: false,
+      libraryEntryCount: null,
+      reachability: reachability(document),
+      input: {},
+    };
+    var entry = byText("看看能做什么");
+    if (entry) {
+      var match = /共\s*(\d+)\s*项/.exec(entry.textContent || "");
+      if (match) home.libraryEntryCount = parseInt(match[1], 10);
+    }
+    if (cards.length) {
+      var first = cards[0];
+      var last = cards[cards.length - 1];
+      if (scroller) {
+        var keep = scroller.scrollTop;
+        scrollTo(scroller, first, false);
+        home.firstCardReachable = visibleInScroller(scroller, first);
+        scroller.scrollTop = scroller.scrollHeight;
+        home.lastCardReachable = visibleInScroller(scroller, last);
+        scroller.scrollTop = keep;
+      } else {
+        home.firstCardReachable = insideViewport(first);
+        home.lastCardReachable = insideViewport(last);
+      }
+    }
+    var input = document.getElementById("cante-say");
+    if (!input) {
+      home.input = { found: false };
+    } else {
+      input.focus();
+      var focused = document.activeElement === input;
+      var sentence = "把上个月的表格汇总一下";
+      input.value = sentence;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      home.input = {
+        found: true,
+        rect: round(input.getBoundingClientRect()),
+        inView: insideViewport(input),
+        focusable: focused,
+        typedKept: input.value === sentence,
+        tallEnough: input.getBoundingClientRect().height >= 44,
+      };
+      input.value = "";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    out.home = home;
+  }
+
+  // The history and privacy layers live in App.tsx: a full-screen box with a
+  // "返回" button at the top and a scroll area under it. They carry no
+  // role="dialog", so the back button is how they are found.
+  async function probeAppPanel(entryText) {
+    var record = { opened: false };
+    var entry = byText(entryText);
+    if (!entry) return record;
+    entry.focus();
+    entry.click();
+    await null; // the layer renders and its focus layer lands the focus
+    var back = byText("返回");
+    if (!back) return record;
+    record.opened = true;
+    var panel = back.parentElement;
+    record.backInView = insideViewport(back);
+    record.coversViewport = !!panel && coversViewport(panel);
+    record.switches = panel ? panel.querySelectorAll('[role="switch"]').length : 0;
+    record.reachability = reachability(panel || document);
+    back.click();
+    await null;
+    record.closed = !byText("返回");
+    return record;
+  }
+
+  // The ability centre and the results panel are real dialogs (role="dialog"),
+  // and both close with a "回到首页" button.
+  async function probeDialog(entryText, searchId) {
+    var record = { opened: false };
+    var entry = byText(entryText);
+    if (!entry) return record;
+    entry.focus();
+    entry.click();
+    await null; // the dialog renders and its focus layer lands the focus
+    var dialog = document.querySelector('[role="dialog"]');
+    if (!dialog) return record;
+    record.opened = true;
+    record.coversViewport = coversViewport(dialog);
+    var close = byText("回到首页", dialog);
+    record.closeInView = !!close && insideViewport(close);
+    if (searchId) {
+      var search = dialog.querySelector("#" + searchId);
+      record.searchInView = !!search && insideViewport(search);
+      record.searchFocused = document.activeElement === search;
+    }
+    record.reachability = reachability(dialog);
+    if (close) close.click();
+    await null;
+    record.closed = !document.querySelector('[role="dialog"]');
+    return record;
+  }
+
+  window.addEventListener("load", function () {
+    void (async function () {
+      try {
+        out.viewport = {
+          innerW: window.innerWidth,
+          innerH: window.innerHeight,
+          dpr: window.devicePixelRatio,
+          clientW: document.documentElement.clientWidth,
+          clientH: document.documentElement.clientHeight,
+        };
+        await null; // let Solid's first paint settle before measuring
+        probeHome();
+        out.history = await probeAppPanel("历史");
+        out.privacy = await probeAppPanel("隐私");
+        out.library = await probeDialog("看看能做什么", "cante-library-search");
+        out.results = await probeDialog("打开我做的结果");
+      } catch (error) {
+        out.error = String((error && error.stack) || error);
+      }
+      var pre = document.createElement("pre");
+      pre.id = "layout-report";
+      pre.textContent = JSON.stringify(out);
+      document.body.appendChild(pre);
+    })();
+  });
+})();
+JS
+
+# `$1` url path, `$2` output file, `$3` chrome profile tag, `$4` --window-size.
+# No --virtual-time-budget: the app keeps a reconcile interval alive, so virtual
+# time never settles and Chrome hangs. --dump-dom after load is enough — Solid
+# renders during module evaluation, and both probes await their microtasks before
+# writing their report.
+#
+# Note --window-size is the WINDOW, and headless Chrome's window keeps a toolbar
+# (~87px tall when re-measured on macOS), so the page gets a shorter viewport
+# than the number asked for. The probes report the measured viewport, and the
+# checker asserts against that: the 800×560 window is checked at roughly
+# 800×473, i.e. never a looser claim than the contract.
 dump() {
   "$CHROME" --headless=new --disable-gpu --no-first-run \
-    --user-data-dir="$WORK/chrome-$3" --dump-dom "http://127.0.0.1:$PORT$1" > "$2" 2>/dev/null &
+    --user-data-dir="$WORK/chrome-$3" --window-size="$4" --dump-dom "http://127.0.0.1:$PORT$1" > "$2" 2>/dev/null &
   local pid=$!
   for _ in $(seq 1 40); do
     kill -0 "$pid" 2>/dev/null || break
@@ -281,15 +643,19 @@ dump() {
 }
 
 echo "==> dumping the first-run DOM"
-dump "/" "$WORK/dom-first-run.html" first-run
+dump "/" "$WORK/dom-first-run.html" first-run "1180,760"
 
-echo "==> dumping the provisioned DOM (home screen)"
-dump "/?provisioned=1" "$WORK/dom-home.html" home
+echo "==> dumping the provisioned DOM (home screen, 1180×760)"
+dump "/?provisioned=1&layout=1" "$WORK/dom-home.html" home "1180,760"
 
 echo "==> dumping the keyboard probe DOM (Tab / Shift+Tab / Escape)"
-dump "/?provisioned=1&probe=1" "$WORK/dom-probe.html" probe
+dump "/?provisioned=1&probe=1" "$WORK/dom-probe.html" probe "1180,760"
 
-python3 - "$WORK/dom-first-run.html" "$WORK/dom-home.html" "$WORK/dom-probe.html" <<'PY'
+echo "==> dumping the home screen in a small window (800×560)"
+dump "/?provisioned=1&layout=1" "$WORK/dom-home-small.html" home-small "800,560"
+
+exit_code=0
+python3 - "$WORK/dom-first-run.html" "$WORK/dom-home.html" "$WORK/dom-probe.html" <<'PY' || exit_code=1
 import html, json, re, sys
 
 SCREENS = {
@@ -430,5 +796,165 @@ else:
 
 if exit_code:
     sys.exit(exit_code)
-print("dom-smoke: OK — every screen rendered, and the keyboard walk stayed inside")
+print("dom-smoke: screens rendered, keyboard walk stayed inside")
 PY
+
+# ---- r24：小窗口 / 缩放下的布局核对 ----------------------------------------
+#
+# App.tsx 的注释里写着一条契约：800×560 也还能用。这条契约以前没人验。这里把两个
+# 窗口尺寸下的真实测量结果拿来做断言，标准就是「她够不够得着」：
+#   * 卡片在（数量不是 0，而且真能滚到第一张和最后一张）；
+#   * 输入框在视野里、能点、能打字；
+#   * 历史 / 隐私 / 能力中心 / 我做的结果都能打开、关掉，而且关掉的按钮在视野里；
+#   * 没有任何一个可见的控件是被裁掉的（屏幕外、被 overflow:hidden 的盒子切掉、
+#     或者掉在视野下面而又没地方能滚）。
+# 「在可滚动区域下面」不算问题：她能滚下去。这条区分是这个检查不变成噪音的关键。
+python3 - "$WORK/dom-home.html" 1180 760 "$WORK/dom-home-small.html" 800 560 <<'PY' || exit_code=1
+import html, json, re, sys
+
+
+def load(path):
+    dom = open(path, encoding="utf-8", errors="replace").read()
+    if len(dom) < 500:
+        return None, f"Chrome produced no DOM ({len(dom)} bytes)"
+    blob = re.search(r'<pre id="layout-report">(.*?)</pre>', dom, flags=re.S)
+    if not blob:
+        return None, "no layout report — 探针没跑出来"
+    try:
+        return json.loads(html.unescape(blob.group(1))), None
+    except ValueError as error:
+        return None, f"layout report is not JSON ({error})"
+
+
+def describe(problem):
+    why = problem.get("why")
+    what = problem.get("what") or "(unlabelled)"
+    rect = problem.get("rect") or {}
+    if why == "off-screen-x":
+        right = rect.get("x", 0) + rect.get("w", 0)
+        return f"{what}: off the side (x={rect.get('x')}..{right}, the window is {problem.get('viewportW')} wide)"
+    if why == "off-screen-y-no-scroll":
+        return f"{what}: below the bottom (y={rect.get('y')}, the window is {problem.get('viewportH')} tall) with nothing to scroll"
+    if why == "cut-by-hidden-box":
+        return f"{what}: cut off by a box that cannot scroll ({problem.get('box')})"
+    return f"{what}: {why}"
+
+
+def unreachable(record, name, problems):
+    scan = (record or {}).get("reachability") or {}
+    for problem in scan.get("problems", []):
+        problems.append(f"{name}: " + describe(problem))
+    return scan
+
+
+SOURCES = [
+    (sys.argv[1], int(sys.argv[2]), int(sys.argv[3])),
+    (sys.argv[4], int(sys.argv[5]), int(sys.argv[6])),
+]
+
+failed = 0
+for path, win_w, win_h in SOURCES:
+    label = f"layout {win_w}×{win_h} window"
+    report, error = load(path)
+    if error:
+        print(f"dom-smoke: {label}: {error}", file=sys.stderr)
+        failed = 1
+        continue
+
+    problems = []
+
+    def need(ok, message, bucket=problems):
+        if not ok:
+            bucket.append(message)
+
+    if report.get("error"):
+        problems.append("the probe threw: " + str(report["error"]).splitlines()[0])
+
+    viewport = report.get("viewport") or {}
+    inner_w = viewport.get("innerW", 0)
+    inner_h = viewport.get("innerH", 0)
+    # 先证明 --window-size 真的生效了：否则两条记录量的是同一个视口，这个文件就
+    # 变成了一个什么都不验的绿灯。headless 的窗口带工具栏，量到的视口比窗口矮。
+    if win_w >= 1100:
+        need(
+            inner_w >= 1100,
+            f"the viewport is only {inner_w}px wide — --window-size did not take effect, so this run proves nothing",
+        )
+    else:
+        need(
+            inner_w <= win_w and inner_h <= win_h,
+            f"the viewport is {inner_w}×{inner_h}, not at or below the {win_w}×{win_h} window",
+        )
+
+    home = report.get("home") or {}
+    cards = home.get("cards", 0)
+    need(cards >= 20, f"only {cards} task card(s) rendered")
+    need(home.get("firstCardReachable") is True, "the first card could not be scrolled fully onto the screen")
+    need(home.get("lastCardReachable") is True, "the last card could not be scrolled fully onto the screen")
+    entry_count = home.get("libraryEntryCount")
+    if entry_count is not None:
+        need(
+            entry_count == cards,
+            f"the home screen advertises {entry_count} tasks but {cards} cards are rendered",
+        )
+    box = home.get("input") or {}
+    need(box.get("found") is True, "the sentence box is not on the home screen")
+    need(box.get("inView") is True, "the sentence box is outside the viewport")
+    need(box.get("focusable") is True, "the sentence box did not take the focus")
+    need(box.get("typedKept") is True, "typing into the sentence box did not stick")
+    need(box.get("tallEnough") is True, "the sentence box is under 44px tall")
+
+    home_scan = unreachable(home, "home screen", problems)
+
+    layers = [
+        ("history", "历史", True, False, False),
+        ("privacy", "隐私", True, False, True),
+        ("library", "能力中心", False, True, False),
+        ("results", "我做的结果", False, True, False),
+    ]
+    for key, name, is_panel, is_dialog, wants_switch in layers:
+        layer = report.get(key) or {}
+        need(layer.get("opened") is True, f"the {name} layer did not open")
+        need(layer.get("coversViewport") is True, f"the {name} layer does not cover the window")
+        if is_panel:
+            need(layer.get("backInView") is True, f"the 返回 button of the {name} layer is outside the viewport")
+        if is_dialog:
+            need(layer.get("closeInView") is True, f"the 回到首页 button of the {name} layer is outside the viewport")
+        need(layer.get("closed") is True, f"the {name} layer did not close again")
+        if wants_switch:
+            need(layer.get("switches", 0) >= 1, f"the {name} layer rendered no switch")
+        unreachable(layer, name, problems)
+
+    library = report.get("library") or {}
+    need(library.get("searchInView") is True, "the ability centre search box is outside the viewport")
+    need(library.get("searchFocused") is True, "the ability centre did not put the focus on its search box")
+
+    layer_ok = all(
+        (report.get(key) or {}).get("opened") is True and (report.get(key) or {}).get("closed") is True
+        for key, *_ in layers
+    )
+    yes = lambda value: "yes" if value else "NO"
+    # 这条摘要只说量到的事实：断言失败时它不会先说一句“可以”，再说“其实不行”。
+    print(
+        f"dom-smoke: {label}: viewport {inner_w}×{inner_h}; cards {cards}; "
+        f"scrolls to first/last card {yes(home.get('firstCardReachable') is True)}/{yes(home.get('lastCardReachable') is True)}; "
+        f"sentence box in view {yes(box.get('inView') is True)}, typeable {yes(box.get('typedKept') is True)}; "
+        f"history/privacy/ability-centre/results open+close {yes(layer_ok)}; "
+        f"{home_scan.get('checked', 0)} controls checked, "
+        f"{home_scan.get('belowFoldInScroll', 0)} below the fold but reachable, "
+        f"{home_scan.get('textWiderThanBox', 0)} text boxes wider than their box "
+        f"(reported, not asserted: 省略号是有意的)"
+    )
+    if problems:
+        for problem in problems:
+            print(f"dom-smoke: {label}: {problem}", file=sys.stderr)
+        failed = 1
+
+if failed:
+    sys.exit(1)
+PY
+
+if [ "$exit_code" -ne 0 ]; then
+  exit "$exit_code"
+fi
+echo "dom-smoke: OK — every screen rendered, the keyboard walk stayed inside, and both window sizes are usable"
