@@ -69,6 +69,88 @@ describe("许可数据：条目与原文对得上", () => {
   });
 });
 
+describe("补回的许可原文：从上游取回，不是编的（#158）", () => {
+  /** 带来源链接 = 这个包发布时没把 LICENSE 打进包，原文是补回来的。 */
+  const restored = NOTICES.filter((notice) => notice.sources.length > 0);
+  const markdown = readFileSync(join(HERE, "..", "..", "THIRD-PARTY-LICENSES.md"), "utf8");
+
+  test("每条补回都真的带上了原文（不是只挂了一个链接）", () => {
+    expect(restored.length).toBeGreaterThan(0);
+    const broken = restored.filter(
+      (notice) => notice.textHash === null || TEXTS[notice.textHash]!.trim().length === 0,
+    );
+    expect(broken.map((notice) => notice.name)).toEqual([]);
+  });
+
+  test("每条的来源都是可以点开核对的 https 链接", () => {
+    const bad = restored.filter((notice) => notice.sources.some((source) => !/^https:\/\/\S+$/.test(source)));
+    expect(bad.map((notice) => `${notice.name} ${notice.version}`)).toEqual([]);
+    // 反向：大多数原文还是随包来的（没有来源链接），补回的是少数。
+    const fromPackage = NOTICES.filter((notice) => notice.textHash !== null && notice.sources.length === 0);
+    expect(fromPackage.length).toBeGreaterThan(restored.length);
+  });
+
+  test("法务上更敏感的那几个现在真的有原文", () => {
+    // selectors 是 MPL-2.0（弱 copyleft）；r-efi 三许可里含 LGPL-2.1-or-later 选项；
+    // cesu8 / vite-plugin-solid 上游仓库里连许可文件都没有。
+    for (const name of ["selectors", "r-efi", "cesu8", "vite-plugin-solid", "objc2", "block2"]) {
+      const hits = NOTICES.filter((notice) => notice.name === name);
+      expect(hits.length).toBeGreaterThan(0);
+      for (const notice of hits) {
+        expect(notice.textHash).not.toBeNull();
+        expect(notice.sources.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  test("上游仓库里没有许可文件的那几个：来源是许可证官方的地址，原文也是官方那两份", () => {
+    const mpl = NOTICES.find((notice) => notice.name === "selectors")!;
+    expect(mpl.sources.join(" ")).toMatch(/mozilla\.org\/\S*MPL/);
+    expect(TEXTS[mpl.textHash!]!).toContain("Mozilla Public License Version 2.0");
+    for (const rEfi of NOTICES.filter((notice) => notice.name === "r-efi")) {
+      expect(rEfi.sources.join(" ")).toMatch(/spdx|apache\.org/);
+      // 三许可里我们走 MIT / Apache，两份原文都该在（LGPL 那份不必带）。
+      expect(TEXTS[rEfi.textHash!]!).toContain("Permission is hereby granted, free of charge");
+      expect(TEXTS[rEfi.textHash!]!).toContain("Apache License");
+    }
+  });
+
+  test("这些原文真的出现在「关于」页的渲染结果里（她看得到，不只是链接）", () => {
+    const html = noticesHtml(DATA);
+    const selectors = NOTICES.find((notice) => notice.name === "selectors")!;
+    expect(html).toContain(escapeHtml(TEXTS[selectors.textHash!]!));
+    for (const rEfi of NOTICES.filter((notice) => notice.name === "r-efi")) {
+      expect(html).toContain(escapeHtml(TEXTS[rEfi.textHash!]!));
+    }
+  });
+
+  test("来源链接是给法务核对的，不是她的文案（copy-about.ts 里没有网址）", () => {
+    const copy = readFileSync(join(HERE, "copy-about.ts"), "utf8");
+    expect(copy).not.toMatch(/https?:\/\//);
+    expect(copy).not.toMatch(/github|spdx|apache\.org|mozilla\.org/i);
+  });
+
+  test("清单（markdown）里补回的每一条也带着来源，数字与数据对得上", () => {
+    const start = markdown.indexOf("## 补回的许可原文（来源链接）");
+    expect(start).toBeGreaterThan(0);
+    const section = markdown.slice(start).split("\n## ")[0]!;
+    const notListed = restored.filter((notice) => {
+      if (!section.includes(`${notice.name} ${notice.version}`)) return true;
+      return !notice.sources.every((source) => section.includes(source));
+    });
+    expect(notListed.map((notice) => `${notice.name} ${notice.version}`)).toEqual([]);
+    // 清单里说的「补回 N 个」就是数据里数出来的 N（不写死，跟着生成物走）。
+    const claimed = /- 其中 \*\*(\d+)\*\* 个是\*\*补回\*\*的/.exec(markdown);
+    expect(claimed?.[1]).toBe(String(restored.length));
+  });
+
+  test("这一轮补回之后，清单里不再有「没有原文」的包（#158）", () => {
+    // 这不是一条永久约束：上游哪天又发布一个不带 LICENSE 的包，这里会红并把名字
+    // 报出来——那时要么照它的仓库补回来，要么在报告里点名，不能假装没这回事。
+    expect(missing.map((notice) => `${notice.name} ${notice.version}`)).toEqual([]);
+  });
+});
+
 describe("渲染结果里真的有许可原文（不只是名字）", () => {
   const html = noticesHtml(DATA);
 
@@ -104,7 +186,7 @@ describe("渲染结果里真的有许可原文（不只是名字）", () => {
 
   test("原文里的尖括号会被转义，不会把页面搞坏", () => {
     const rendered = noticesHtml({
-      notices: [{ name: "demo", version: "1.0.0", license: "MIT", textHash: "h" }],
+      notices: [{ name: "demo", version: "1.0.0", license: "MIT", textHash: "h", sources: [] }],
       texts: { h: "if (a < b) { return \"x & y\"; } </pre><script>bad()</script>" },
       summary: { packages: 1, uniqueTexts: 1, missingText: 0 },
     });
