@@ -76,13 +76,27 @@ esac
 
 echo "verify-bundle: 检查 $MODE $TARGET $DESC"
 
+# 在候选里挑出真正的那个可执行文件（macOS 没有扩展名，Windows always `.exe`）。
+#
+# 为什么不能只按固定顺序取第一个：Windows 的**构建目录**（target/release）里同时躺着
+# `cante-pdf.exe`（真程序）、`cante-pdf`（0 字节占位）和 `cante-pdf.d`（依赖清单）——
+# 0.2.0 的安装包当年就是把这一整套 glob 进去的（#141）。原来的顺序先看不带扩展名的那个，
+# 于是在构建目录里挑中了 0 字节占位文件：`du` 报 0、`--version` 跑不出东西，闸门在
+# Windows 上必红（真机实测）。现在：优先 `.exe`，并要求选中的是**非空**普通文件。
+# 真程序不在时，候选落到 0 字节文件上会被 `-s` 拒掉，① 照样报「缺」、② 也跑不出东西
+# —— 判据没有放松。
+pick_bin() { # $1 = 目录，$2 = 不带扩展名的名字；找到就打印完整路径
+  local dir="$1" name="$2" cand
+  for cand in "$dir/$name.exe" "$dir/$name"; do
+    [ -f "$cand" ] && [ -s "$cand" ] && { printf '%s' "$cand"; return 0; }
+  done
+  return 1
+}
+
 # ---- ① 四个可执行文件都在 ----
 echo "① 四个可执行文件"
 for bin in cante-gui cante-sheets cante-pdf cante-bridge; do
-  found=""
-  for cand in "$MACOS/$bin" "$MACOS/$bin.exe"; do
-    [ -f "$cand" ] && found="$cand" && break
-  done
+  found="$(pick_bin "$MACOS" "$bin" || true)"
   if [ -n "$found" ]; then
     ok "${bin}（$(du -h "$found" | cut -f1 | tr -d ' ')）"
   else
@@ -108,8 +122,7 @@ else
   echo "② 包里能跑吗"
 fi
 for bin in cante-sheets cante-pdf cante-bridge; do
-  cand=""
-  for c in "$MACOS/$bin" "$MACOS/$bin.exe"; do [ -f "$c" ] && cand="$c" && break; done
+  cand="$(pick_bin "$MACOS" "$bin" || true)"
   [ -n "$cand" ] || continue
   out="$("$cand" --version 2>&1 | head -1)"
   if [ -z "$out" ]; then
@@ -131,7 +144,10 @@ else
   [ -z "$junk" ] && ok "没有 .d 依赖清单" || fail ".d 文件回来了：$(printf '%s ' $junk)"
   zero="$(find "$MACOS" -maxdepth 1 -type f -size 0 2>/dev/null)"
   [ -z "$zero" ] && ok "没有 0 字节文件" || fail "0 字节文件：$(printf '%s ' $zero)"
-  dirs="$(find "$MACOS" -maxdepth 1 -type d ! -path "$MACOS" 2>/dev/null | grep -v -E '/(Resources|Frameworks|_CodeSignature)$' || true)"
+  # 排除根目录本身要用 `-mindepth 1`，不能用 `! -path "$MACOS"`：GNU find 在 -path 的
+  # 模式里把 `\` 当转义符，Windows 路径 `C:\Users\…` 因此永远匹配不上它自己，安装目录
+  # 会被当成「多出来的子目录」误报（Windows 真机实测，v0.2.1 安装目录）。
+  dirs="$(find "$MACOS" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | grep -v -E '/(Resources|Frameworks|_CodeSignature)$' || true)"
   [ -z "$dirs" ] && ok "没有多出来的子目录" || fail "多出来的目录：$(printf '%s ' $dirs)"
 fi
 
