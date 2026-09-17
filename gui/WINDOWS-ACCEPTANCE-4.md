@@ -263,7 +263,7 @@ Button | 开始处理
 ```
 ==> excel.diff
     通过：产出 结果_对比.xlsx；cante-sheets 读回 31 行；表：对照
-守护进程：/home/ubuntu/cante-bin/ante serve
+守护进程：/home/<用户>/cante-bin/ante serve
 ```
 
 对照——不加垫片时同一条命令的结果（`evidence/15-sweep-wsl-shim.log`）：
