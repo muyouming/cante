@@ -928,6 +928,24 @@ mod tests {
     }
 
     #[test]
+    fn hiding_the_bundled_assistant_flips_the_answer_to_not_ready() {
+        // 真机复现（#177）：同一个安装目录，先把随包的那组（`pi\bun.exe` +
+        // `pi\dist\bundle\cli.js`）放好，探测说「在」；把它挪走之后，探测必须变成
+        // 「不在」——「就绪」不允许还有第二种说法（那正是绿勾看 `--version` 时的事）。
+        let dir = TempDir::new("hide-pi");
+        place_named(&dir.0, "cante-bridge.exe");
+        place_named(&dir.0.join("pi"), "bun.exe");
+        place_named(&dir.0.join("pi").join("dist").join("bundle"), "cli.js");
+        let before = resolve_daemon_bin(None, None, Some(&dir.0), None, None);
+        assert!(before.available, "{before:?}");
+
+        fs::remove_dir_all(dir.0.join("pi")).expect("把 pi 目录挪走");
+        let after = resolve_daemon_bin(None, None, Some(&dir.0), None, None);
+        assert!(!after.available, "动手的组件被挪走了就不能再说就绪：{after:?}");
+        assert!(after.reinstall, "缺的是随包发的那一块，出路是重装：{after:?}");
+    }
+
+    #[test]
     fn an_upstream_daemon_needs_no_component_of_ours() {
         // 上游的 `cante`（或 WSL 里的 `ante`）不是我们的桥，它不需要 pi。
         let dir = TempDir::new("upstream-only");

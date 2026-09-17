@@ -31,8 +31,14 @@ mock.module("../tauri.ts", () => ({
   CommandRejected: class CommandRejected extends Error {},
 }));
 
-const { copyDaemonDetails, daemonDetails, daemonNotice, normalizeDaemon, probeDaemon } =
-  await import("./daemon.ts");
+const {
+  copyDaemonDetails,
+  daemonDetails,
+  daemonNotice,
+  daemonReady,
+  normalizeDaemon,
+  probeDaemon,
+} = await import("./daemon.ts");
 const { explainError } = await import("./copy.ts");
 const { actionsFor } = await import("./recovery.ts");
 
@@ -98,6 +104,31 @@ describe("probeDaemon", () => {
   test("探测失败返回 null：这是没答案，不是缺组件", async () => {
     boom = true;
     expect(await probeDaemon()).toBeNull();
+  });
+});
+
+// #177 — 向导的绿勾只有一个来源：后端 `daemon_capability`（program.rs 那条查找线）。
+// 真机复现：把随包的执行组件（安装目录里的 pi\）挪走，桥照样报得出版本号——上一版的
+// 绿勾看的就是它，所以说「已经就绪」，她一动手才失败。
+describe("daemonReady：就绪的唯一判据（#177）", () => {
+  test("后端说缺动手的组件（把 pi 藏起来）时，就绪必须为假", () => {
+    const cap = normalizeDaemon({
+      available: false,
+      why: "这台电脑上缺一个动手的组件，可以重新安装一次 Cante。",
+      searched: ["C:\\Cante\\pi"],
+      reinstall: true,
+    });
+    expect(daemonReady(cap)).toBe(false);
+  });
+
+  test("只有后端说在时才为真", () => {
+    expect(daemonReady(normalizeDaemon({ available: true, path: "C:\\Cante\\cante-bridge.exe" }))).toBe(
+      true,
+    );
+  });
+
+  test("没问出答案（探测失败 / 浏览器预览）不是就绪：不能替她打包票", () => {
+    expect(daemonReady(null)).toBe(false);
   });
 });
 

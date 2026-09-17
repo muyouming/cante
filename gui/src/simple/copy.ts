@@ -94,7 +94,13 @@ export const WIZARD = {
   doneButton: "开始使用",
 } as const;
 
-/** Copy for each way `health` can come back unready. */
+/**
+ * 向导「检查电脑」没问出答案、或者根本没跑在桌面程序里时说的话。
+ *
+ * #177 之后「组件在不在」的那一句不在这里（见 copy-daemon.ts）：绿勾只认后端
+ * `daemon_capability`，缺组件时用 [DAEMON] / [DAEMON_REINSTALL] 那组话。这里的
+ * `engine` 只是不再被向导使用的一条兜底文案。
+ */
 export const WIZARD_HEALTH = {
   bridge:
     "现在打开的是浏览器里的预览，不是桌面程序。请找到并打开电脑上的「Cante」程序，再回来检查。",

@@ -5,10 +5,13 @@
 // 路都行 / 动手前先问你 / 原来的东西不乱动）和第一句话可以怎么说的三句例子都在
 // 那里；点中哪一句，进去首页的框里就已经填好了（见 copy-first-run.ts）。
 //
-// Readiness comes from `invoke("health")`. “管理员配置存在时直接跳过” is a
-// browser-side check (`shouldShowWizard`): a machine an administrator has
-// already provisioned carries a marker, and the wizard never appears. See the
-// report for the exact keys.
+// #177 — 「就绪」只有这一个来源：`daemon_capability`（Rust 侧走 `program.rs` 那条查找
+// 线）。这里**不再**自己探桥的 `--version`：桥在、随包的动手组件不在时它照样报版本号，
+// 界面就会先说她准备好了、她一动手才失败。
+//
+// “管理员配置存在时直接跳过” is a browser-side check (`shouldShowWizard`): a machine an
+// administrator has already provisioned carries a marker, and the wizard never
+// appears. See the report for the exact keys.
 import { For, Show, createSignal, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
@@ -21,9 +24,9 @@ import {
   type SayExample,
 } from "./copy-first-run.ts";
 import { adminConfigured, initAdminConfig } from "./admin-config.ts";
-import { copyDaemonDetails, daemonNotice, probeDaemon } from "./daemon.ts";
+import { copyDaemonDetails, daemonNotice, daemonReady, probeDaemon } from "./daemon.ts";
 import type { DaemonCapability } from "./daemon.ts";
-import { invoke, isBridgeAvailable, type Health } from "../tauri.ts";
+import { isBridgeAvailable } from "../tauri.ts";
 
 /** Set once the person has finished the wizard. */
 export const WIZARD_DONE_KEY = "cante:wizard:done";
@@ -91,9 +94,7 @@ const STEPS: readonly Step[] = ["welcome", "check", "done"];
 export default function Wizard(props: WizardProps): JSX.Element {
   const [step, setStep] = createSignal<Step>("welcome");
   const [checking, setChecking] = createSignal(false);
-  const [health, setHealth] = createSignal<Health | null>(null);
   const [bridgeMissing, setBridgeMissing] = createSignal(false);
-  const [failed, setFailed] = createSignal(false);
   // #103 — 这台电脑有没有那个真正干活的组件。null 是「没问出答案」（探测失败 /
   // 浏览器预览），不是「缺组件」；只有明确的「不在」才显示那一节。
   const [daemon, setDaemon] = createSignal<DaemonCapability | null>(null);
@@ -103,15 +104,23 @@ export default function Wizard(props: WizardProps): JSX.Element {
   const [picked, setPicked] = createSignal<string | null>(null);
 
   const stepIndex = (): number => STEPS.indexOf(step());
-  const ready = (): boolean =>
-    !bridgeMissing() && !failed() && health()?.ok === true && !!health()?.cante;
+
+  /**
+   * 绿勾只看后端那份唯一判断（#177）：动手的组件在不在。
+   *
+   * 探测没问出答案（`daemon()` 为 null）时不为真——没答案不等于就绪，宁可让她
+   * 点一次「重新检查」，也不要先说准备好了。
+   */
+  function ready(): boolean {
+    return !bridgeMissing() && daemonReady(daemon());
+  }
 
   const notice = (): ReturnType<typeof daemonNotice> => daemonNotice(daemon());
 
+  // 没有那份唯一判断的答案时（纯浏览器预览 / 探测失败）只能给一句兜底：
+  // 组件明明缺着的那一路会走上面的 daemonNotice，说得更具体。
   const problem = (): string => {
     if (bridgeMissing()) return WIZARD_HEALTH.bridge;
-    const result = health();
-    if (result && (!result.ok || !result.cante)) return notice()?.what ?? WIZARD_HEALTH.engine;
     return WIZARD_HEALTH.unknown;
   };
 
@@ -123,30 +132,22 @@ export default function Wizard(props: WizardProps): JSX.Element {
 
   async function runCheck(): Promise<void> {
     setChecking(true);
-    setFailed(false);
     setBridgeMissing(false);
     setDaemon(null);
     setDaemonCopied(false);
     setDaemonCopyFailed(false);
     if (!isBridgeAvailable()) {
       // Plain browser preview: there is no desktop host to reach.
-      setHealth(null);
       setBridgeMissing(true);
       setChecking(false);
       return;
     }
-    try {
-      const result = await invoke("health");
-      setHealth(result);
-      if (result.ok && result.cante) markWizardDone();
-      // 能力探测单独走一条，它只回答「组件在不在」；问不到就当没答案。
-      setDaemon(await probeDaemon());
-    } catch {
-      setHealth(null);
-      setFailed(true);
-    } finally {
-      setChecking(false);
-    }
+    // 只问一件事：那个真正干活的组件在不在（后端 `daemon_capability`）。问不到
+    // 就当没答案（`probeDaemon` 返回 null），绝不拿别的东西顶替它说「就绪」。
+    const cap = await probeDaemon();
+    setDaemon(cap);
+    if (daemonReady(cap)) markWizardDone();
+    setChecking(false);
   }
 
   function goCheck(): void {
