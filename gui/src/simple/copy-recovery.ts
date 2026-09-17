@@ -10,6 +10,15 @@
 // 对；混进 recovery.ts 的判断代码里就会漏检。
 import type { RecoveryCopy } from "./recovery.ts";
 
+/**
+ * #173 —— 桥自己报「跑到一半就没消息了」的那句原文的开头。
+ *
+ * 只有 `bridge.rs` 会发出这句话（`STALL_HEADLINE`），所以它能当作可核对的特征：
+ * `recovery.ts` 拿它挑「再试一次」这条路，`copy.ts` 拿它换上停滞专用的
+ * 发生了什么 / 你可以怎么做。改一边就得改另一边。
+ */
+export const STALLED_MARKER = /连不上帮你处理的服务方/;
+
 /** 每条动作的两句话。why 用大白话说清「为什么先做这件事」。 */
 export const RECOVERY: {
   readonly retry: RecoveryCopy;
@@ -28,6 +37,7 @@ export const RECOVERY: {
   readonly copyDetail: RecoveryCopy;
   readonly signIn: RecoveryCopy;
   readonly reinstall: RecoveryCopy;
+  readonly stalled: RecoveryCopy;
 } = {
   /** 通用出口，和原来的「重试」是同一个动作，只是把为什么写出来了。 */
   retry: {
@@ -43,6 +53,15 @@ export const RECOVERY: {
   retryLater: {
     label: "过一会儿再试",
     why: "现在连不上帮你处理的服务方，多半是网络断了。先用浏览器看看别的网页能不能打开，过几分钟再点这个按钮。",
+  },
+  /**
+   * #173 —— 跑到一半彻底没消息了。这一条比上面那条更确定：不是刚连不上，
+   * 而是**已经在做、做到一半，然后断了**。所以她能做的是等网络回来再走一遍，
+   * 而文件是安全的这点要当面说清楚。
+   */
+  stalled: {
+    label: "再试一次",
+    why: "先看看别的网页能不能打开。网络恢复以后，点这个按钮从头走一遍；原来的文件都还在。",
   },
   /** 文件被移走 / 删除：她需要重新选一次。 */
   pickFiles: {

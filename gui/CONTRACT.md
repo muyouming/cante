@@ -121,7 +121,46 @@ the keys in the table are the ones the frontend sends).
   "Status transitions" below.
 - **stderr**: forward line by line as `cante://log`.
 - **Exit**: emit `cante://exit`, set status `offline`, drop the child.
-- **No fabrication**: never synthesize protocol events.
+- **No fabrication**: never synthesize protocol events — with the single,
+documented exception below (the stall report).
+
+#### A turn that goes quiet (bridge-synthesized `Error`)
+
+When the network dies mid-turn, `pi` can stop talking without ever sending a
+`TurnEnd` or an `Error`. The window then spins forever and she concludes the app
+is broken. `cante-bridge` therefore watches its own turn and reports the silence
+itself (issue #173); the upstream daemon does not have to grow a timeout for it.
+
+| | |
+| --- | --- |
+| Who | `cante-bridge` (`src-tauri/src/bridge.rs`, `stall_watch`) |
+| Armed | A prompt was written (`UserInput`), and again on `TurnStart`. Silence before the first prompt is not a stall. |
+| Reset | Every event the **window** receives resets the clock. Raw lines from `pi` that translate to nothing do **not**: a real cut produced 920 s in which the window got nothing while `pi` retried the dead request internally, and that must not keep the spinner alive. An open `TurnPause` (approval sheet) is exempt: `pi` is waiting on the user, and the clock is refreshed instead of expiring. |
+| Fired | When a live turn has said **nothing at all** for the silence budget. |
+| Event | `Evt::Error` (`{ "Error": "…" }`) with the plain-Chinese sentence. No `TurnEnd` is emitted: the turn is neither a success nor a failure — it is unfinished. |
+| After | The turn is abandoned. Late events from it are dropped (a late `agent_settled` must not close a run the window has moved on from), the next prompt starts a clean turn, and the assistant's running work is **not** aborted — killing a tool mid-write could damage a file. |
+| Wording | The message starts with `连不上帮你处理的服务方`; `src/simple/copy.ts` matches that marker for the stall-specific 发生了什么 / 你可以怎么做, and `recovery.ts` routes it to 「再试一次」. Change the marker in one place only if you change the other. |
+
+**The silence budget is 600 s (10 minutes)**, overridable with
+`CANTE_BRIDGE_STALL_SECS` (seconds; `0` disables). It is deliberately large:
+slow is not disconnected.
+
+* **Slow means a long gap, not a long card.** The slowest real card measured is
+  **846 s** (Gemma-4, zero tool calls; `gui/scripts/sweep/README.md`) — but it
+  streamed the whole time, so the *window* was never silent. The quantity this
+  watchdog measures is the gap.
+* That gap has its own measured rule: the sweep has judged “no event for 300 s”
+  to mean stuck on real cards, and the 846 s card never tripped it. 600 s is
+  twice that proven-safe gap.
+* It also has to beat the gateway's own recovery: four 60 s reconnects is 240 s,
+  less than half the budget.
+* It has to beat `pi`'s own patience, or the window still freezes for a quarter
+  of an hour. Measured against a real cut (below): `pi` retried the dead request
+  silently at ~305 s intervals and gave up at ~925 s. 600 s reports about five
+  minutes earlier, in plain Chinese, with an exit she can press.
+
+While a turn is live and silent this is the *only* event the adapter
+synthesizes; every other event is still forwarded verbatim.
 
 #### Status transitions
 
@@ -136,6 +175,9 @@ the keys in the table are the ones the frontend sends).
 | `TurnEnd` | `idle` (stays `error` if it was `error`) |
 | `Error` | `error` |
 | `SessionEnd` / `Goodbye` | `offline`, session cleared |
+
+A bridge-synthesized stall `Error` (above) is an ordinary `Error` here: status
+`error`, and the window shows the failure page instead of a spinner.
 
 ## Frontend module interfaces (already implemented — treat as fixed)
 

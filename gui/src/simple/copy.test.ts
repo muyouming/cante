@@ -38,6 +38,38 @@ describe("explainError", () => {
     expect(ERRORS.networkHow).not.toContain("「重试」");
   });
 
+  test("跑到一半没消息了：换成停滞专用的两句，并带上做到第几步", () => {
+    // #173 —— bridge.rs 在服务方长时间没消息时自己报这一句。跑失败的
+    // TaskRun.error 自带 what＝兜底那句「这件事没有做完。」，所以停滞必须在那
+    // 之前认出来；否则她看到的仍是一句什么都没说的通用话。
+    const raw =
+      "连不上帮你处理的服务方，可能网络断了。已经做到第 3 步，原来的文件都还在。网络好了，点「再试一次」。";
+    const human = explainError(raw);
+    expect(human.what).toBe(ERRORS.stallWhat);
+    expect(human.how).toBe("已经做到第 3 步，原来的文件都还在。网络好了，点「再试一次」。");
+    expect(human.how).toContain("原来的文件都还在");
+    expect(human.detail).toBe(raw);
+
+    // 从 store 给的真实形状来也一样：what/how 是兜底两句，锚点在 detail 里。
+    const fromRun = explainError({
+      what: "这件事没有做完。",
+      how: "原来的文件都还在。可以再试一次，或者换一种说法告诉我要做什么。",
+      detail: raw,
+    });
+    expect(fromRun.what).toBe(ERRORS.stallWhat);
+    expect(fromRun.how).toContain("第 3 步");
+
+    // 认不出步数时就不说数字——不编。
+    const noCount = explainError({
+      what: "这件事没有做完。",
+      how: "原来的文件都还在。",
+      detail: "连不上帮你处理的服务方，可能网络断了。",
+    });
+    expect(noCount.what).toBe(ERRORS.stallWhat);
+    expect(noCount.how).toBe(ERRORS.stallHow);
+    expect(noCount.how).not.toMatch(/\d/);
+  });
+
   test("the desktop-bridge message is explained for a browser preview", () => {
     expect(explainError("desktop bridge unavailable").what).toBe(ERRORS.bridgeWhat);
   });

@@ -7,6 +7,9 @@
 // reviewable at a glance instead of hunting through JSX.
 
 import { DAEMON, DAEMON_REINSTALL } from "./copy-daemon.ts";
+// #173 —— 桥自己报的「跑到一半没消息了」。特征只在这一处和 `copy-recovery.ts`
+// 共用，两边都靠它认这一条。
+import { STALLED_MARKER } from "./copy-recovery.ts";
 
 export const APP_NAME = "Cante";
 
@@ -152,6 +155,11 @@ export const ERRORS = {
   // 这句会在出错页的提示框里、也可能在别处单独出现，所以不点名某个按钮——
   // 出错页上那个按钮叫「再试一次」，写死「重试」她就找不到它了。
   networkHow: "先用浏览器看看能不能打开网页；网络正常了，再试一次。",
+  // #173 —— 跑到一半彻底没消息了。不是「一开始就连不上」，而是**已经在做**：
+  // 所以要先告诉她做到哪儿了、原来的文件没事，然后再走一遍。步数由下面的
+  // explainError 从桥给的原文里取回来，取不到就不说数字——不编。
+  stallWhat: "连不上帮你处理的服务方，可能网络断了。",
+  stallHow: "已经做到的步骤、原来的文件都还在。网络好了，点「再试一次」。",
   authWhat: "账号还没配置好，暂时用不了需要联网的功能。",
   authHow:
     "请找配置这台电脑的同事或管理员帮你配好账号，然后点「重试」。这期间可以先用不需要联网的功能。",
@@ -331,6 +339,20 @@ function rawDetail(input: unknown): string {
  */
 export function explainError(input: unknown): HumanError {
   const detail = rawDetail(input);
+  // #173 —— 停滞要排在「对象自带 what/how」前面：TaskRun.error 的 what 是兜底那句
+  // 「这件事没有做完。」，真原因只在 detail 里。按它换成停滞专用的两句，她才知道
+  // 是网络断了、做到哪儿了、文件没事；通用那句什么都没有说。
+  if (STALLED_MARKER.test(detail)) {
+    const steps = Number(/已经做到第 (\d+) 步/.exec(detail)?.[1] ?? 0);
+    return {
+      what: ERRORS.stallWhat,
+      how:
+        steps > 0
+          ? `已经做到第 ${steps} 步，原来的文件都还在。网络好了，点「再试一次」。`
+          : ERRORS.stallHow,
+      detail,
+    };
+  }
   if (input && typeof input === "object") {
     const record = input as Record<string, unknown>;
     const what = typeof record.what === "string" ? record.what.trim() : "";

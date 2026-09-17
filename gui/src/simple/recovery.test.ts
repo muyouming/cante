@@ -157,6 +157,24 @@ describe("actionsFor：可核对的原因（cause）也参与判断", () => {
     expect(kinds(offline)).not.toContain("pick-files");
   });
 
+  test("#173 停滞：已经在做、做到一半断了，出路是「再试一次」", () => {
+    // 这一句是桥自己在服务方长时间没消息时报的（bridge.rs 的 STALL_HEADLINE）。
+    // 它比普通的「连不上」更具体：事情已经做了一半，所以要告诉她怎么接着走，
+    // 而不是让她重新选文件。文案里的数字必须原样留着。
+    const stalled = actionsFor(
+      runFailure(
+        "连不上帮你处理的服务方，可能网络断了。已经做到第 3 步，原来的文件都还在。网络好了，点「再试一次」。",
+      ),
+    );
+    expect(kinds(stalled)).toEqual(["retry", "copy-detail"]);
+    expect(stalled[0]?.label).toBe("再试一次");
+    expect(stalled[0]?.why).toContain("网络");
+    expect(kinds(stalled)).not.toContain("pick-files");
+
+    // 没带步数时也走同一条路，不退回通用出口。
+    expect(actionsFor(runFailure("连不上帮你处理的服务方"))[0]?.label).toBe("再试一次");
+  });
+
   test("cause 说没有权限：另存到能写的位置", () => {
     const denied = actionsFor(runFailure("os error 13: Permission denied"));
     expect(kinds(denied)).toContain("save-elsewhere");
