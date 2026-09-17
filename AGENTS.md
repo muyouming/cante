@@ -70,6 +70,18 @@ result = subprocess.run(..., timeout=60)   # python
 - 想在那台 Windows 上做**真实端到端**验收：在 **WSL** 里跑 Linux 版守护进程，然后把 `CANTE_BIN` 指过去（例如 `wsl.exe -e /home/<用户>/cante-bin/ante serve`）。WSL 里能访问局域网网关。
 - **SSH 会话里看不到窗口**：从 SSH 启动的 GUI 进程没有交互桌面，截图拿不到真实画面。要看窗口、点按钮，需要 **RDP 会话**（或把任务挂到已登录会话上）。这条限制要在报告里如实写。
 
+## 6.5 两个会让"推不上去"的坑（Windows 上尤其）
+
+1. **改动 `.github/workflows/**` 的分支，可能推不上去**。那台 Windows 测试机上 git 用的是
+   **凭据管理器里缓存的旧令牌**（缺 `workflow` 权限），于是 `git push` 报
+   `refusing to allow an OAuth App to create or update workflow … without workflow scope` ✗。
+   **遇到就如实写进报告**，别反复重试 ✗ —— 集成者会把这个提交取回本机来推 ✓
+   （本机的凭据有权限 ✓）。
+2. **在 Windows 上生成 patch/重定向输出，别用 `>`**。PowerShell 的重定向按**控制台编码**（GBK）
+   写文件，中文会变成非法字节，`git am` / `git apply` 都会说"不是合法补丁" ✗。
+   让 **git 自己写文件**：`git format-patch -1 HEAD --output=…` ✓（或 `git show > ` 换成
+   `--output` 类的写法 ✓）。
+
 ## 7. 交付方式
 
 - 一个任务一个分支（`ws/<轮次>-<名字>` 或 `fix/<简述>`），**只改任务范围内列出的文件**；不要顺手重构无关代码。
