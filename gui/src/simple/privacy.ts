@@ -6,11 +6,16 @@
 // jargon (no "model", "provider", "token", "prompt", "path"…). The logic is
 // pure so `bun test` can pin the copy without a browser.
 //
-// Two consumers:
+// Consumers:
 //   - PrivacyPanel.tsx renders `privacyAnswers()` from `store.privacy()`.
 //   - r5-trust's ResultCard reads `runIsOnline()` / `onlineLabel()` when it
 //     stamps a finished run — the store writes `run.online` from the same
 //     `PrivacyState`, so the panel and the card can never disagree.
+//   - r20's「这次发出去了什么」renders `sentContentView()` from the same
+//     `store.composedInstruction(run)` the store actually sends, so what she
+//     reads is exactly what went out — never a second, drifting copy.
+import { SENT } from "./copy-privacy-audit.ts";
+
 export interface PrivacyState {
   /** The machine is allowed to reach the network for the next task. */
   online: boolean;
@@ -86,6 +91,93 @@ export function webSearchHint(localOnly: boolean): string {
   return localOnly
     ? "已关闭（跟着「只在本机处理」一起关）"
     : "已开：需要时会联网，关掉它就等于只在本机处理";
+}
+
+// ---------------------------------------------------------------------------
+// r20 — 「这次发出去了什么」：把真正发出去的那段文字摊开给她看。
+//
+// 关键约束，改这一节前先读：
+//   * 展示的文字**只能**来自 store.composedInstruction(run)（也就是
+//     `instructionFor(taskId, files, instruction)` 的结果）。这里绝不重新拼
+//     一份指令——两份一定会漂移，而她看到的就是她要信的。
+//   * 这里也**绝不读取任何本地文件内容**：我们展示的是「发出去的那段文字」，
+//     不是「文件里有什么」。文件留在本机，由任务自己在需要时处理，不归这一节管。
+// ---------------------------------------------------------------------------
+
+/** 最近一次任务，缩成这一节需要的最小信息。 */
+export interface SentRunFacts {
+  /** 那次真正发出去的文字，逐字来自 composedInstruction；没有任务时是 null。 */
+  text: string | null;
+  /** 那次允不允许联网（run.online）。 */
+  online: boolean;
+}
+
+/** 折叠 / 展开要用的三态，以及每种状态该说的话。 */
+export interface SentContentView {
+  state: "none" | "offline" | "sent";
+  /** 原文；只有 sent 时非空。 */
+  text: string;
+  /** 折叠时的一句摘要；只有 sent 时有内容。 */
+  summary: string;
+  /** 没有原文时的如实说明；none / offline 各一句。 */
+  message: string;
+}
+
+/** 每段内容在信封里用的固定开头（见 tasks/prompt.ts 的 buildPrompt）。这里只用来
+ *  **描述**「这段文字里有什么」，不参与拼装——拼装永远是 composedInstruction 的事。 */
+const SENT_MARKERS: ReadonlyArray<{ label: string; markers: readonly string[] }> = [
+  { label: SENT.partLabel.what, markers: ["【要做的事】"] },
+  { label: SENT.partLabel.where, markers: ["【要处理的文件】", "【要整理的文件夹】"] },
+  { label: SENT.partLabel.how, markers: ["【怎么做】"] },
+  { label: SENT.partLabel.words, markers: ["【用户的原话】"] },
+];
+
+/** 这段文字里都有哪几类内容，按固定顺序。用来写摘要，不改变原文一个字。 */
+export function sentTextParts(text: string): string[] {
+  return SENT_MARKERS.filter((part) => part.markers.some((marker) => text.includes(marker))).map(
+    (part) => part.label,
+  );
+}
+
+/**
+ * 把「有没有任务、联没联网」变成一个可以直接渲染的三态。三条路都要如实：
+ *
+ *   * 没有做过任务 -> none
+ *   * 做过，但那次只在本地处理 -> offline（什么都没发出去）
+ *   * 做过且联了网 -> sent（原文 + 摘要）
+ */
+export function sentContentView(facts: SentRunFacts | null): SentContentView {
+  if (!facts || facts.text === null) {
+    return { state: "none", text: "", summary: "", message: SENT.none };
+  }
+  if (!facts.online) {
+    return { state: "offline", text: "", summary: "", message: SENT.offline };
+  }
+  const text = facts.text;
+  return {
+    state: "sent",
+    text,
+    summary: SENT.summary(text.length, sentTextParts(text)),
+    message: "",
+  };
+}
+
+/**
+ * 最近一次真正交给助手的任务（还没开始的不算）。
+ *
+ * `preview` / `draft` 还停在确认页上，一个字都没发出去；把它们算进来会让这一节
+ * 对着「将要发的」说「已经发的」，那就不是如实了。历史里的旧任务（卡片已经不在）
+ * 同样照收——它的 instruction 本身就是当时发出去的那段文字。
+ */
+export function latestSentRun<T extends { state: string; createdAt: number }>(
+  runs: readonly T[],
+): T | null {
+  let newest: T | null = null;
+  for (const run of runs) {
+    if (run.state === "preview" || run.state === "draft") continue;
+    if (!newest || run.createdAt > newest.createdAt) newest = run;
+  }
+  return newest;
 }
 
 // ---------------------------------------------------------------------------

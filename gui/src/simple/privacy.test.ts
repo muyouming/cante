@@ -11,6 +11,7 @@ import {
   DRAFT_SEND_NOTICE,
   LOCAL_ONLY_KEY,
   WECHAT_SAFETY_NOTICE,
+  latestSentRun,
   localOnlyHint,
   onlineHint,
   onlineLabel,
@@ -18,9 +19,12 @@ import {
   privacyAnswers,
   readLocalOnly,
   runIsOnline,
+  sentContentView,
+  sentTextParts,
   webSearchHint,
   type PrivacyState,
 } from "./privacy.ts";
+import { SENT } from "./copy-privacy-audit.ts";
 import { createStore } from "../store.ts";
 
 /** Words this audience does not know; none may appear in user-facing copy. */
@@ -187,5 +191,113 @@ describe("store privacy members", () => {
     await store.setLocalOnly(false);
     expect(store.privacy().online).toBe(true);
     dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// r20 — 「这次发出去了什么」
+//
+// 这一节展示的必须是**真正发出去的那段文字**（store.composedInstruction 的结果），
+// 不是这里另拼的一份。所以下面的断言拿 store 的真实结果来对，而不是自己造一段。
+// ---------------------------------------------------------------------------
+
+describe("这次发出去了什么", () => {
+  const TASK = {
+    id: "excel.merge",
+    title: "把几张表合成一张",
+    plan: ["打开这几张表", "合成一张新表"],
+  };
+
+  function mount() {
+    let store!: ReturnType<typeof createStore>;
+    let dispose!: () => void;
+    createRoot((root) => {
+      dispose = root;
+      store = createStore();
+    });
+    return { store, dispose };
+  }
+
+  test("展示的就是真正发出去的那一段，与 composedInstruction 逐字一致", async () => {
+    const { store, dispose } = mount();
+    await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这两张表合成一张");
+    const run = store.currentRun()!;
+    const composed = store.composedInstruction(run);
+    const view = sentContentView({ text: composed, online: true });
+
+    expect(view.state).toBe("sent");
+    // 不另拼一份：显示的就是 store 真正会发出去的那一份。
+    expect(view.text).toBe(composed);
+    expect(view.text).toBe(store.composedInstruction(run));
+    // 卡片的规矩和她的原话都在，长度也说明它不是一句话。
+    expect(view.text).toContain("原来的文件一张都不要改");
+    expect(view.text).toContain("把这两张表合成一张");
+    expect(view.text.length).toBeGreaterThan(200);
+    dispose();
+  });
+
+  test("摘要说出多少字、里面有哪几类内容", async () => {
+    const { store, dispose } = mount();
+    await store.startRun(TASK, ["/work/a.xlsx"], "把这两张表合成一张");
+    const composed = store.composedInstruction(store.currentRun()!);
+    const view = sentContentView({ text: composed, online: true });
+
+    expect(sentTextParts(composed)).toEqual([
+      SENT.partLabel.what,
+      SENT.partLabel.where,
+      SENT.partLabel.how,
+      SENT.partLabel.words,
+    ]);
+    expect(view.summary).toContain("字");
+    for (const label of sentTextParts(composed)) expect(view.summary).toContain(label);
+    assertPlain(view.summary);
+    dispose();
+  });
+
+  test("没联网时如实说：这次什么都没发出去，也不显示原文", () => {
+    const view = sentContentView({ text: "一份并不存在的原文", online: false });
+    expect(view.state).toBe("offline");
+    expect(view.message).toContain("什么都没发出去");
+    expect(view.text).toBe("");
+    assertPlain(view.message);
+  });
+
+  test("还没做过任务时如实说，不假装发过", () => {
+    const view = sentContentView(null);
+    expect(view.state).toBe("none");
+    expect(view.message).toContain("还没有做过任务");
+    expect(view.text).toBe("");
+    expect(view.summary).toBe("");
+    assertPlain(view.message);
+  });
+
+  test("这一节所有的说明文案都没有技术词", () => {
+    assertPlain(SENT.filesStay);
+    assertPlain(SENT.textGoes);
+    assertPlain(SENT.textIsLocal);
+    assertPlain(SENT.none);
+    assertPlain(SENT.offline);
+    assertPlain(SENT.entryShow);
+    assertPlain(SENT.entryHide);
+    assertPlain(SENT.showFull);
+    assertPlain(SENT.hideFull);
+    assertPlain(SENT.summary(123, [SENT.partLabel.what, SENT.partLabel.where]));
+  });
+
+  test("摘要只描述原文里真有的内容：什么都没有时就说多少字", () => {
+    // 找不到卡片时 composedInstruction 退回她那一句话，信封的开头一个都没有。
+    expect(sentTextParts("把这两张表合成一张")).toEqual([]);
+    expect(SENT.summary(9, [])).toContain("9 个字");
+    expect(SENT.summary(9, [])).not.toContain("里面有");
+  });
+
+  test("最近一次任务：停在确认页的不算，做过或做完的才算", () => {
+    const runs = [
+      { id: "old", state: "done", createdAt: 10 },
+      { id: "new", state: "preview", createdAt: 99 },
+    ];
+    expect(latestSentRun(runs)?.id).toBe("old");
+    expect(latestSentRun([{ id: "draft", state: "draft", createdAt: 5 }])).toBeNull();
+    expect(latestSentRun([])).toBeNull();
   });
 });
