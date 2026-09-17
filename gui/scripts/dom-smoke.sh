@@ -75,14 +75,20 @@ bun run build:web >/dev/null
 cat > "$WORK/serve.py" <<'PY'
 import http.server, os, socketserver, sys, urllib.parse
 
-root, port, probe, layout = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+root, port, probe, layout, firstrun = (
+    sys.argv[1],
+    int(sys.argv[2]),
+    sys.argv[3],
+    sys.argv[4],
+    sys.argv[5],
+)
 
 
 def injected(query):
     flags = []
     if "provisioned=1" in query:
         flags.append("<script>window.__CANTE_PROVISIONED__=true;</script>")
-    for flag, path in (("probe=1", probe), ("layout=1", layout)):
+    for flag, path in (("probe=1", probe), ("layout=1", layout), ("firstrun=1", firstrun)):
         if flag in query:
             with open(path, encoding="utf-8") as handle:
                 flags.append("<script>" + handle.read() + "</script>")
@@ -118,7 +124,7 @@ with socketserver.TCPServer(("127.0.0.1", port), Handler) as httpd:
 PY
 
 echo "==> serving $APP_DIR/dist on :$PORT"
-python3 "$WORK/serve.py" "$APP_DIR/dist" "$PORT" "$WORK/probe.js" "$WORK/layout.js" >/dev/null 2>&1 &
+python3 "$WORK/serve.py" "$APP_DIR/dist" "$PORT" "$WORK/probe.js" "$WORK/layout.js" "$WORK/firstrun.js" >/dev/null 2>&1 &
 SERVER_PID=$!
 sleep 1
 
@@ -619,6 +625,138 @@ cat > "$WORK/layout.js" <<'JS'
 })();
 JS
 
+# The first-run probe (r24/F7). Unlike the two above, it *drives* the wizard:
+# welcome → 先看看界面 (there is no desktop bridge in a plain browser, so the
+# check step can only be skipped) → it measures the last step's layout → it
+# clicks one example → 开始使用 → it reads back #cante-say. That last read is
+# the only place where “点一下例子真的填进框里” is observed in a real browser;
+# the unit test only scans the source for the wiring.
+#
+# It also records the last-step geometry: after F1 the outer box is top-aligned
+# with an m-auto inner box, so the title must not sit above the viewport on a
+# scroll area that cannot reach it (that was the 800×560 regression).
+#
+# It is a plain script in a real page and writes facts, not verdicts, into
+# <pre id="firstrun-report"> — the assertions live in the python below.
+cat > "$WORK/firstrun.js" <<'JS'
+(function () {
+  var out = {
+    error: null,
+    steps: [],
+    example: null,
+    stored: null,
+    homeValue: null,
+    homeTitleSeen: false,
+    keyAfter: null,
+    layout: { viewportH: null, h1: null, contentH: null, scroller: null },
+  };
+
+  function byText(text, scope) {
+    var list = Array.prototype.slice.call((scope || document).querySelectorAll("button"));
+    for (var i = 0; i < list.length; i++) {
+      if ((list[i].textContent || "").indexOf(text) >= 0) return list[i];
+    }
+    return null;
+  }
+
+  function byExactText(text, selector) {
+    var list = Array.prototype.slice.call(document.querySelectorAll(selector));
+    for (var i = 0; i < list.length; i++) {
+      if ((list[i].textContent || "").trim() === text) return list[i];
+    }
+    return null;
+  }
+
+  function click(el, name) {
+    if (!el) {
+      out.steps.push(name + ":missing");
+      return false;
+    }
+    // Focus before click: a real mouse press lands the focus on the button too.
+    el.focus();
+    el.click();
+    out.steps.push(name + ":clicked");
+    return true;
+  }
+
+  function round(rect) {
+    return {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      w: Math.round(rect.width),
+      h: Math.round(rect.height),
+    };
+  }
+
+  async function settle(times) {
+    // Solid's effects run as microtasks; no timers, because --dump-dom may run
+    // before one fires (same rule as the other probes).
+    for (var i = 0; i < (times || 4); i++) await null;
+  }
+
+  function measureLastStep() {
+    var h1 = byExactText("开始之前，先记住三件事", "h1");
+    var scroller = null;
+    for (var p = h1 && h1.parentElement; p; p = p.parentElement) {
+      var style = getComputedStyle(p);
+      if (style.overflowY === "auto" || style.overflowY === "scroll") {
+        scroller = p;
+        break;
+      }
+    }
+    var inner = h1 && h1.closest("div.m-auto");
+    out.layout = {
+      viewportH: window.innerHeight,
+      h1: h1 ? round(h1.getBoundingClientRect()) : null,
+      contentH: inner ? Math.round(inner.getBoundingClientRect().height) : null,
+      scroller: scroller
+        ? {
+            clientH: scroller.clientHeight,
+            scrollH: scroller.scrollHeight,
+            scrollTop: Math.round(scroller.scrollTop),
+          }
+        : null,
+    };
+  }
+
+  window.addEventListener("load", function () {
+    void (async function () {
+      try {
+        await settle();
+        click(byText("开始检查"), "welcome");
+        await settle();
+        click(byText("先看看界面"), "skip");
+        await settle();
+        measureLastStep();
+        var example = byText("帮我把微信里那些接龙整理成一张表");
+        out.example = example ? "帮我把微信里那些接龙整理成一张表" : null;
+        click(example, "pick-example");
+        out.stored =
+          typeof localStorage !== "undefined"
+            ? localStorage.getItem("cante:first-run:sentence")
+            : null;
+        await settle();
+        click(byText("开始使用"), "start");
+        await settle(8);
+        var box = document.getElementById("cante-say");
+        out.homeValue = box ? box.value : null;
+        out.homeTitleSeen = !!byText("看看能做什么");
+        out.keyAfter =
+          typeof localStorage !== "undefined"
+            ? localStorage.getItem("cante:first-run:sentence")
+            : null;
+      } catch (error) {
+        out.error = String((error && error.stack) || error);
+      }
+      var pre = document.createElement("pre");
+      pre.id = "firstrun-report";
+      pre.textContent = JSON.stringify(out);
+      document.body.appendChild(pre);
+    })();
+  });
+})();
+JS
+
 # `$1` url path, `$2` output file, `$3` chrome profile tag, `$4` --window-size.
 # No --virtual-time-budget: the app keeps a reconcile interval alive, so virtual
 # time never settles and Chrome hangs. --dump-dom after load is enough — Solid
@@ -653,6 +791,12 @@ dump "/?provisioned=1&probe=1" "$WORK/dom-probe.html" probe "1180,760"
 
 echo "==> dumping the home screen in a small window (800×560)"
 dump "/?provisioned=1&layout=1" "$WORK/dom-home-small.html" home-small "800,560"
+
+echo "==> driving the first-run wizard to its last step (1180×760)"
+dump "/?firstrun=1" "$WORK/dom-firstrun-large.html" firstrun-large "1180,760"
+
+echo "==> driving the first-run wizard to its last step (800×560)"
+dump "/?firstrun=1" "$WORK/dom-firstrun-small.html" firstrun-small "800,560"
 
 exit_code=0
 python3 - "$WORK/dom-first-run.html" "$WORK/dom-home.html" "$WORK/dom-probe.html" <<'PY' || exit_code=1
@@ -944,6 +1088,84 @@ for path, win_w, win_h in SOURCES:
         f"{home_scan.get('belowFoldInScroll', 0)} below the fold but reachable, "
         f"{home_scan.get('textWiderThanBox', 0)} text boxes wider than their box "
         f"(reported, not asserted: 省略号是有意的)"
+    )
+    if problems:
+        for problem in problems:
+            print(f"dom-smoke: {label}: {problem}", file=sys.stderr)
+        failed = 1
+
+if failed:
+    sys.exit(1)
+PY
+
+# ---- r24/F7：向导最后一步真的驱动一遍（点例子 → 首页框里有字） -----------------
+#
+# 之前 dom-smoke 只 dump 了向导第 1 步，「点一下例子真的填进框里」只有源码扫描。
+# 这里注入一个普通脚本，真的点 welcome → 先看看界面 → 量最后一步布局 → 点例子
+# → 开始使用，然后读回 #cante-say。两个窗口尺寸都跑，和上面那条约定一样。
+#
+# 顺带把 F1 钉住：内容比视口高时，标题不能被裁到视口上面、也不能有一段永远滚不到。
+python3 - "$WORK/dom-firstrun-large.html" "$WORK/dom-firstrun-small.html" <<'PY' || exit_code=1
+import html, json, re, sys
+
+failed = 0
+for path in sys.argv[1:]:
+    label = "first-run wizard (driven)"
+    dom = open(path, encoding="utf-8", errors="replace").read()
+    if len(dom) < 500:
+        print(f"dom-smoke: {label}: Chrome produced no DOM ({len(dom)} bytes)", file=sys.stderr)
+        failed = 1
+        continue
+    blob = re.search(r'<pre id="firstrun-report">(.*?)</pre>', dom, flags=re.S)
+    if not blob:
+        print(f"dom-smoke: {label}: no report (探针没跑出来)", file=sys.stderr)
+        failed = 1
+        continue
+    try:
+        report = json.loads(html.unescape(blob.group(1)))
+    except ValueError as error:
+        print(f"dom-smoke: {label}: report is not JSON ({error})", file=sys.stderr)
+        failed = 1
+        continue
+    if report.get("error"):
+        print(f"dom-smoke: {label}: the probe threw: {report['error']}", file=sys.stderr)
+        failed = 1
+        continue
+
+    steps = " → ".join(report.get("steps", []))
+    layout = report.get("layout") or {}
+    h1 = layout.get("h1")
+    content_h = layout.get("contentH")
+    scroller = layout.get("scroller") or {}
+    problems = []
+    if not report.get("example"):
+        problems.append("最后一步没找到那条例子的按钮")
+    if report.get("homeValue") != report.get("example"):
+        problems.append(
+            f"点例子并开始使用后，#cante-say 里的字是 {report.get('homeValue')!r}，"
+            f"不是那条例子的原文 {report.get('example')!r}"
+        )
+    if not report.get("homeTitleSeen"):
+        problems.append("点「开始使用」后没有进到首页")
+    if report.get("keyAfter") is not None:
+        problems.append("暂存键在首页取走后还留着（应该取走即清）")
+    if not h1:
+        problems.append("最后一步的标题没找到")
+    elif h1.get("y", -999) < -1:
+        problems.append(
+            f"最后一步的标题被裁到视口上面（y={h1.get('y')}，视口高 {layout.get('viewportH')}），滚不回来"
+        )
+    if content_h and scroller and scroller.get("scrollH", 0) < content_h:
+        problems.append(
+            f"内容高 {content_h}px 但可滚区只有 {scroller.get('scrollH')}px：有一段永远滚不到"
+        )
+
+    h1_y = h1.get("y") if h1 else None
+    print(f"dom-smoke: {label}: 走完 {steps}；框里读回 {report.get('homeValue')!r}")
+    print(
+        f"  | 最后一步布局：标题 y={h1_y}；视口高 {layout.get('viewportH')}；"
+        f"内容高 {content_h}；可滚区 {scroller.get('clientH')}→{scroller.get('scrollH')}；"
+        f"暂存值点后 {report.get('stored')!r}，首页取走后 {report.get('keyAfter')!r}"
     )
     if problems:
         for problem in problems:

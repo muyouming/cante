@@ -1,6 +1,10 @@
 // Simple-mode home: big task cards grouped by what they are for, plus one
 // free-form box for “直接说一句话” (#38).
 //
+// r24 — 对一个从没用过这类工具的人，「我该怎么开口」才是门槛：三句她说得出口的
+// 例子就摆在那个框下面，点一下填进去，改几个字就是她的第一次尝试；第一次做成
+// 之后，同一件事「多说一个条件」的那一句也会出现在这里（见 copy-first-run.ts）。
+//
 // This file is only the entry point. A card press hands the chosen `TaskDef`
 // to the task flow (r5-tasks' TaskRunner, wired in App.tsx); a free-form
 // sentence hands the text over the same seam. Home never talks to the daemon
@@ -9,6 +13,16 @@ import { For, Show, createSignal, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { HOME, TASK_GROUPS, taskGroupRank } from "./copy.ts";
+// r24 — 「第一句话该怎么说」：三句例子两边（向导最后一步、首页输入框旁）共用。
+import {
+  FIRST_RUN,
+  SAY_EXAMPLES,
+  exampleForSentence,
+  firstWinHintFor,
+  firstWinRun,
+  nextTimeSuggestion,
+  takeSentence,
+} from "./copy-first-run.ts";
 import { ADMIN, adminDefaultText, adminDisabledText, adminNetworkText } from "./copy-admin.ts";
 import {
   adminConfig,
@@ -43,6 +57,8 @@ export interface HomeProps {
 export default function Home(props: HomeProps): JSX.Element {
   const [text, setText] = createSignal("");
   const [hint, setHint] = createSignal<string | null>(null);
+  // 点了一条例子之后，光标要落进框里（她接着改几个字就是自己的事了）。
+  let input: HTMLInputElement | undefined;
   // #58 — 「技术同事设了什么」默认收起，只有她主动点开才展开。
   const [adminOpen, setAdminOpen] = createSignal(false);
   // #74 — the ability centre is a local overlay; the shell does not need to know.
@@ -101,7 +117,29 @@ export default function Home(props: HomeProps): JSX.Element {
   // #58 — 启动时读一次技术同事设好的配置。读到了就重画：被关掉的任务卡要消失。
   onMount(() => {
     void initAdminConfig();
+    // r24 — 她在向导最后一步点的那一句，被带到这里（取走即清，只填这一次）。
+    const seed = takeSentence();
+    if (seed) setText(seed);
   });
+
+  /**
+   * r24 — 点一条例子：这句话进框，光标也进框。
+   *
+   * 例子只是起点，不是模板：框里的字随她改，所以她点完得能直接往下接着打。
+   */
+  function pickExample(sentence: string): void {
+    setText(sentence);
+    setHint(null);
+    input?.focus();
+  }
+
+  // r24 — 她第一次做成的那件事；以及同一件事「多说一个条件」的那一句。
+  // 结果卡片归别的 workstream，而这里是她做完之后一定回到的那一屏。
+  const firstWin = () => firstWinRun(props.store.runs());
+  const nextTime = (): string | null => {
+    const run = firstWin();
+    return run ? nextTimeSuggestion(run) : null;
+  };
 
   // Group the catalogue once; unknown groups fall to the end rather than
   // disappearing, so a task with a new group is never silently lost. (#58 —
@@ -133,6 +171,15 @@ export default function Home(props: HomeProps): JSX.Element {
     }
     setHint(null);
     setText("");
+    // r24 — 她提交的这一句正好是某条例子的原文时，那不是「自由发挥」：这件事卡片
+    // 里本来就有，走卡片流程才走得通（微信接龙要的是贴进去的文字，走「直接说一句
+    // 话」会卡在选文件那一步）。改过一个字就还是按她自己想的说，不替她认。
+    const example = exampleForSentence(value);
+    const task = example ? taskById(example.taskId) : undefined;
+    if (task) {
+      props.onPickTask(task);
+      return;
+    }
     props.onSubmitText(value);
   };
 
@@ -142,6 +189,28 @@ export default function Home(props: HomeProps): JSX.Element {
         <div class="mx-auto w-full max-w-3xl">
           <h1 class="text-[26px] leading-tight font-bold text-slate-100">{HOME.greeting}</h1>
           <p class="mt-2 text-[16px] text-slate-400">{HOME.intro}</p>
+
+          {/* r24 — 她刚做成第一件事。同一件事原来还能说得更细，这句话就摆在这里，
+              点一下同样能填进下面的框：第一次成功之后最该学的就是这一句。 */}
+          <Show when={nextTime()}>
+            {(sentence) => (
+              <section class="mt-5 rounded-2xl border-2 border-emerald-700 bg-emerald-950/30 px-5 py-4">
+                <h2 class="text-[20px] font-semibold text-emerald-100">
+                  {FIRST_RUN.firstWinTitle}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => pickExample(sentence())}
+                  class="mt-3 min-h-[48px] w-full rounded-xl border border-emerald-700 bg-[#111820] px-4 py-2 text-left text-[17px] leading-snug text-emerald-50 hover:border-emerald-400"
+                >
+                  {sentence()}
+                </button>
+                <p class="mt-2 text-[16px] leading-relaxed text-slate-300">
+                  {firstWinHintFor(firstWin())}
+                </p>
+              </section>
+            )}
+          </Show>
 
           {/* #55 — 到点的自动任务在等她确认；它不会自己动手，得让她找得到入口。 */}
           <Show when={pendingRun() && !stagedFromQueue()}>
@@ -318,6 +387,7 @@ export default function Home(props: HomeProps): JSX.Element {
           <div class="flex items-stretch gap-2">
             <input
               id="cante-say"
+              ref={input}
               type="text"
               autocomplete="off"
               value={text()}
@@ -340,6 +410,22 @@ export default function Home(props: HomeProps): JSX.Element {
               {hint()}
             </p>
           </Show>
+          {/* r24 — 「该怎么说」才是第一次用的人真正的门槛：三句人话就摆在输入框
+              下面，点一下就跑进框里。它们是唯一的口子，不是一份功能清单。 */}
+          <p class="text-[16px] leading-relaxed text-slate-300">{FIRST_RUN.homeTitle}</p>
+          <div class="flex flex-wrap gap-2">
+            <For each={SAY_EXAMPLES}>
+              {(example) => (
+                <button
+                  type="button"
+                  onClick={() => pickExample(example.sentence)}
+                  class="min-h-[44px] rounded-xl border border-slate-700 bg-[#141b24] px-4 text-[16px] text-slate-200 hover:border-sky-500"
+                >
+                  {example.sentence}
+                </button>
+              )}
+            </For>
+          </div>
         </form>
       </div>
 

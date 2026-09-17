@@ -86,8 +86,9 @@ export const WIZARD = {
   notReadyBody: "现在还差一点点，最快的方法是打开 Cante 桌面程序再检查一次。",
   recheckButton: "重新检查",
   skipButton: "先看看界面",
-  doneTitle: "准备好了",
-  doneBody: "以后想做什么，点一张卡片或者直接说一句话就行。出问题我会用大白话告诉你。",
+  // r24 — 最后一步的标题、三条承诺和三句例子都搬进了 copy-first-run.ts：
+  // 「该怎么说第一句话」和「第一次做成之后怎么说得更细」是同一件事，放在一起
+  // 才不会两屏各说一套。这里只留下那个按钮。
   doneButton: "开始使用",
 } as const;
 
