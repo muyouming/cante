@@ -76,3 +76,37 @@ test("打包带上给助手用的工具，名字和 sources 一致", () => {
     expect(joined, `tauri.conf.json 的 bundle.resources 里缺少 ${tool}`).toContain(tool);
   }
 });
+
+// #112：真机验收时发现 Windows 的安装包里**根本没有**两个工具——NSIS/MSI 里只有
+// cante-gui.exe 与 uninstall.exe。原因是 resources 写的是"没有扩展名"的字面路径，
+// 而 Windows 上产物叫 `cante-sheets.exe`：**路径不存在 → 静默不打包**（不报错）。
+//
+// 这条测试要挡住的正是"静默"：每个工具在配置里必须用一个 **glob**（`…cante-sheets*`）
+// 或者把两种文件名都列出来，否则窄的名字会随平台变，而漏掉的时候没有任何提示。
+test("每个自带工具都按平台可能的文件名打包，而不是写死一个不带扩展名的路径", () => {
+  const config = JSON.parse(readFileSync(path.join(SRC_TAURI, "tauri.conf.json"), "utf8"));
+  const resources = config?.bundle?.resources ?? [];
+  const entries: string[] = Array.isArray(resources) ? resources : Object.keys(resources);
+  const joined = entries.join(" ");
+
+  for (const tool of ["cante-sheets", "cante-pdf"]) {
+    const hasGlob = new RegExp(`${tool}\\*`).test(joined);
+    const hasBothNames = joined.includes(tool) && joined.includes(`${tool}.exe`);
+    expect(
+      hasGlob || hasBothNames,
+      `bundle.resources 里的 ${tool} 只匹配一种文件名（在另一个平台上会静默漏打包）。` +
+        `要么写成 glob（…${tool}*），要么把 ${tool} 与 ${tool}.exe 都列出来。现在是：${joined}`,
+    ).toBe(true);
+  }
+
+  // 打包后的落点必须与 Rust 解析器查的位置**一致**：tauri 用数组形式会把路径原样保留，
+  // 于是文件落在 $RESOURCE/target/release/<名字>，而 commands.rs 里就是查的这里。
+  // 两边任意一边改了，这条会红——不然"打包了但找不到"会再次发生。
+  const resolver = readFileSync(path.join(SRC_TAURI, "src", "commands.rs"), "utf8");
+  const resolverLooksNested = /join\("target"\)[\s\S]{0,120}join\("release"\)/.test(resolver);
+  expect(
+    resolverLooksNested,
+    "commands.rs 的 resolve_tool_bin 必须查 $RESOURCE/target/release/（数组形式打包会保留目录结构）",
+  ).toBe(true);
+  expect(joined, "bundle.resources 的路径要在 target/release 下，才能被解析器找到").toContain("target/release");
+});
