@@ -125,17 +125,15 @@ done
 # ---- ③ 没有垃圾（0.2.0 那批：.d 清单 + 0 字节的无扩展名文件 + target/release 目录）----
 if [ "$SKIP_JUNK" = "1" ]; then
   echo "③ 跳过（--build-dir：构建目录里本来就有 .d 与占位符；垃圾要查的是安装目录与 dmg）"
+else
+  echo "③ 有没有混进构建垃圾"
+  junk="$(find "$MACOS" -maxdepth 1 -name '*.d' 2>/dev/null)"
+  [ -z "$junk" ] && ok "没有 .d 依赖清单" || fail ".d 文件回来了：$(printf '%s ' $junk)"
+  zero="$(find "$MACOS" -maxdepth 1 -type f -size 0 2>/dev/null)"
+  [ -z "$zero" ] && ok "没有 0 字节文件" || fail "0 字节文件：$(printf '%s ' $zero)"
+  dirs="$(find "$MACOS" -maxdepth 1 -type d ! -path "$MACOS" 2>/dev/null | grep -v -E '/(Resources|Frameworks|_CodeSignature)$' || true)"
+  [ -z "$dirs" ] && ok "没有多出来的子目录" || fail "多出来的目录：$(printf '%s ' $dirs)"
 fi
-[ "$SKIP_JUNK" = "0" ] && echo "③ 有没有混进构建垃圾"
-[ "$SKIP_JUNK" = "1" ] && junk=""
-[ "$SKIP_JUNK" = "0" ] && junk="$(find "$MACOS" -maxdepth 1 -name '*.d' 2>/dev/null)"
-[ -z "$junk" ] && ok "没有 .d 依赖清单" || fail ".d 文件回来了：$(printf '%s ' $junk)"
-[ "$SKIP_JUNK" = "1" ] && zero=""
-[ "$SKIP_JUNK" = "0" ] && zero="$(find "$MACOS" -maxdepth 1 -type f -size 0 2>/dev/null)"
-[ -z "$zero" ] && ok "没有 0 字节文件" || fail "0 字节文件：$(printf '%s ' $zero)"
-[ "$SKIP_JUNK" = "1" ] && dirs=""
-[ "$SKIP_JUNK" = "0" ] && dirs="$(find "$MACOS" -maxdepth 1 -type d ! -path "$MACOS" 2>/dev/null | grep -v -E '/(Resources|Frameworks|_CodeSignature)$' || true)"
-[ -z "$dirs" ] && ok "没有多出来的子目录" || fail "多出来的目录：$(printf '%s ' $dirs)"
 
 echo
 if [ "$FAILS" -eq 0 ]; then
