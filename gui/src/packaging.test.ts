@@ -15,6 +15,15 @@ import path from "node:path";
 
 const SRC_TAURI = path.resolve(import.meta.dir, "..", "src-tauri");
 
+/**
+ * 随应用一起发布的辅助程序：它们在 Cargo.toml 里是额外的 `[[bin]]`，
+ * 解析器（`src-tauri/src/commands.rs::resolve_tool_bin`）会在**主程序旁边**找它们。
+ *
+ * `cante-bridge`（#116 那个顶替 `cante serve` 的桥）也走同一条路，只是它的解析在
+ * 别处（`daemon.rs`），所以不在这个列表里。
+ */
+const TOOLS = ["cante-sheets", "cante-pdf"];
+
 /** `[[bin]]` 段里的 name，按出现顺序。 */
 function binaryNames(cargo: string): string[] {
   const names: string[] = [];
@@ -34,6 +43,19 @@ function packageField(cargo: string, key: string): string | null {
   const section = end < 0 ? rest : rest.slice(0, end);
   const match = section.match(new RegExp(`^\\s*${key}\\s*=\\s*"([^"]+)"`, "m"));
   return match ? match[1]! : null;
+}
+
+/** tauri.conf.json 的 `bundle` 段。 */
+function bundleConfig(): Record<string, unknown> {
+  const config = JSON.parse(readFileSync(path.join(SRC_TAURI, "tauri.conf.json"), "utf8"));
+  return (config?.bundle ?? {}) as Record<string, unknown>;
+}
+
+/** `bundle.resources` 的条目（对象写法与数组写法都算）。 */
+function resourceEntries(bundle: Record<string, unknown>): string[] {
+  const resources = bundle.resources;
+  if (!resources) return [];
+  return Array.isArray(resources) ? resources.map(String) : Object.keys(resources as object);
 }
 
 test("多个 binary 时必须声明 default-run，否则打安装包会失败", () => {
@@ -64,49 +86,100 @@ test("多个 binary 时必须声明 default-run，否则打安装包会失败", 
   }
 });
 
-test("打包带上给助手用的工具，名字和 sources 一致", () => {
-  const config = JSON.parse(readFileSync(path.join(SRC_TAURI, "tauri.conf.json"), "utf8"));
-  const resources = config?.bundle?.resources ?? [];
-  const keys = Array.isArray(resources) ? resources : Object.keys(resources);
-  const joined = JSON.stringify(keys);
+// ---------------------------------------------------------------------------
+// 两个工具怎么进包：走 crate 的额外 [[bin]]，**不要**走 bundle.resources
+// ---------------------------------------------------------------------------
+//
+// #112（第一次真机验收）：`bundle.resources` 写的是没有扩展名的字面路径
+// （`target/release/cante-sheets`），而 Windows 上产物叫 `.exe` —— 路径不存在就
+// **静默不打包**，装完两个工具都不在。
+//
+// #112 的修法改成了 glob（`target/release/cante-sheets*`），工具是进包了，
+// 但第二次真机验收发现 glob **顺带把那个目录里的东西一起扫了进来**：
+//
+//   * `build.rs` 为了让 `tauri-build` 的资源校验通过而写的 0 字节占位符
+//     （`target/release/cante-sheets`）—— Windows 上真产物叫 `.exe`，名字对不上，
+//     占位符永远不会被覆盖，于是"0 字节的假工具"也被打进包；
+//   * cargo 给每个 `[[bin]]` 写的 dep-info（`cante-sheets.d`）。
+//
+// 第三次（本文件改的这一次）的做法：**不声明**，让 tauri 自己把 crate 的额外
+// `[[bin]]` 当辅助程序装到**主程序旁边**。真机验证过（NSIS 与安装目录都干净）：
+// 装完只有 5 个文件 —— cante-gui/cante-bridge/cante-pdf/cante-sheets/uninstall，
+// 没有 `.d`、没有 0 字节文件。而"主程序旁边"正好是解析器的第一条候选。
+//
+// 为什么不用 `bundle.externalBin`（那才是"官方"的辅助程序写法）：它要求文件叫
+// `<名字>-<target-triple>[.exe]`，校验发生在 **build script** 里，而 crate 自己的
+// bin 是在那次 cargo 调用里**稍后**才编译出来的 —— 真机上直接报
+// `resource path target\release\cante-sheets-x86_64-pc-windows-msvc.exe doesn't exist`，
+// 包都出不来。要让它成立得额外加一步"先编译再改名"的打包前脚本，代价大于收益。
+test("两个自带工具必须在 Cargo.toml 里是 [[bin]]，且不许再写进 bundle.resources", () => {
+  const cargo = readFileSync(path.join(SRC_TAURI, "Cargo.toml"), "utf8");
+  const bins = binaryNames(cargo);
 
-  // 应用会告诉助手这些工具在哪，所以它们必须真的进包；漏一个就会出现
-  // "助手被告知有这个工具、实际调不到"的最差情况。
-  for (const tool of ["cante-sheets", "cante-pdf"]) {
-    expect(joined, `tauri.conf.json 的 bundle.resources 里缺少 ${tool}`).toContain(tool);
+  // 1) 它们是 crate 的额外 bin —— 这正是 tauri 把"辅助程序装到主程序旁边"的依据。
+  for (const tool of TOOLS) {
+    expect(
+      bins,
+      `src-tauri/Cargo.toml 里没有 ${tool} 这个 [[bin]]：它不会进安装包，` +
+        `应用会告诉用户"这台电脑还没有工具"，而这个结果没人会及时发现。`,
+    ).toContain(tool);
+  }
+
+  // 2) `bundle.resources` 里**不许**再出现 `target/release`。
+  //
+  //    注意这条不能只查工具名：`target/release/*` 这种宽 glob 一样能把 `.d` 和
+  //    0 字节占位符扫进去（而它并不包含 "cante-sheets" 字面量，只查名字会漏）。
+  //    所以要挡的是"把编译产物目录交给 resources"这件事本身。
+  const bundle = bundleConfig();
+  for (const entry of resourceEntries(bundle)) {
+    expect(
+      entry.replace(/\\/g, "/").includes("target/release"),
+      `bundle.resources 里不该再有 "${entry}"：tauri 用数组形式会保留目录结构，` +
+        `而 target/release 里躺着 cargo 的 .d 与 build.rs 的 0 字节占位符 —— ` +
+        `上一轮它们就是这么被 glob 扫进安装包的（真机验收 2 的证据）。` +
+        `工具走 crate 的额外 [[bin]]，tauri 会把它们装到主程序旁边。`,
+    ).toBe(false);
+  }
+
+  // 3) `externalBin` 也不要用它来放这两个工具：真机上它是硬报错（见上面那段注释）。
+  //    这条断言是"别重复踩同一个坑"，不是"externalBin 永远不能用" —— 如果哪天真加了
+  //    "先编译再按 target triple 改名"的打包前步骤，把这条和上面那段注释一起改掉。
+  const externalBin = (bundle.externalBin ?? []) as unknown[];
+  for (const entry of Array.isArray(externalBin) ? externalBin.map(String) : []) {
+    for (const tool of TOOLS) {
+      expect(
+        entry.includes(tool),
+        `bundle.externalBin 里不该列 ${tool}：tauri 要求同名文件带 target triple 后缀` +
+          `（<名字>-<三元组>.exe），而 crate 自己的 bin 在 build script 跑的时候还没编译出来，` +
+          `真机上直接打包失败。`,
+      ).toBe(false);
+    }
   }
 });
 
-// #112：真机验收时发现 Windows 的安装包里**根本没有**两个工具——NSIS/MSI 里只有
-// cante-gui.exe 与 uninstall.exe。原因是 resources 写的是"没有扩展名"的字面路径，
-// 而 Windows 上产物叫 `cante-sheets.exe`：**路径不存在 → 静默不打包**（不报错）。
-//
-// 这条测试要挡住的正是"静默"：每个工具在配置里必须用一个 **glob**（`…cante-sheets*`）
-// 或者把两种文件名都列出来，否则窄的名字会随平台变，而漏掉的时候没有任何提示。
-test("每个自带工具都按平台可能的文件名打包，而不是写死一个不带扩展名的路径", () => {
-  const config = JSON.parse(readFileSync(path.join(SRC_TAURI, "tauri.conf.json"), "utf8"));
-  const resources = config?.bundle?.resources ?? [];
-  const entries: string[] = Array.isArray(resources) ? resources : Object.keys(resources);
-  const joined = entries.join(" ");
+// 打包后的落点必须与 Rust 解析器查的第一条候选**一致**：装上以后工具就躺在
+// 主程序旁边（Windows 的安装根目录、macOS 的 Contents/MacOS），而
+// commands.rs 的第一条候选就是"与可执行文件同目录"。这条把两边钉在一起：
+// 以后谁改了打包方式（工具不再落在同目录），或者谁把解析顺序调了，都会红。
+test("解析器必须先在主程序旁边找工具，打包方式也要把工具放在那里", () => {
+  const resolver = readFileSync(path.join(SRC_TAURI, "src", "commands.rs"), "utf8");
+  const start = resolver.indexOf("pub fn resolve_tool_bin");
+  expect(start, "commands.rs 里找不到 resolve_tool_bin").toBeGreaterThan(-1);
+  const body = resolver.slice(start, resolver.indexOf("\n}", start));
+  expect(body, "resolve_tool_bin 读不出函数体").toContain("exe_dir");
 
-  for (const tool of ["cante-sheets", "cante-pdf"]) {
-    const hasGlob = new RegExp(`${tool}\\*`).test(joined);
-    const hasBothNames = joined.includes(tool) && joined.includes(`${tool}.exe`);
+  const sameDir = body.indexOf("dir.join(bin_name)");
+  expect(
+    sameDir,
+    "resolve_tool_bin 必须查「与可执行文件同目录」——打包把工具放在那里",
+  ).toBeGreaterThan(-1);
+
+  const nested = body.indexOf('join("release")');
+  if (nested > -1) {
     expect(
-      hasGlob || hasBothNames,
-      `bundle.resources 里的 ${tool} 只匹配一种文件名（在另一个平台上会静默漏打包）。` +
-        `要么写成 glob（…${tool}*），要么把 ${tool} 与 ${tool}.exe 都列出来。现在是：${joined}`,
+      sameDir < nested,
+      "同目录那条候选必须在 target/release 那条之前：打包把工具放在主程序旁边，" +
+        "先查同目录才找得到（顺序反了会在某些机器上先撞到旧路径）。",
     ).toBe(true);
   }
-
-  // 打包后的落点必须与 Rust 解析器查的位置**一致**：tauri 用数组形式会把路径原样保留，
-  // 于是文件落在 $RESOURCE/target/release/<名字>，而 commands.rs 里就是查的这里。
-  // 两边任意一边改了，这条会红——不然"打包了但找不到"会再次发生。
-  const resolver = readFileSync(path.join(SRC_TAURI, "src", "commands.rs"), "utf8");
-  const resolverLooksNested = /join\("target"\)[\s\S]{0,120}join\("release"\)/.test(resolver);
-  expect(
-    resolverLooksNested,
-    "commands.rs 的 resolve_tool_bin 必须查 $RESOURCE/target/release/（数组形式打包会保留目录结构）",
-  ).toBe(true);
-  expect(joined, "bundle.resources 的路径要在 target/release 下，才能被解析器找到").toContain("target/release");
 });
