@@ -49,6 +49,7 @@ describe("normalizeDaemon", () => {
       path: "/usr/local/bin/cante",
       why: null,
       searched: [],
+      reinstall: false,
     });
   });
 
@@ -66,6 +67,7 @@ describe("normalizeDaemon", () => {
       path: null,
       why: null,
       searched: [],
+      reinstall: false,
     });
     expect(normalizeDaemon(undefined).available).toBe(false);
   });
@@ -121,6 +123,19 @@ describe("daemonNotice：向导「检查电脑」该显示什么", () => {
     expect(daemonNotice({ available: true, path: "/usr/local/bin/cante" })).toBeNull();
   });
 
+  test("缺随包发的那一块时，动作是「再装一次」而不是找技术同事（#150）", () => {
+    const notice = daemonNotice({
+      available: false,
+      why: "这台电脑上缺一个动手的组件，可以重新安装一次 Cante。",
+      searched: ["C:\\Cante\\pi"],
+      reinstall: true,
+    });
+    expect(notice?.what).toContain("动手的组件");
+    expect(notice?.action).toContain("安装包");
+    expect(notice?.action).toContain("重新检查");
+    expect(notice?.action).not.toContain("技术同事");
+  });
+
   test("没答案（探测失败）时也不显示：别把网络问题说成缺组件", () => {
     expect(daemonNotice(null)).toBeNull();
   });
@@ -170,6 +185,20 @@ describe("出错界面：任务起不来时落到同一句话 + 同一个出路"
     });
     expect(actions[0]?.kind).toBe("copy-detail");
     expect(actions[0]?.label).toContain("同事");
+  });
+
+  test("桥说「动手的组件」没找到时，出路是自己重装一次（#150）", () => {
+    // 东西就在安装包里，所以不绕技术同事那一步（与上一条区别就在这里）。
+    const human = explainError({
+      what: "这件事没有做完。",
+      how: "原来的文件都还在。",
+      detail: "这台电脑上缺一个动手的组件，重新安装一次 Cante 就能补上。",
+    });
+    expect(human.what).toContain("动手的组件");
+    expect(human.how).toContain("安装包");
+    const actions = actionsFor(human);
+    expect(actions[0]?.kind).toBe("retry");
+    expect(actions[0]?.label).toContain("重新装");
   });
 
   test("普通的「找不到文件」仍是重新选文件，不被误判成缺组件", () => {

@@ -6,7 +6,7 @@
 // 你可以怎么做. Keeping the strings in one module makes the whole surface
 // reviewable at a glance instead of hunting through JSX.
 
-import { DAEMON } from "./copy-daemon.ts";
+import { DAEMON, DAEMON_REINSTALL } from "./copy-daemon.ts";
 
 export const APP_NAME = "Cante";
 
@@ -183,6 +183,13 @@ interface ErrorRule {
 const DAEMON_SPAWN = /could not start[^\n]{0,200}serve/i;
 
 /**
+ * #150 —— 桥在、动手的那个组件不在（或起不来）。桥给的那两句都以「动手的组件」
+ * 开头（`bridge.rs` 的 ASSISTANT_MISSING / ASSISTANT_UNSTARTABLE），这是只有
+ * 我们会发出的形状——与上面那条一样，拿来判「缺组件」，而不是「某个命令没找到」。
+ */
+const ASSISTANT_MISSING = /动手的组件/;
+
+/**
  * 组件缺失的可核对特征：上面那条专用包装，加上 Windows / 命令解释器在找不到程序
  * 时会说的原文。只认这些，不拿「找不到文件」瞎猜（那是另一种失败，出路也不一样）。
  */
@@ -324,6 +331,9 @@ export function explainError(input: unknown): HumanError {
       // 「缺组件」同一句话替掉兜底说明，让出错界面和向导说的是同一件事。
       // 只认 DAEMON_SPAWN（daemon.rs 独有），不拿宽泛的 command not found 去
       // 覆盖任务自己的说明：那可能只是任务里某条命令没找到。
+      if (ASSISTANT_MISSING.test(detail)) {
+        return { what: DAEMON_REINSTALL.what, how: DAEMON_REINSTALL.how, detail };
+      }
       if (DAEMON_SPAWN.test(detail)) return { what: DAEMON.what, how: DAEMON.how, detail };
       const how = typeof record.how === "string" ? record.how.trim() : "";
       return { what, how: how || ERRORS.genericHow, detail };

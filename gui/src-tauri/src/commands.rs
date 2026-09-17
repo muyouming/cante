@@ -199,13 +199,15 @@ pub fn tool_capabilities() -> ToolCapabilities {
 // 一句「这台电脑上到底有没有那个组件」，然后把答案如实说出来。
 // ---------------------------------------------------------------------------
 
-/// 守护进程的可执行文件名，和 `daemon.rs` 缺省用的名字一致。
-const DAEMON_BIN_NAME: &str = "cante";
-/// Windows 上的写法。探测时两个名字都认，所以在任何平台上都能单测这条。
-const DAEMON_BIN_NAME_EXE: &str = "cante.exe";
-
 /// 找不到守护进程时给用户看的一句话。前端会把它直接放到「检查电脑」那一屏。
 const DAEMON_UNAVAILABLE_WHY: &str = "这台电脑上还没有装好 Cante 需要的那个组件。";
+
+/// 桥在、但动手的那个组件不在时给用户看的一句话（#150）。
+///
+/// 与上面那句的区别很重要：那种情况是**这个软件本身少了一块**，她自己那一步不是
+/// 「找技术同事装组件」，而是**把安装包再运行一次**——随包发的东西丢了，重装就有。
+const ASSISTANT_UNAVAILABLE_WHY: &str =
+    "这台电脑上缺一个动手的组件，可以重新安装一次 Cante。";
 
 /// 真正干活的组件在不在、在哪里、不在时怎么跟用户说。序列化后直接给前端；
 /// `why` 和 `searched` 都是给用户（或她的技术同事）看的中文事实。
@@ -216,105 +218,45 @@ pub struct DaemonCapability {
     pub why: Option<String>,
     /// 探测时实际看过哪些位置；可用时为空，不可用时用来给「复制详情」凑事实。
     pub searched: Vec<String>,
+    /// 出路是不是「把这个软件重新装一次」（#150）。缺的是随包发的那一块时才是 true；
+    /// 缺上游守护进程（要技术同事装）时是 false。前端据此换那句话里的动作。
+    pub reinstall: bool,
 }
 
 /// 这台电脑上能不能找到真正干活的组件。
 ///
-/// 解析顺序和 `daemon.rs` 拉起进程时走的同一条路：
+/// 解析顺序就是**拉起进程时走的那一条**（只有一份实现：[`crate::program`]）：
 ///
 /// 1. `CANTE_BIN` —— 一旦给了就是它，**不再往下找**（运行时不回退，这里也不回退，
-///    否则会报成可用而骗了用户）。它是一段命令（可能带参数，见 CONTRACT.md），所以
-///    先切出第一个词再看它是不是真实存在的程序；
-/// 2. 程序旁边（安装目录）；
+///    否则会报成可用而骗了用户）；
+/// 2. 应用自己旁边（`cante` 优先，然后我们随包发的 `cante-bridge`）；
 /// 3. `$HOME/.cante/bin/`；
 /// 4. `PATH` 里的每个目录。
 ///
-/// 环境、常见目录、PATH 全部由参数传入，所以 `cargo test` 能逐条复盘；文件名同时
-/// 认 `cante` 与 `cante.exe`，Windows 的找法在别的平台上也能验证。
+/// 找到的如果是**我们随包发的桥**，还要再看一层「动手的那个组件」在不在（#150）：
+/// 桥在、它起不来的话，界面说「就绪」就是骗她。
+///
+/// 环境、常见目录、PATH 全部由参数传入，所以 `cargo test` 能逐条复盘。
 pub fn resolve_daemon_bin(
     env_bin: Option<&str>,
+    assistant_env: Option<&str>,
     exe_dir: Option<&Path>,
     home: Option<&Path>,
     path_var: Option<&str>,
 ) -> DaemonCapability {
-    if let Some(spec) = env_bin {
-        let spec = spec.trim();
-        if !spec.is_empty() {
-            let (program, _args) = crate::daemon::split_binary(spec);
-            return match locate_program(&program, path_var) {
-                Some(found) => daemon_available(&found),
-                None => daemon_unavailable(vec![spec.to_string()]),
-            };
+    let daemon = crate::program::locate_daemon(env_bin, exe_dir, home, path_var);
+    let Some(found) = daemon.path() else {
+        return daemon_unavailable(daemon.searched().to_vec(), false);
+    };
+
+    if crate::program::is_bundled_bridge(found) {
+        let assistant = crate::program::locate_assistant(assistant_env, exe_dir, home, path_var);
+        if assistant.path().is_none() {
+            return daemon_unavailable(assistant.searched().to_vec(), true);
         }
     }
 
-    let mut searched: Vec<String> = Vec::new();
-
-    if let Some(dir) = exe_dir {
-        searched.push(join_daemon(dir));
-        if let Some(found) = existing_daemon(dir) {
-            return daemon_available(&found);
-        }
-    }
-
-    if let Some(home) = home {
-        let dir = home.join(".cante").join("bin");
-        searched.push(join_daemon(&dir));
-        if let Some(found) = existing_daemon(&dir) {
-            return daemon_available(&found);
-        }
-    }
-
-    if let Some(raw_path) = path_var {
-        searched.push("系统里登记的每个文件夹".to_string());
-        for dir in std::env::split_paths(raw_path) {
-            if let Some(found) = existing_daemon(&dir) {
-                return daemon_available(&found);
-            }
-        }
-    }
-
-    daemon_unavailable(searched)
-}
-
-/// 按名字定位一个程序：带目录分隔的按它自己看，裸名字才去 PATH 里找。
-fn locate_program(program: &str, path_var: Option<&str>) -> Option<String> {
-    if program.contains('/') || program.contains('\\') {
-        return existing(PathBuf::from(program));
-    }
-    if let Some(found) = existing(PathBuf::from(program)) {
-        return Some(found);
-    }
-    if let Some(raw_path) = path_var {
-        for dir in std::env::split_paths(raw_path) {
-            if let Some(found) = existing_named(&dir, program) {
-                return Some(found);
-            }
-        }
-    }
-    None
-}
-
-/// 在目录下找守护进程，`cante` 和 `cante.exe` 都认（Windows 上只有后者）。
-fn existing_daemon(dir: &Path) -> Option<String> {
-    existing(dir.join(DAEMON_BIN_NAME)).or_else(|| existing(dir.join(DAEMON_BIN_NAME_EXE)))
-}
-
-/// 在目录下找指定名字的程序；没有扩展名时补一个 `.exe` 再试一次（Windows）。
-fn existing_named(dir: &Path, name: &str) -> Option<String> {
-    if let Some(found) = existing(dir.join(name)) {
-        return Some(found);
-    }
-    if !name.ends_with(".exe") {
-        if let Some(found) = existing(dir.join(format!("{name}.exe"))) {
-            return Some(found);
-        }
-    }
-    None
-}
-
-fn join_daemon(dir: &Path) -> String {
-    dir.join(DAEMON_BIN_NAME).to_string_lossy().into_owned()
+    daemon_available(found)
 }
 
 fn daemon_available(path: &str) -> DaemonCapability {
@@ -323,15 +265,21 @@ fn daemon_available(path: &str) -> DaemonCapability {
         path: Some(path.to_string()),
         why: None,
         searched: Vec::new(),
+        reinstall: false,
     }
 }
 
-fn daemon_unavailable(searched: Vec<String>) -> DaemonCapability {
+/// 缺组件时的事实。`reinstall` 说的是出路：缺随包发的那一块（#150）时她自己重装
+/// 一次就行；缺上游守护进程（#103）时得找技术同事。
+fn daemon_unavailable(searched: Vec<String>, reinstall: bool) -> DaemonCapability {
     DaemonCapability {
         available: false,
         path: None,
-        why: Some(DAEMON_UNAVAILABLE_WHY.to_string()),
+        why: Some(
+            if reinstall { ASSISTANT_UNAVAILABLE_WHY } else { DAEMON_UNAVAILABLE_WHY }.to_string(),
+        ),
         searched,
+        reinstall,
     }
 }
 
@@ -339,11 +287,17 @@ fn daemon_unavailable(searched: Vec<String>) -> DaemonCapability {
 #[tauri::command]
 pub fn daemon_capability() -> DaemonCapability {
     let env_bin = std::env::var("CANTE_BIN").ok();
-    let exe_dir =
-        std::env::current_exe().ok().and_then(|path| path.parent().map(Path::to_path_buf));
-    let home = home_dir();
+    let assistant_env = std::env::var("PI_BIN").ok();
+    let exe_dir = crate::program::current_exe_dir();
+    let home = crate::program::home_dir();
     let path_var = std::env::var("PATH").ok();
-    resolve_daemon_bin(env_bin.as_deref(), exe_dir.as_deref(), home.as_deref(), path_var.as_deref())
+    resolve_daemon_bin(
+        env_bin.as_deref(),
+        assistant_env.as_deref(),
+        exe_dir.as_deref(),
+        home.as_deref(),
+        path_var.as_deref(),
+    )
 }
 
 /// 读回一个结果表的内容，走的是应用自带的 `cante-sheets read`。
@@ -570,6 +524,10 @@ mod tests {
     use std::fs;
     use std::sync::atomic::{AtomicU32, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    /// 守护进程在测试里的两个写法（真名字在 `crate::program` 的候选表里）。
+    const DAEMON_BIN_NAME: &str = "cante";
+    const DAEMON_BIN_NAME_EXE: &str = "cante.exe";
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
 
@@ -831,7 +789,7 @@ mod tests {
     fn daemon_env_bin_found_is_available() {
         let dir = TempDir::new("daemon-env");
         let expected = place_named(&dir.0, DAEMON_BIN_NAME);
-        let cap = resolve_daemon_bin(Some(&expected), None, None, None);
+        let cap = resolve_daemon_bin(Some(&expected), None, None, None, None);
         assert!(cap.available);
         assert_eq!(cap.path.as_deref(), Some(expected.as_str()));
         assert!(cap.why.is_none());
@@ -844,14 +802,14 @@ mod tests {
         let dir = TempDir::new("daemon-args");
         let program = place_named(&dir.0, DAEMON_BIN_NAME_EXE);
         let spec = format!("\"{program}\" -e /home/wang/ante serve");
-        let cap = resolve_daemon_bin(Some(&spec), None, None, None);
+        let cap = resolve_daemon_bin(Some(&spec), None, None, None, None);
         assert!(cap.available);
         assert_eq!(cap.path.as_deref(), Some(program.as_str()));
     }
 
     #[test]
     fn daemon_env_bin_missing_is_unavailable() {
-        let cap = resolve_daemon_bin(Some("/definitely/not/here/cante"), None, None, None);
+        let cap = resolve_daemon_bin(Some("/definitely/not/here/cante"), None, None, None, None);
         assert!(!cap.available);
         assert!(cap.path.is_none());
         let why = cap.why.expect("why");
@@ -868,7 +826,7 @@ mod tests {
         place_named(&dir.0, DAEMON_BIN_NAME);
         let path_var = dir.0.to_string_lossy().into_owned();
         let cap =
-            resolve_daemon_bin(Some("/definitely/not/here/cante"), None, None, Some(&path_var));
+            resolve_daemon_bin(Some("/definitely/not/here/cante"), None, None, None, Some(&path_var));
         assert!(!cap.available);
     }
 
@@ -876,7 +834,7 @@ mod tests {
     fn daemon_found_next_to_the_executable() {
         let dir = TempDir::new("daemon-exe");
         let expected = place_named(&dir.0, DAEMON_BIN_NAME);
-        let cap = resolve_daemon_bin(None, Some(&dir.0), None, None);
+        let cap = resolve_daemon_bin(None, None, Some(&dir.0), None, None);
         assert!(cap.available);
         assert_eq!(cap.path.as_deref(), Some(expected.as_str()));
     }
@@ -886,7 +844,7 @@ mod tests {
         // Windows 上只有 cante.exe；这段在任何平台上都跑得起来。
         let dir = TempDir::new("daemon-exe-win");
         let expected = place_named(&dir.0, DAEMON_BIN_NAME_EXE);
-        let cap = resolve_daemon_bin(None, Some(&dir.0), None, None);
+        let cap = resolve_daemon_bin(None, None, Some(&dir.0), None, None);
         assert!(cap.available);
         assert_eq!(cap.path.as_deref(), Some(expected.as_str()));
     }
@@ -896,7 +854,7 @@ mod tests {
         let dir = TempDir::new("daemon-path");
         let expected = place_named(&dir.0, DAEMON_BIN_NAME);
         let path_var = dir.0.to_string_lossy().into_owned();
-        let cap = resolve_daemon_bin(None, None, None, Some(&path_var));
+        let cap = resolve_daemon_bin(None, None, None, None, Some(&path_var));
         assert!(cap.available);
         assert_eq!(cap.path.as_deref(), Some(expected.as_str()));
     }
@@ -906,7 +864,7 @@ mod tests {
         let dir = TempDir::new("daemon-home");
         let expected =
             place_named(&dir.0.join("personal").join(".cante").join("bin"), DAEMON_BIN_NAME);
-        let cap = resolve_daemon_bin(None, None, Some(&dir.0.join("personal")), None);
+        let cap = resolve_daemon_bin(None, None, None, Some(&dir.0.join("personal")), None);
         assert!(cap.available);
         assert_eq!(cap.path.as_deref(), Some(expected.as_str()));
     }
@@ -915,7 +873,7 @@ mod tests {
     fn daemon_nothing_found_says_so_in_chinese_and_lists_where() {
         let dir = TempDir::new("daemon-none");
         let path_var = dir.0.to_string_lossy().into_owned();
-        let cap = resolve_daemon_bin(None, Some(&dir.0), Some(&dir.0), Some(&path_var));
+        let cap = resolve_daemon_bin(None, None, Some(&dir.0), Some(&dir.0), Some(&path_var));
         assert!(!cap.available);
         assert!(cap.path.is_none());
         let why = cap.why.expect("why");
@@ -929,6 +887,54 @@ mod tests {
             "{}\n{why}",
             format!("{:?}", cap.searched)
         );
+    }
+
+    #[test]
+    fn a_bundled_bridge_without_the_working_component_asks_for_a_reinstall() {
+        // #150：应用旁边只有随包发的桥、没有动手的组件 —— 界面不能说「就绪」，
+        // 也不能叫她去「找技术同事装组件」：重装一次这个软件就有了。
+        let dir = TempDir::new("bridge-only");
+        place_named(&dir.0, "cante-bridge.exe");
+        let cap = resolve_daemon_bin(None, None, Some(&dir.0), None, None);
+        assert!(!cap.available);
+        assert!(cap.reinstall, "出路是重新装一次：{:?}", cap);
+        let why = cap.why.expect("why");
+        assert!(why.contains("重新安装"), "要说清下一步：{why}");
+        assert!(why.contains("组件"), "要说清缺的是什么：{why}");
+        assert!(!why.contains("pi"), "不该把程序名端给用户：{why}");
+        assert!(!why.contains("路径"), "黑名单词不能进用户文案：{why}");
+        assert!(cap.searched.iter().any(|item| item.ends_with("pi")), "{:?}", cap.searched);
+    }
+
+    #[test]
+    fn a_bundled_bridge_with_the_working_component_beside_it_is_ready() {
+        let dir = TempDir::new("bridge-and-pi");
+        place_named(&dir.0, "cante-bridge.exe");
+        place_named(&dir.0, "pi.exe");
+        let cap = resolve_daemon_bin(None, None, Some(&dir.0), None, None);
+        assert!(cap.available, "{:?}", cap);
+        assert!(!cap.reinstall);
+    }
+
+    #[test]
+    fn the_bundled_runtime_plus_entry_script_counts_as_the_working_component() {
+        // 随包发的形态：`pi\bun.exe` + `pi\cli.js`（#150 定下的那条约定）。
+        let dir = TempDir::new("bridge-and-bun");
+        place_named(&dir.0, "cante-bridge.exe");
+        place_named(&dir.0.join("pi"), "bun.exe");
+        place_named(&dir.0.join("pi").join("dist").join("bundle"), "cli.js");
+        let cap = resolve_daemon_bin(None, None, Some(&dir.0), None, None);
+        assert!(cap.available, "{:?}", cap);
+    }
+
+    #[test]
+    fn an_upstream_daemon_needs_no_component_of_ours() {
+        // 上游的 `cante`（或 WSL 里的 `ante`）不是我们的桥，它不需要 pi。
+        let dir = TempDir::new("upstream-only");
+        place_named(&dir.0, "cante.exe");
+        let cap = resolve_daemon_bin(None, None, Some(&dir.0), None, None);
+        assert!(cap.available, "{:?}", cap);
+        assert!(!cap.reinstall);
     }
 
     #[test]

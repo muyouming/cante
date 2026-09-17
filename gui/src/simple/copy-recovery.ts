@@ -27,6 +27,7 @@ export const RECOVERY: {
   readonly openFolder: RecoveryCopy;
   readonly copyDetail: RecoveryCopy;
   readonly signIn: RecoveryCopy;
+  readonly reinstall: RecoveryCopy;
 } = {
   /** 通用出口，和原来的「重试」是同一个动作，只是把为什么写出来了。 */
   retry: {
@@ -102,5 +103,14 @@ export const RECOVERY: {
   signIn: {
     label: "复制详情给同事",
     why: "这台电脑的账号还没弄好，你自己改不了。把这段说明发给配置这台电脑的同事，让他帮你弄。",
+  },
+  /**
+   * #150 —— 动手的那个组件就在安装包里，但这台电脑上没找到（或者它起不来，
+   * 最常见的原因就是杀毒软件拦了未签名的程序）。这一条与「缺上游守护进程」不同：
+   * 她自己就能修，出路是把安装包再运行一次，不必绕技术同事。
+   */
+  reinstall: {
+    label: "重新装一次后重试",
+    why: "这台电脑上缺一个动手的组件。把 Cante 的安装包（下载的那个文件）再运行一次，装好后点这里重试。",
   },
 } as const;
