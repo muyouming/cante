@@ -415,3 +415,28 @@ transitions」表一一对应）：`SessionStart`、`SessionUpdated`、`TurnStar
    机器上会怎样，**无从判断**（需要那台 Windows / RDP，见 `AGENTS.md` §6）。
 5. **本仓库能不能构建上游守护进程**：我按「找不到 `main.rs`/根 `Cargo.toml`」推断它不在本仓库；
    没有去核对私有仓库是否存在（够不着网络）。
+
+---
+
+## 8. 进展（2026-09-17 更新）
+
+这一节只记**已经落地或被实测推翻**的事，别把它当计划看。
+
+| 步骤 | 状态 | 证据 / 在哪 |
+| --- | --- | --- |
+| §4 阶段 0：探针（三个问题：流式事件 / 扩展能否拦住并问人 / `abort`） | **做完了，三条答案都是「能」** | `gui/docs/PROBE-pi-rpc.md`；探针 10/10 场景、7.2 秒、**不需要真模型**，可进 CI |
+| §4 阶段 1 第一刀：`StartSession` / `UserInput`（流式文本 + 工具）/ `Interrupt` | **做完了** | `gui/docs/BRIDGE-spike.md`、`gui/src-tauri/src/bridge.rs`、`gui/src-tauri/tests/bridge.rs`（5 条，没装 `pi` 时打印 `SKIP`）。**关键事实**：桥是通过**现有 `daemon.rs` 自己**走通的——`CANTE_BIN=cante-bridge` 即可，Rust 桥与前端**一行未改** |
+| §3 最关键的 20%：把审批闸门接进桥（`extension_ui_request` ⇄ 我们的 `TurnPause` / `ApprovalResponse`） | **在做** | 分支 `ws/r19-gate`（本轮） |
+| 真机验收（Windows 上装包、看界面） | **做完了两轮**（第一轮验的旧产物、第二轮验修复） | `gui/WINDOWS-ACCEPTANCE-1.md`、`-2.md`、`-3.md`；**当前构建在真 WebView2 里就是中文简单模式**（第一轮那个英文界面是 `gui-v0.1.0-rc1` 旧产物） |
+| §3.3 的人日估计（2–4 周 / 5–9 周） | **仍然没有被实测** | 我们还没写适配器到"能用"的程度；目前只能说**没有根本性阻碍**，且第一刀比预想的小 |
+| 上游出 Windows 构建 | **维持"不指望"** | 官方 README 明说 Windows 建议 WSL；守护进程源码不在本仓库（全仓库只有两个 `main.rs`、没有根 `Cargo.toml`）——**连补丁都做不了** |
+
+### 这一段暴露出来的新约束（要加进 §3.1 的适配清单）
+
+- **打包辅助程序别用 `externalBin`**（它要求 `<名字>-<target-triple>.exe`，校验发生在 build script 阶段、crate 自己的 `[[bin]]` 还没编出来 → 实测包都出不来）；tauri 会自动把主程序之外的 `[[bin]]` 装到主程序旁边。详见 `gui/WINDOWS-ACCEPTANCE-3.md` 与 #117。
+- **npm 版的 `bun` 顶不住**：Rust 里 `Command::new("bun")` 在 Windows 上找不到 npm 的 `.ps1`/`.cmd` 包装，必须装官方 `bun.exe`（这条让 4 个 Rust 测试红过）。
+- **路径与换行**：仓库里文本一律 LF（`.gitattributes`），否则 Windows 检出成 CRLF 会让"按行解析"的测试红（真发生过）。
+
+### 现在可以回答"方案 C 到哪一步了"
+
+**能干活（第一刀）+ 正在做会问人（闸门）**。也就是说：**最难的机制问题已经不再是未知数**，剩下的是工作量与打磨（用量、会话持久化、多窗口、Windows 上打包桥本身）。决策该交给产品：是继续投适配器，还是先只把"WSL + 如实告知"做成正式支持。
