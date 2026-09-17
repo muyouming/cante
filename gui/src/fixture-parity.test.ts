@@ -28,8 +28,8 @@
 // Collapsing both into one "only real hardware" list would be its own lie, so
 // the catalog keeps them apart and this test enforces both halves.
 
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 
 import { expect, test } from "bun:test";
 
@@ -40,6 +40,8 @@ const PROTOCOL_RS = join(GUI_ROOT, "src-tauri", "src", "protocol.rs");
 const FIXTURE_TS = join(GUI_ROOT, "fixtures", "fake-cante.ts");
 const SOAK_TS = join(GUI_ROOT, "fixtures", "flood.ts");
 const CONTRACT_MD = join(GUI_ROOT, "CONTRACT.md");
+const STORE_TS = join(GUI_ROOT, "src", "store.ts");
+const SIMPLE_DIR = join(GUI_ROOT, "src", "simple");
 
 // 读文件时把 CRLF 折成 LF：仓库里已规定文本文件用 LF（.gitattributes），但贡献者的
 // 编辑器、或某些检出配置仍可能带来 `\r`——而下面这些解析是按行做的（`split("\n")`、
@@ -206,6 +208,39 @@ const daemon = daemonEvents(read(MSG_RS));
 const fixture = fixtureEvents(read(FIXTURE_TS));
 const contract = read(CONTRACT_MD);
 
+/**
+ * The events `store.ts` drops on purpose: the names inside its `IGNORED_EVENTS`
+ * Set literal. Parsed from source (same trick as `protocol.rs`'s `reduce_state`)
+ * so the #107 catalog and the reducer cannot drift apart silently.
+ */
+function deliberatelyIgnored(source: string): string[] {
+  const at = source.indexOf("const IGNORED_EVENTS");
+  if (at < 0) throw new Error("store.ts: cannot find `const IGNORED_EVENTS`");
+  const open = source.indexOf("new Set([", at);
+  if (open < 0) throw new Error("store.ts: IGNORED_EVENTS is not a Set literal");
+  const close = source.indexOf("])", open);
+  if (close < 0) throw new Error("store.ts: unterminated IGNORED_EVENTS literal");
+  const names = [...source.slice(open, close).matchAll(/"([A-Za-z]+)"/g)].map((match) => match[1]!);
+  if (names.length === 0) throw new Error("store.ts: parsed zero ignored events");
+  return names;
+}
+
+/** Every `.ts`/`.tsx` under a directory; test files are excluded by default. */
+function sourceFiles(dir: string, options: { includeTests?: boolean } = {}): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...sourceFiles(full, options));
+    else if (/\.(ts|tsx)$/.test(entry.name) && (options.includeTests || !entry.name.endsWith(".test.ts"))) out.push(full);
+  }
+  return out;
+}
+
+/** Drop TS line and block comments, so `.skills` inside prose is not a read. */
+function stripTsComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
+}
+
 test("the fixture can only perform events the daemon can actually emit", () => {
   const impossible = fixture.filter((name) => !daemon.includes(name));
   expect(impossible, `fixture emits events absent from protocol-shape: ${impossible.join(", ")}`).toEqual([]);
@@ -255,6 +290,62 @@ test("the realities the fixture cannot establish are written down and named", ()
     expect(why!.length, `CONTRACT.md: no explanation for ${key}`).toBeGreaterThan(0);
     expect(where!.length, `CONTRACT.md: no guard named for ${key}`).toBeGreaterThan(0);
   }
+});
+
+// ---------------------------------------------------------------------------
+// #107 — the capabilities the fixture cannot exercise and nobody verified.
+// The decisions live in CONTRACT.md (「没人验的能力：逐条定论（#107）」); these
+// tests hold the write-up and the reducer to each other.
+// ---------------------------------------------------------------------------
+
+test("CONTRACT.md's #107 decisions each name a decision, a reason and a lock", () => {
+  const rows = markdownTable(contract, "### 没人验的能力：逐条定论（#107）", 4);
+  const decisions = ["接", "不接，但明确", "需要单独跟踪"];
+  for (const [capability, decision, why, lock] of rows) {
+    expect(decisions, `CONTRACT.md: "${capability}" has no valid decision: ${decision}`).toContain(decision!);
+    expect(why!.length, `CONTRACT.md: no reason for "${capability}"`).toBeGreaterThan(20);
+    expect(lock!.length, `CONTRACT.md: no lock named for "${capability}"`).toBeGreaterThan(10);
+  }
+  const capabilities = rows.map((row) => row[0]!).join("\n");
+  // The three items #107 named, plus Ambient — whose catalog row already said
+  // the simple surface never shows it. Losing one is a failure: the whole point
+  // of the table is that every unverified capability has an owner.
+  for (const required of ["ExtensionRefreshed", "ShellOutput", "skills 为空", "Ambient"]) {
+    expect(capabilities, `CONTRACT.md: the #107 table is missing "${required}"`).toContain(required);
+  }
+});
+
+test("the store's deliberate ignores and the #107 table name the same events", () => {
+  const ignored = deliberatelyIgnored(read(STORE_TS));
+  // Direction 1: every event the store drops on purpose is a real wire event
+  // and is written down in the #107 table.
+  for (const name of ignored) {
+    expect(daemon, `store.ts ignores "${name}", which protocol-shape does not carry`).toContain(name);
+    expect(contract, `CONTRACT.md does not record why "${name}" is ignored`).toContain(name);
+  }
+  // Direction 2: every "不接，但明确" row that names a wire event names one the
+  // store actually ignores — so a decision cannot rot into a comment, and a new
+  // entry in IGNORED_EVENTS cannot appear without a written-down reason.
+  const rows = markdownTable(contract, "### 没人验的能力：逐条定论（#107）", 4);
+  const named = new Set<string>();
+  for (const [capability, decision] of rows) {
+    if (decision !== "不接，但明确") continue;
+    for (const match of capability!.matchAll(/`([A-Za-z]+)`/g)) {
+      if (daemon.includes(match[1]!)) named.add(match[1]!);
+    }
+  }
+  expect([...named].sort()).toEqual([...ignored].sort());
+});
+
+test("the simple surface never reads skills (the #107 decision, held to source)", () => {
+  // CONTRACT's #107 table decides the simple surface has no skill/command entry
+  // point, so nothing in it consumes `SessionInfo.skills`: a session that starts
+  // with none and gets refreshed later changes nothing the user sees. The day
+  // someone wires a skills surface in, this goes red and points back at the
+  // decision that then has to be reopened — instead of silently invalidating it.
+  const files = [STORE_TS, ...sourceFiles(SIMPLE_DIR)];
+  const readers = files.filter((file) => /\.skills\b/.test(stripTsComments(read(file)))).map((file) => relative(GUI_ROOT, file));
+  expect(readers, `these files read .skills, but the simple surface has no skills entry point: ${readers.join(", ")}`).toEqual([]);
 });
 
 test("the bridge never reduces an event the wire no longer carries", () => {

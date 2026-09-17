@@ -249,9 +249,9 @@ Goodbye
 | 事件 | 夹具为什么不演 | 只能在真机上验的部分 | 现在靠什么保证 |
 | --- | --- | --- | --- |
 | SessionUpdated | 夹具只在 StartSession 演一次会话信息，没有 UpdateSession 的脚本；换模型或改标题后守护进程重发 SessionInfo 这件事没演 | 真实守护进程是否在 UpdateSession 后真的发 SessionUpdated、字段是否齐全，只能在真机上验 | Rust 状态归约 gui/src-tauri/tests/state.rs；前端 store.test.ts 的恶意形状与随机流喂过这个形状；会话头随改动更新没有真机验证 |
-| ExtensionRefreshed | 夹具的 SessionStart 里 skills 和 subagents 恒为空，也从不发刷新事件 | 真实守护进程会在会话里发它，带上真实的 skills、subagents 和 MCP 清单（2026-09 真机 excel.merge 两轮各见过 1 次）；这份清单只能来自真机 | 未验证：issue #107（简单界面不渲染刷新事件，起步只读 SessionStart 的 skills——真实 SessionStart 的 skills 也可能是空的，两者都没人验） |
+| ExtensionRefreshed | 夹具的 SessionStart 里 skills 和 subagents 恒为空，也从不发刷新事件 | 真实守护进程会在会话里发它，带上真实的 skills、subagents 和 MCP 清单（2026-09 真机 excel.merge 两轮各见过 1 次）；这份清单只能来自真机 | 已定论（#107）：不接，显式忽略——简单界面不渲染刷新事件，起步只读 SessionStart 的 skills，而真实 SessionStart 的 skills 也可能为空，两端都决定不消费；理由与测试见下面「没人验的能力：逐条定论（#107）」 |
 | SessionEnd | 夹具用 Goodbye 收尾，没有演会话被替换或关闭时的 SessionEnd（带 reason 和 usage） | 真实守护进程关会话时是否发 SessionEnd、usage 是否可信，只能在真机上验 | Rust 状态归约 gui/src-tauri/tests/state.rs；前端 store.test.ts 的随机流喂过这个形状 |
-| ShellOutput | 夹具不执行任何 shell 命令，也没有 stdout、stderr、退出码 | 真实命令的 stdout、stderr、退出码，只能在真机上验 | 未验证：issue #107（简单界面没有终端或命令面板入口；协议里有这个事件但产品不走） |
+| ShellOutput | 夹具不执行任何 shell 命令，也没有 stdout、stderr、退出码 | 真实命令的 stdout、stderr、退出码，只能在真机上验 | 已定论（#107）：不接，显式忽略——简单界面没有终端或命令面板入口，协议里有这个事件但产品不走；理由与测试见下面「没人验的能力：逐条定论（#107）」 |
 | Thinking | 夹具只演流式的 ThinkingDelta，没演一次性发整段思考的 Thinking | 真实守护进程在同一轮里既发 Thinking 也发 ThinkingDelta（2026-09 真机 excel.merge 两轮分别见过 11 和 12 次 Thinking），何时发哪种只能在真机上验 | 前端 store.ts 有分支；store.test.ts 的恶意形状与随机流覆盖了形状 |
 | InfoBlockStart | 夹具只演单行 Info，没演带 header 的分组信息块（例如 MCP 预热） | 真实后台分组信息何时出现、header 写什么，只能在真机上验 | store.test.ts 的形状与随机流用例覆盖了渲染 |
 | InfoBlockAppend | 夹具没演分组信息块的子行 | 真实子行何时追加、内容是什么，只能在真机上验 | store.test.ts 的形状与随机流用例覆盖了渲染 |
@@ -275,5 +275,22 @@ Goodbye
 
 `bash gui/scripts/task-sweep.sh excel.merge`（真实守护进程 + 真实模型）跑完后，`gui/scripts/sweep/work/runs/*/sweep-events.jsonl` 里实际出现的事件种类是：`AgentMessage`、`ExtensionRefreshed`、`MessageDelta`、`Thinking`、`ThinkingDelta`、`ToolEnd`、`ToolStart`、`TurnEnd`、`TurnPause`、`TurnResume`、`TurnStart`、`UsageUpdate`、`UserInput`。
 
-其中 `Thinking` 和 `ExtensionRefreshed` 正是夹具没演的两个。清单没漏（它们在上面已经列出），但这也说明「夹具没演」确实会在真机上出现：真实守护进程同一轮里既发 `Thinking` 又发 `ThinkingDelta`；`ExtensionRefreshed` 会带上真实的 skills、subagents 与 MCP 清单，而夹具的 `SessionStart` 里这些恒为空——真实会话起步时的 skills 也可能为空，那条刷新路径至今没人验。
+其中 `Thinking` 和 `ExtensionRefreshed` 正是夹具没演的两个。清单没漏（它们在上面已经列出），但这也说明「夹具没演」确实会在真机上出现：真实守护进程同一轮里既发 `Thinking` 又发 `ThinkingDelta`；`ExtensionRefreshed` 会带上真实的 skills、subagents 与 MCP 清单，而夹具的 `SessionStart` 里这些恒为空——真实会话起步时的 skills 也可能为空。那条刷新路径以前没人验，现在有了定论：不接（见下面「没人验的能力：逐条定论（#107）」）。
+
+### 没人验的能力：逐条定论（#107）
+
+上面两份清单回答的是「夹具演不出来的部分，现在靠什么保证」。但有一类条目原来的答案是「未验证：issue #107」——也就是说，夹具演不出、真机上真的会出现、而且**谁都没验**。一张没人负责的清单不算保证，所以这里对每一条给出**决定**，并写清**拿什么把决定锁住**；上面那两行（ExtensionRefreshed、ShellOutput）的保证栏也随之改成指到这里。
+
+每个决定必须落进三类之一：**接**（简单界面确实需要，那就接上并在 store / 界面体现，加测试）；**不接，但明确**（不需要，就在代码里显式忽略、写清原因，并用测试断言「它是有意被忽略的」）；**需要单独跟踪**（现在做不完，写清为什么现在不做、什么时候该做）。本轮四条全部落在「不接，但明确」，原因都指向同一件事：**简单界面没有对应的入口，也没有对应的位置**。
+
+它们在代码里由 `gui/src/store.ts` 的 `IGNORED_EVENTS` 显式挡下（不是被 reducer 的 `default:` 顺手吞掉），并由 `gui/src/store.test.ts` 的「有意忽略的事件（#107 的定论）」用例断言：不出行、不改状态机、不换会话。
+
+| 能力 | 决定 | 理由 | 由什么锁住 |
+| --- | --- | --- | --- |
+| `ExtensionRefreshed` 的刷新路径 | 不接，但明确 | 它带的是 skills、subagents、MCP 清单（`crates/protocol-shape/src/msg.rs` 的 `ExtensionRefreshed`），而简单界面没有技能或命令入口——pro 的命令面板已删（`store.ts` 顶部注释），`src/simple/**` 与 `store.ts` 里没有任何一处读 `SessionInfo.skills`。它也不带 model / provider，刷新不了简单界面唯一会读的会话字段（`support_vision`，见 `src/simple/capabilities.ts` 的 `visionAvailable`）。真机确实会发它（2026-09 `sweep excel.merge` 两轮各 1 次），所以是「见过、决定不接」，不是「没见过」 | `store.ts` 的 `IGNORED_EVENTS`；`store.test.ts` 断言 ExtensionRefreshed 不出行、不改状态、不换会话；`fixture-parity.test.ts` 核对 `IGNORED_EVENTS` 里每个事件都在本表里有记录 |
+| 起步时 skills 为空（SessionStart 的 skills 字段） | 不接，但明确 | 真实 `SessionStart` 可能给空 skills，稍后由 `ExtensionRefreshed` 补齐（#107）。但简单界面只有 32 张固定卡片这一个入口，卡片来自 `src/simple/tasks/index.ts` 的静态表，不随 skills 变化，也没有任何地方读这份清单。所以「起步是不是空的」今天不影响任何用户可见行为。将来加了技能或命令入口，这条决定必须重开——那时「刷新补齐」就是必须接的路径 | `store.test.ts` 断言空 skills 起步加带真 skills 的刷新事件不改变任何用户可见状态；`fixture-parity.test.ts` 扫源码，断言 `src/simple/**` 与 `store.ts` 不读 `.skills` |
+| `ShellOutput` | 不接，但明确 | 简单界面没有终端、也没有命令面板；`send_input` 只在 `store.ts` 的 `sendRunInstruction` 里发过一次，mode 恒为 `prompt`，所以产品永远不会触发 shell 命令，也收不到它的 stdout / stderr / 退出码。就算收到了，把命令原文渲染给用户等于把「终端 / 路径」这类黑名单词直接摆到界面上（`src/simple/copy-guard.test.ts` 的黑名单），而且没有可操作的去处 | `store.ts` 的 `IGNORED_EVENTS`；`store.test.ts` 断言 ShellOutput 不出行、不改状态 |
+| `Ambient` | 不接，但明确 | 它是思考短语或输入建议，要先由前端发 `AmbientPhrase` / `AmbientSuggestion` 去问才有回包（`crates/protocol-shape/src/msg.rs` 的 `Evt::Ambient`）；`src/tauri.ts` 的 `Commands` 里没有这两个 op，简单界面也没有状态栏短语或输入提示的位置，所以它只会是没人要的回包。上面「夹具没演的事件」里 Ambient 那一行本就写着「简单界面不显示 Ambient」，这里把它升成一条有测试兜着的决定 | `store.ts` 的 `IGNORED_EVENTS`；`store.test.ts` 断言 Ambient 不出行、不改状态 |
+
+四条的复查条件写在一起免得忘：**简单界面第一次出现「按名字调用一项技能 / 命令」的入口时**，第 1、2 条必须重开（skills 清单与它稍后刷新补齐的路径）；**出现终端或命令行入口时**，第 3 条必须重开。到那时 `gui/src/store.test.ts` 里对应的断言会先红，红的信息会把人指回这一节。
 
