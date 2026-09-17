@@ -24,7 +24,7 @@ import {
   webSearchHint,
   type PrivacyState,
 } from "./privacy.ts";
-import { SENT } from "./copy-privacy-audit.ts";
+import { SENT, WHEN } from "./copy-privacy-audit.ts";
 import { createStore } from "../store.ts";
 
 /** Words this audience does not know; none may appear in user-facing copy. */
@@ -67,6 +67,27 @@ beforeEach(() => {
 });
 
 describe("the network question", () => {
+  test("她没说出口的那个担心（它会不会自己动手）在面板里有明确答案", () => {
+    // 「它什么时候会动手」这一节存在的理由：面板此前只讲了「内容去了哪」，
+    // 没有回答「我不在的时候它会不会自己干活」。两句话各自对应一条已被钉住的行为：
+    // ① 不点「开始」不动手（store.test.ts 里「排队不等于自动做完」那段产品律）；
+    // ② 定时任务只把要确认的事排到首页（同上，runScheduled 只暂存、不开始）。
+    // 这里钉住的是「这句话还在、还是人话」；行为那边由那两个描述块负责。
+    assertPlain(WHEN.title);
+    assertPlain(WHEN.onlyAfterYouSay);
+    assertPlain(WHEN.notInBackground);
+
+    // 每句话都得把话说全：不是含糊的「很安全」，而是具体到她会怎么遇到它。
+    expect(WHEN.onlyAfterYouSay).toContain("开始");
+    expect(WHEN.notInBackground).toContain("排到首页");
+
+    // 不许变成技术说明：她不需要知道「组件 / 运行时 / 后台进程」这些词。
+    for (const word of ["后台", "进程", "组件", "服务", "常驻", "守护"]) {
+      expect(WHEN.onlyAfterYouSay).not.toContain(word);
+      expect(WHEN.notInBackground).not.toContain(word);
+    }
+  });
+
   test("a run is online only when allowed and not local-only", () => {
     expect(runIsOnline({ online: true, localOnly: false })).toBe(true);
     expect(runIsOnline({ online: true, localOnly: true })).toBe(false);

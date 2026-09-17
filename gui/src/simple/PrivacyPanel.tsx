@@ -13,7 +13,7 @@ import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
-import { SENT } from "./copy-privacy-audit.ts";
+import { SENT, WHEN } from "./copy-privacy-audit.ts";
 import type { TaskRun } from "./run.ts";
 import {
   DEFAULT_PRIVACY,
@@ -179,6 +179,16 @@ export default function PrivacyPanel(props: PrivacyPanelProps): JSX.Element {
           onChange={(checked) => setLocalOnly(!checked)}
         />
       </div>
+
+      {/* 她没说出口的那个担心：我不在的时候，它会不会自己干活？（见 WHEN 的注释） */}
+      <section
+        class="flex flex-col gap-2 rounded-lg border border-slate-800 bg-[#0e141b] p-3"
+        aria-label={WHEN.title}
+      >
+        <span class="text-[20px] font-bold text-slate-300">{WHEN.title}</span>
+        <p class="text-[16px] leading-6 text-slate-400">{WHEN.onlyAfterYouSay}</p>
+        <p class="text-[16px] leading-6 text-slate-400">{WHEN.notInBackground}</p>
+      </section>
     </section>
   );
 }
