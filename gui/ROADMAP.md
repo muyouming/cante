@@ -101,6 +101,7 @@ prompt、会话、上下文、权限模式、工具调用、diff、worktree、�
 | "**先给我看一眼再交上去**" | 反复检查、怕担责 | 有（先试跑 + 动手前确认） | 这是信任设计的落地形态，要在界面上更显眼，而不是藏在按钮里 |
 | 语音说需求 | 打字 | 没做（#56） | 维持不做：系统自带听写已经够用，自研收益低 |
 | 2026-09-17 | **`notice` 接进界面（#140）**：它是别的 agent 在清理 store 时发现的一条「**还没有出口的承诺**」——写方全是活路径（撤销成功/失败、出错、选文件的窗口打不开），读方只剩两条断言。**选 A（接进界面）而不是 B（删掉）**：因为选文件窗口打不开那类路径如果什么都不说，就变成**静默失败** ✗ —— 而她的直觉里"没反应"等于"它坏了"或"它偷偷做了什么" ✓。文案以**事实**为准：撤销**失败**那条说的是「原来的文件没有被改动，都还在」+「可以过一会儿再点一次」，**不写"已撤回"** ✗ | 判据来自 #140 的验收标准（"若删了会变成静默失败，就必须选 A"）|
+| 2026-09-17 | **构建产物不再进 git（#147）**：把 `gui/src-tauri/gen/schemas/` 整个目录写进 `gui/.gitignore`，并把索引里的五个文件删掉（`git rm --cached`：acl-manifests.json、capabilities.json、desktop-schema.json、macOS-schema.json、windows-schema.json）。**选 A（忽略 + 删除）而不是 B（保留 + CI 断言"生成后无差异"）**：这五个文件全是 `src-tauri/build.rs` 里 `tauri-build` 每次构建重写的产物，落盘用的是 `write_if_changed` —— 谁在哪台机器上跑过构建，谁的工作区就会多出改动。Windows 上跑一次会重写 `windows-schema.json`，**并用它覆盖 `desktop-schema.json`**（源码里就是把当前平台的 schema 复制成 desktop 那份），所以只忽略 windows 那一个等于半修：下一次 `git add -A` 还是会把 desktop 那份带进来。B 只能事后报警，A 让它根本不会发生；上游 Tauri 的项目模板同样忽略整个 `/gen/schemas`。而且仓库里那份 `windows-schema.json` 已经**过期**——它不认识产品在用的 opener 插件（0 处 `opener`，desktop 那份有 16 处，而 `capabilities/default.json` 里正引着 `opener:default`），留着它只会让人误以为窗口权限有据可查。 | 仓库里没有任何代码或测试读这些文件（唯一的引用是 `capabilities/default.json` 第一行的 `$schema`，那是编辑器提示；实测把整个目录移走后 `bunx tauri build --no-bundle` 照样成功，构建会自己再生成）。要改回来只需删掉 `.gitignore` 那一行、重新构建、再 `git add`。 |
 
 **从这张表读出的产品走势**：我们的差异化不在"更聪明的 Excel 助手"，而在**跨应用、跨文件、每月重复、且数据不出本机**。凡是需要"新系统/新账号/上传数据"的方案，对这个人群都是高墙——而这正是我们的入口。
 

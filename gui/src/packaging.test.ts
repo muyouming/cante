@@ -10,6 +10,7 @@
 // 所以这条测试直接读 Cargo.toml 与 tauri.conf.json 做一致性检查：便宜、确定、
 // 在三个平台上都能跑，而且失败信息直接告诉你缺哪一行。
 import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
@@ -248,4 +249,51 @@ test("两个工具的解析器必须先在主程序旁边找它们，打包方�
         "先查同目录才找得到（顺序反了会在某些机器上先撞到旧路径）。",
     ).toBe(true);
   }
+});
+
+// ---------------------------------------------------------------------------
+// 生成物不许进 git（#147）
+// ---------------------------------------------------------------------------
+//
+// `gui/src-tauri/gen/schemas/` 整个目录是 **构建产物**：`build.rs` 调
+// `tauri_build::build()`，它每次构建都（重）写 `acl-manifests.json`、
+// `capabilities.json`、`<当前平台>-schema.json`，并把当前平台的 schema 复制成
+// `desktop-schema.json`。所以同一份 `desktop-schema.json` 在 macOS 机器上写一遍、
+// 在 Windows 机器上又写一遍 —— 内容跟着"最后一次构建在哪台机器上"变。
+//
+// #147 之前它们在 git 里，代价是真实的：Windows 上的 agent 跑完构建 `git add -A`，
+// 就把一整份 windows-schema.json 当成成果提交了（两次都由收尾的人手工还原）；而
+// 仓库里那份还是**过期的** —— 它不认识产品在用的 opener 插件。修法是忽略整个目录
+// （与上游 Tauri 模板一致），这条断言把"别再跟踪回去"钉住。
+//
+// 判据是"git 说它没有被跟踪 + 那条例外还在"，而不是"目录里没有文件"：本地开发时
+// 这些文件本来就该躺在磁盘上（构建产物），只是不该进索引。
+test("构建产物不许被 git 跟踪：gen/schemas 全是生成物", () => {
+  const repoRoot = path.resolve(SRC_TAURI, "..", "..");
+  // 源码 tarball / 没有 git 的环境：没有"被跟踪"这个概念，跳过（别把环境问题写成产品红）。
+  if (!existsSync(path.join(repoRoot, ".git"))) return;
+
+  const lsFiles = spawnSync("git", ["ls-files", "--", "gui/src-tauri/gen"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  if (lsFiles.status !== 0) return; // git 不在或仓库读不了：宁可少判一条
+
+  expect(
+    lsFiles.stdout.trim(),
+    "gen/ 下又出现被跟踪的文件了 —— 那是 tauri-build 每次构建都会重写的产物" +
+      "（Windows 构建会重写 windows-schema.json，并用它覆盖 desktop-schema.json）。" +
+      "把它们从索引里删掉，并确认 gui/.gitignore 里的 /src-tauri/gen/schemas/ 还在。",
+  ).toBe("");
+
+  const checkIgnore = spawnSync(
+    "git",
+    ["check-ignore", "--no-index", "-q", "gui/src-tauri/gen/schemas/windows-schema.json"],
+    { cwd: repoRoot },
+  );
+  expect(
+    checkIgnore.status,
+    "gui/.gitignore 没有忽略 gui/src-tauri/gen/schemas/：下一个在 Windows 上跑构建的" +
+      "agent git add -A 时又会把这份生成物提交进来（#147）。",
+  ).toBe(0);
 });

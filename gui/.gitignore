@@ -2,3 +2,10 @@ node_modules/
 dist/
 target/
 *.o
+
+# Tauri 构建产物（#147）：src-tauri/build.rs 里的 tauri-build 每次构建都会重写
+# 这个目录 —— acl-manifests.json、capabilities.json、<当前平台>-schema.json，
+# 并把当前平台的 schema 复制成 desktop-schema.json。它是产物不是源码，上游
+# Tauri 模板同样忽略整个 /gen/schemas。曾经 Windows 上跑过构建的 agent
+# git add -A，就把一整份 windows-schema.json 当成果提交了。
+/src-tauri/gen/schemas/
