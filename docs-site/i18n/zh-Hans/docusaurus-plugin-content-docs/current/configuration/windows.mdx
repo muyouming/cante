@@ -1,0 +1,118 @@
+---
+title: "Windows：今天能用到什么程度"
+sidebar_label: "Windows 现状"
+description: "Windows 安装包今天能做什么、怎么用 WSL 让一台机器先跑起来，以及 cante-bridge 替代方案做到了哪一步、还差什么"
+---
+
+这一页是写给**被叫来帮忙的技术同事**的。应用自己的界面是纯中文的，而且是给不搞 IT 的人写的，所以它不会告诉你下面这些。这里讲三件事：今天到底什么能用、怎么让一台机器现在就能用、以及产品还做不到什么——包括我们自己**没有验证**的部分。
+
+:::warning
+应用在 Windows 上装得上、打得开，但**装完开箱跑不了任务**。下面的内容就是讲为什么，以及今天能怎么办。如果你只是想让某个人先不被卡住，读前两节就够了。
+:::
+
+## 现状：能装能开，但起不了会话 {#status}
+
+Windows 的两个安装包（`Cante_<版本>_x64-setup.exe` 按用户安装、`Cante_<版本>_x64_en-US.msi` 按机器安装）安装与卸载都干净。在 Windows 11 Home 25H2 x64 上验过 `gui-v0.2.0`：
+
+- 静默安装退出码 0，窗口在**真 WebView2** 里打开（应用进程会拉起 `msedgewebview2.exe`）；
+- 第一屏就是**中文简单模式**——三步向导加任务卡首页，不是开发者控制台；
+- 随包的两个工具在安装目录里能跑：`cante-sheets.exe --version` 打印 `cante-sheets 0.2.0`，`cante-pdf.exe --version` 打印 `cante-pdf 0.2.0`（都是退出码 0）。
+
+缺的是**真正干活的那个组件**。应用靠拉起 `cante serve` 来驱动助手运行时——来源是 `CANTE_BIN` 那条命令规格，或者 `PATH` 上的 `cante`。而上游**只为 macOS 与 Linux 发布**这个运行时（[上游 README 明写](https://github.com/muyouming/cante/blob/main/README.md)，[文档概览页](/)也带着同一条警告），它的源码不在本仓库里，所以我们也编不出 Windows 版。
+
+于是 Windows 上向导的第二步会停在这里：
+
+> 这台电脑还缺一个必须的组件
+
+> 这不是网络问题，也不是你操作错了，是这台电脑少了一个真正干活的组件。装好它，任务才能跑起来。
+
+> 请让帮你配置这台电脑的技术同事装一次 Cante 的组件，装好后点「重新检查」。
+
+这段话在 macOS 上是对的（那里确实装得上这个组件）。在 Windows 上它指向的东西没有原生构建。这一屏唯一能点的动作是 复制详情（给技术同事看），它会把事实（缺的是什么、找过哪些位置）复制出来，好交给技术同事——你通常会看到的那段文字就是它复制出来的。
+
+## 今天怎么让它用起来：在 WSL 里跑那个运行时 {#wsl}
+
+今天唯一走得通的路是：把上游的 Linux 二进制跑在 WSL（Ubuntu）里，再把应用指过去。WSL 是真的 Linux 环境，所以它跑的就是 macOS 和 Linux 用户拿到的同一个运行时；应用通过 `wsl.exe` 的标准输入输出跟它说话。
+
+- **代价**：装 WSL 本身要管理员权限（这是机器级的改动，通常还要重启一次），然后是一台机器做一次的设置。这是 IT 的活，用应用的人永远不需要做。
+- **改了什么**：应用进程的一个环境变量 `CANTE_BIN`。它是**命令规格**，不是路径——应用会在后面追加 `serve`——所以 `wsl.exe -e /home/<用户>/cante-bin/ante serve` 就是完整的值。这条规格按词法切分，带空格的路径必须加引号。
+
+确切的步骤、设置脚本与检查项都在 [`gui/DEVELOPING-WINDOWS.md`](https://github.com/muyouming/cante/blob/main/gui/DEVELOPING-WINDOWS.md)。要点是：
+
+1. 在 Windows PowerShell 里跑一次 `gui\scripts\windows\wsl-ante-setup.ps1`。它会把 Linux 运行时下载并解包到 WSL 里的 `~/cante-bin/`，自检一遍，并打印出该设的 `CANTE_BIN` 值。
+2. 把 `CANTE_BIN` 设成那个值——只对当前 PowerShell 窗口生效（最省事，验收时就是这么做的），或用 `[Environment]::SetEnvironmentVariable(...)` 设成用户级（要重新登录一次，才会传给从开始菜单启动的程序）。
+3. 从同一个窗口启动应用，跑一张只读的卡（比如合并两张表）。
+
+**不要看到"窗口打开了"就以为成了**——什么都没连上时窗口一样在。下面这些才是分辨两种情况的检查：
+
+| 看什么 | 通过的标准 |
+| --- | --- |
+| `wsl.exe -e /home/<用户>/cante-bin/ante --version` | 打印出版本号 |
+| 应用的首次检查 | 走到 准备好了，**不是** 这台电脑还缺一个必须的组件 |
+| 供应商列表 | 能列出来——它来自运行时，列得出来才说明应用真的在跟它说话 |
+| 一张只读卡 | 产出文件落在原文件旁边，资源管理器里看得到 |
+| 日志 | 没有"组件没装好"的提示，也没有意外的 `cante://exit` |
+
+一张卡**至少留 1800 秒**再判失败：慢模型实测到过 850 秒，超时设 600 会把成功误判成失败。
+
+这条路解决不了的事：
+
+- **路径映射**：应用选的是 Windows 路径（`C:\Users\...\预算.xlsx`），Linux 侧看到的是 `/mnt/c/Users/.../预算.xlsx`，得由模型自己把这层对上。某张卡说找不到文件时，先怀疑这一条，再怀疑卡本身。
+- **性能不是画像机的结论**：开发机上的 WSL 不等于一台 16GB 办公电脑的体感。
+- **它不是交付形态**：这是我们自己的验收办法。它替代不了真正的 Windows 版运行时，也不该让用应用的人去装 WSL。
+- **SSH 会话里没有交互桌面**：从 SSH 启动的 GUI 没有窗口可看。要看窗口得走 RDP，或者把进程挂到已登录的会话上。
+
+## 我们正在做的替代方案：`cante-bridge` {#bridge}
+
+`main` 上还有第二条路，**不需要 WSL**。`pi` 在 Windows 上原生能跑，所以我们加了一个小二进制 `cante-bridge`：它说应用那套运行时协议，但驱动的是 `pi --mode rpc`，而不是 `cante serve`。`CANTE_BIN` 指向 `cante-bridge.exe`，Rust 侧和前端一行未改。有价值的地方在于：守护进程协议可以由上游二进制以外的东西实现——这是"做一版不依赖我们编不了的组件的 Windows 构建"的第一刀。
+
+已经做到的事，全部是在 macOS 上对着一个脚本化的假 OpenAI 兼容端点跑通的（不需要真模型，也不需要网络），并且进了 CI：
+
+| 部分 | 做到的程度 | 写在哪 |
+| --- | --- | --- |
+| 桥依赖的三个机制：JSONL 事件流、扩展能拦住工具调用并问人、`abort` | 探针三条都答"能" | [`gui/docs/PROBE-pi-rpc.md`](https://github.com/muyouming/cante/blob/main/gui/docs/PROBE-pi-rpc.md) |
+| 第一段：`StartSession`、带流式文本与一次工具调用的 `UserInput`、`Interrupt` | 端到端跑通，而且走的是现有的 `daemon.rs`，Rust 桥与前端都没改 | [`gui/docs/BRIDGE-spike.md`](https://github.com/muyouming/cante/blob/main/gui/docs/BRIDGE-spike.md) |
+| 审批闸门：把 `TurnPause` / `ApprovalResponse` 映射到 `pi` 的扩展对话框 | 一次提问能覆盖同一批的多个调用、批内可逐个放行/拒绝、"以后都允许"在本次运行内记住、审批页开着时也能中止 | [`gui/docs/BRIDGE-gate.md`](https://github.com/muyouming/cante/blob/main/gui/docs/BRIDGE-gate.md) |
+
+在一台机器上试之前要知道两件事：
+
+- **`PI_BIN` 必须指到真 `.exe`**。npm 装的 `pi` 是 `pi.cmd` 包装，而 Rust 侧用 `CreateProcess` 起进程，起不了 `.cmd`。用 `Get-Command pi` 看 `Source` 结尾；`pi.exe`（例如 `bun install -g` 落的那个）才行。
+- **`pi` 要有自己的模型与凭据**。简单模式里应用不向运行时传 provider/model，所以这条路上的模型和密钥来自 `pi` 自己的配置（`~\.pi\agent\`，或常见的 `*_API_KEY` 环境变量），不是来自 Cante。另外，已发布的 `v0.2.0` 安装包早于桥，里面**没有** `cante-bridge.exe`；从 `main` 打出来的包会把它放在主程序旁边。
+
+还差什么——这就是桥今天还不是正式路径的原因：
+
+- **权限语义还没有对齐。** 现在的闸门拦的是**全部**工具调用。上游的 `strict` / `auto` / `yolo` 三档、allow/ask/deny 规则、危险命令识别、持久授权，都还没有对应物，所以"哪一种调用该问"还不是同一个产品。这块正是"破坏性动作先问人"这条承诺的实现，请对它保持怀疑。
+- **"谁来处理你的数据"要对上账。** 隐私面板里的服务方名字来自会话信息，而这条路上凭据在 `pi` 的配置里。两边要说同一套话，而不是假设它们一致。
+- **只在本机处理、错误分类、用量统计**也都还没对齐。
+- **这条路上没有任何一步在真 Windows 上跑过。** 桥那几份文档里所有 Windows 侧的结论都来自读源码与在 macOS 上跑的解析级测试。还没定论的问题——`pi` 在 `CreateProcess` 下起不起得来、退得干不干净，控制台黑窗会不会闪，能不能连上局域网网关——列在 [`gui/docs/BRIDGE-windows.md`](https://github.com/muyouming/cante/blob/main/gui/docs/BRIDGE-windows.md)。
+
+以上都没有时间表，我们也不做承诺。桥会不会成为 Windows 的正式路径、还是继续维持 WSL 那套安排，是还没拍板的产品决定——见 [`gui/docs/DECISION-windows-runtime.md`](https://github.com/muyouming/cante/blob/main/gui/docs/DECISION-windows-runtime.md) 与 issue [#103](https://github.com/muyouming/cante/issues/103)。
+
+## 可以原话转达的边界 {#limits}
+
+下面这些是产品自己公开说明的边界，不是 bug。值得用大白话再说一遍，因为每一条都是"什么都不做"比"猜着做"更安全的地方：
+
+- **截图和照片里的表格：不支持。** 客户端的协议只承载文本，所以就算模型能看图，图片也到不了模型；而且普通办公电脑上没有 OCR 工具。至于那几张会附带图片的卡，图片到底有没有真的送出去取决于宿主的运行时二进制——它不在本仓库里，而且只在**一个**本地视觉模型上验证过。别承诺这一条。
+- **扫描件 PDF 不会被悄悄转换。** 没有文字层的 PDF，或者字体里没有文字映射的 PDF（中文 PDF 从打印/导出流程里出来时很常见：文字看得见，但文件里没有能还原它的东西），会让这次运行停下来问你，而不是给你一页乱码。
+- **超大表或大量合并单元格的表可能要人工核一遍。** 超过几十万行，或者拿合并单元格当表头，确认页会在开始之前就说明。
+- **界面只有中文**，这是刻意的；产品以 Windows 为先。请自己翻译标签。
+- **安装包未签名。** 因此第一次启动时会看到 Windows SmartScreen 的警告（更多信息 → 仍要运行），macOS 的 Gatekeeper 也会同样提醒一次，之后不再出现。这里有一条要如实说明的缺口：我们验收时装的文件**没有** Mark of the Web，那种情况下 SmartScreen 根本不会触发，所以“真实用户第一次双击到底看到哪句话”**还没有**取证。
+
+## 我们没验证的部分 {#unverified}
+
+四轮 Windows 真机验收都是在 **SSH 会话（没有交互桌面）**里跑的。这足以确定安装、包内容与检查项，但下面这些必须有人坐在 RDP 里手验：
+
+- 原生文件对话框，以及从带空格与中文的路径走完整流程；
+- 启动时控制台黑窗会不会闪（代码里用 `CREATE_NO_WINDOW` 把子进程窗口藏了，但这条路径在真机上没被走到过）；
+- WPS 的 `.et`、微信 PC 加中文输入法，以及 16GB 无独显机器上的手感；
+- 字体、中文排版与整体窗口观感。
+
+凡是我们敢下的结论，验收报告里都留着原始命令与输出：[`gui/WINDOWS-ACCEPTANCE-1.md`](https://github.com/muyouming/cante/blob/main/gui/WINDOWS-ACCEPTANCE-1.md) 到 [`-4.md`](https://github.com/muyouming/cante/blob/main/gui/WINDOWS-ACCEPTANCE-4.md)。接着读哪份：
+
+| 想知道什么 | 读哪份 |
+| --- | --- |
+| 真机上到底跑了什么、输出是什么 | `gui/WINDOWS-ACCEPTANCE-{1,2,3,4}.md` |
+| WSL 的逐步设置与验收清单 | `gui/DEVELOPING-WINDOWS.md` |
+| 运行时为什么没有 Windows 构建，考虑过哪些路 | `gui/docs/DECISION-windows-runtime.md` |
+| 桥到哪一步了，以及 Windows 上哪些没验 | `gui/docs/BRIDGE-windows.md` |
+| 产品自己声明的诚实边界 | [`gui/ROADMAP.md`](https://github.com/muyouming/cante/blob/main/gui/ROADMAP.md) 第 6.8 节 |
