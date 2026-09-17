@@ -1,0 +1,601 @@
+# 第三方开源组件与许可证清单
+
+> **本文件由 `gui/scripts/license-inventory.sh` 生成，不要手改。**
+>
+> - 重新生成：`bash gui/scripts/license-inventory.sh`
+> - 校验是否过期（CI 用的就是这条）：`bash gui/scripts/license-inventory.sh --check`
+
+## 覆盖范围：这份清单覆盖什么、不覆盖什么
+
+**覆盖**
+
+- **Rust**：`gui/src-tauri/Cargo.lock` 锁定的**全部**传递依赖（含构建期与开发期依赖，也含各平台专有的依赖）。版本、许可证表达式与版权行取自 `cargo metadata --locked`。
+- **npm**：`gui/package.json` 里声明的**直接**依赖（`dependencies` + `devDependencies`），加上 `dependencies` 的**传递闭包**（真正会打进前端产物那几包）。版本取自 `gui/bun.lock`；许可证与版权行取自已安装的 `gui/node_modules/<包>/package.json`。
+
+**不覆盖**
+
+- npm `devDependencies` 的**传递**依赖（vite / rollup / esbuild 那一整棵构建、测试期的树）。它们是构建期工具、不进安装包；要把它们纳进来，得先解决「平台专有的二进制包在不同机器上装的不一样」这件事，否则这份文件会随机器变。
+- 系统库与运行时：WebView2、WebKitGTK、Node / Bun、操作系统自带的 C 库。
+- 不在本仓库依赖树里、另行分发的组件（例如将来若把 `pi` 宿主随包分发，它自带的依赖树要另出一份清单）。
+- 各许可证的**原文**：本文件只列名字 / 版本 / 许可证表达式 / 版权行，不内嵌全文。
+
+## 统计
+
+| 许可类别 | Rust | npm | 合计 |
+| --- | --- | --- | --- |
+| MIT | 491 | 13 | 504 |
+| Apache-2.0 | 5 | 2 | 7 |
+| ISC | 1 | 0 | 1 |
+| BSD-* | 2 | 0 | 2 |
+| 其他 / 未知 | 29 | 0 | 29 |
+| **合计** | **528** | **15** | **543** |
+
+## MIT
+
+- @tailwindcss/vite 4.3.3 — MIT
+- @tauri-apps/api 2.11.1 — Apache-2.0 OR MIT
+- @tauri-apps/cli 2.11.4 — Apache-2.0 OR MIT
+- @tauri-apps/plugin-dialog 2.7.3 — MIT OR Apache-2.0
+- @tauri-apps/plugin-opener 2.5.5 — MIT OR Apache-2.0
+- @types/bun 1.4.2 — MIT
+- adler2 2.0.1 — 0BSD OR MIT OR Apache-2.0 — Jonas Schievink <jonasschievink@gmail.com>, oyvindln <oyvindln@users.noreply.github.com>
+- aes 0.9.3 — MIT OR Apache-2.0 — RustCrypto Developers
+- aho-corasick 1.1.5 — Unlicense OR MIT — Andrew Gallant <jamslam@gmail.com>
+- android_system_properties 0.1.6 — MIT OR Apache-2.0 — Nicolas Silva <nical@fastmail.com>
+- anyhow 1.0.104 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- async-broadcast 0.7.2 — MIT OR Apache-2.0 — Stjepan Glavina <stjepang@gmail.com>, Yoshua Wuyts <yoshuawuyts@gmail.com>, Zeeshan Ali Khan <zeeshanak@gnome.org>
+- async-channel 2.5.0 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>
+- async-executor 1.14.0 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>, John Nunley <dev@notgull.net>
+- async-io 2.6.0 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>
+- async-lock 3.4.2 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>
+- async-process 2.5.0 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>
+- async-recursion 1.1.1 — MIT OR Apache-2.0 — Robert Usher <266585+dcchut@users.noreply.github.com>
+- async-signal 0.2.14 — Apache-2.0 OR MIT — John Nunley <dev@notgull.net>
+- async-task 4.7.1 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>
+- async-trait 0.1.92 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- atk 0.18.2 — MIT — The gtk-rs Project Developers
+- atk-sys 0.18.2 — MIT — The gtk-rs Project Developers
+- atoi_simd 0.18.1 — MIT OR Apache-2.0 — Dmitry Rodionov <gh@rdmtr.com>
+- atomic-waker 1.1.2 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>, Contributors to futures-rs
+- autocfg 1.5.1 — Apache-2.0 OR MIT — Josh Stone <cuviper@gmail.com>
+- base64 0.21.7 — MIT OR Apache-2.0 — Alice Maz <alice@alicemaz.com>, Marshall Pierce <marshall@mpierce.org>
+- base64 0.22.1 — MIT OR Apache-2.0 — Marshall Pierce <marshall@mpierce.org>
+- base64 0.23.1 — MIT OR Apache-2.0 — Marshall Pierce <marshall@mpierce.org>
+- bit-set 0.8.0 — Apache-2.0 OR MIT — Alexis Beingessner <a.beingessner@gmail.com>
+- bit-vec 0.8.0 — Apache-2.0 OR MIT — Alexis Beingessner <a.beingessner@gmail.com>
+- bitflags 1.3.2 — MIT/Apache-2.0 — The Rust Project Developers
+- bitflags 2.13.2 — MIT OR Apache-2.0 — The Rust Project Developers
+- block-buffer 0.10.4 — MIT OR Apache-2.0 — RustCrypto Developers
+- block-buffer 0.12.1 — MIT OR Apache-2.0 — RustCrypto Developers
+- block-padding 0.4.2 — MIT OR Apache-2.0 — RustCrypto Developers
+- block2 0.6.2 — MIT — Mads Marquart <mads@marquart.dk>
+- blocking 1.7.0 — Apache-2.0 OR MIT
+- brotli-decompressor 5.0.3 — BSD-3-Clause/MIT — Daniel Reiter Horn <danielrh@dropbox.com>, The Brotli Authors
+- bs58 0.5.1 — MIT/Apache-2.0
+- bumpalo 3.20.3 — MIT OR Apache-2.0 — Nick Fitzgerald <fitzgen@gmail.com>
+- bytemuck 1.25.2 — Zlib OR Apache-2.0 OR MIT — Lokathor <zefria@gmail.com>
+- byteorder 1.5.0 — Unlicense OR MIT — Andrew Gallant <jamslam@gmail.com>
+- bytes 1.12.1 — MIT — Carl Lerche <me@carllerche.com>, Sean McArthur <sean@seanmonstar.com>
+- cairo-rs 0.18.5 — MIT — The gtk-rs Project Developers
+- cairo-sys-rs 0.18.2 — MIT — The gtk-rs Project Developers
+- calamine 0.36.1 — MIT — Johann Tuffe <tafia973@gmail.com>
+- camino 1.2.6 — MIT OR Apache-2.0 — Without Boats <saoirse@without.boats>, Ashley Williams <ashley666ashley@gmail.com>, Steve Klabnik <steve@steveklabnik.com>, Rain <rain@sunshowers.io>
+- cargo-platform 0.1.9 — MIT OR Apache-2.0
+- cargo_metadata 0.19.2 — MIT — Oliver Schneider <git-spam-no-reply9815368754983@oli-obk.de>
+- cargo_toml 0.22.3 — Apache-2.0 OR MIT — Kornel <kornel@geekhood.net>
+- cbc 0.2.1 — MIT OR Apache-2.0 — RustCrypto Developers
+- cc 1.4.6 — MIT OR Apache-2.0
+- cesu8 1.1.0 — Apache-2.0/MIT — Eric Kidd <git@randomhacks.net>
+- cfb 0.7.3 — MIT — Matthew D. Steele <mdsteele@alum.mit.edu>
+- cfg-expr 0.15.8 — MIT OR Apache-2.0 — Embark <opensource@embark-studios.com>, Jake Shadle <jake.shadle@embark-studios.com>
+- cfg-if 1.0.4 — MIT OR Apache-2.0 — Alex Crichton <alex@alexcrichton.com>
+- chacha20 0.10.2 — MIT OR Apache-2.0 — RustCrypto Developers
+- chrono 0.4.45 — MIT OR Apache-2.0
+- cipher 0.5.2 — MIT OR Apache-2.0 — RustCrypto Developers
+- codepage 0.1.3 — Apache-2.0 OR MIT — Henri Sivonen <hsivonen@hsivonen.fi>
+- combine 4.6.8 — MIT — Markus Westerlind <marwes91@gmail.com>
+- concurrent-queue 2.5.0 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>, Taiki Endo <te316e89@gmail.com>, John Nunley <dev@notgull.net>
+- const-oid 0.10.2 — Apache-2.0 OR MIT — RustCrypto Developers
+- cookie 0.18.2 — MIT OR Apache-2.0 — Sergio Benitez <sb@sergio.bz>, Alex Crichton <alex@alexcrichton.com>
+- core-foundation 0.10.1 — MIT OR Apache-2.0 — The Servo Project Developers
+- core-foundation-sys 0.8.7 — MIT OR Apache-2.0 — The Servo Project Developers
+- core-graphics 0.25.0 — MIT OR Apache-2.0 — The Servo Project Developers
+- core-graphics-types 0.2.0 — MIT OR Apache-2.0 — The Servo Project Developers
+- core_detect 1.0.0 — MIT/Apache-2.0 — Thom Chiovoloni <chiovolonit@gmail.com>
+- cpubits 0.1.1 — MIT OR Apache-2.0 — RustCrypto Developers
+- cpufeatures 0.2.17 — MIT OR Apache-2.0 — RustCrypto Developers
+- cpufeatures 0.3.1 — MIT OR Apache-2.0 — RustCrypto Developers
+- crc32fast 1.5.2 — MIT OR Apache-2.0 — Sam Rijs <srijs@airpost.net>, Alex Crichton <alex@alexcrichton.com>
+- crossbeam-channel 0.5.17 — MIT OR Apache-2.0
+- crossbeam-utils 0.8.23 — MIT OR Apache-2.0
+- crypto-common 0.1.7 — MIT OR Apache-2.0 — RustCrypto Developers
+- crypto-common 0.2.2 — MIT OR Apache-2.0 — RustCrypto Developers
+- csstype 3.2.3 — MIT — Fredrik Nicol <fredrik.nicol@gmail.com>
+- ctor 0.8.0 — Apache-2.0 OR MIT — Matt Mastracci <matthew@mastracci.com>
+- ctor-proc-macro 0.0.7 — Apache-2.0 OR MIT — Matt Mastracci <matthew@mastracci.com>
+- darling 0.24.1 — MIT — Ted Driggs <ted.driggs@outlook.com>
+- darling_core 0.24.1 — MIT — Ted Driggs <ted.driggs@outlook.com>
+- darling_macro 0.24.1 — MIT — Ted Driggs <ted.driggs@outlook.com>
+- dbus 0.9.12 — Apache-2.0/MIT — David Henningsson <diwic@ubuntu.com>
+- debug_unsafe 0.1.4 — MIT OR Apache-2.0 — Dmitry Rodionov <gh@rdmtr.com>
+- defmt 1.1.1 — MIT OR Apache-2.0 — The Knurling-rs developers
+- defmt-macros 1.1.1 — MIT OR Apache-2.0 — The Knurling-rs developers
+- defmt-parser 1.0.0 — MIT OR Apache-2.0 — The Knurling-rs developers
+- deranged 0.5.8 — MIT OR Apache-2.0 — Jacob Pratt <jacob@jhpratt.dev>
+- derive_more 2.1.1 — MIT — Jelte Fennema <github-tech@jeltef.nl>
+- derive_more-impl 2.1.1 — MIT — Jelte Fennema <github-tech@jeltef.nl>
+- digest 0.10.7 — MIT OR Apache-2.0 — RustCrypto Developers
+- digest 0.11.3 — MIT OR Apache-2.0 — RustCrypto Developers
+- dirs 6.0.0 — MIT OR Apache-2.0 — Simon Ochsenreither <simon@ochsenreither.de>
+- dirs-sys 0.5.0 — MIT OR Apache-2.0 — Simon Ochsenreither <simon@ochsenreither.de>
+- dispatch2 0.3.1 — Zlib OR Apache-2.0 OR MIT — Mads Marquart <mads@marquart.dk>, Mary <mary@mary.zone>
+- displaydoc 0.2.7 — MIT OR Apache-2.0 — Jane Lusby <jlusby@yaah.dev>
+- dlopen2 0.8.2 — MIT — Szymon Wieloch <szymon.wieloch@gmail.com>, Ahmed Masud <ahmed.masud@saf.ai>, OpenByte <development.openbyte@gmail.com>
+- dlopen2_derive 0.4.3 — MIT — Szymon Wieloch <szymon.wieloch@gmail.com>, OpenByte <development.openbyte@gmail.com>
+- dom_query 0.27.0 — MIT — niklak <morgenpurple@gmail.com>, importcjj <importcjj@gmail.com>
+- dtoa 1.0.11 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- dtor 0.3.0 — Apache-2.0 OR MIT — Matt Mastracci <matthew@mastracci.com>
+- dtor-proc-macro 0.0.6 — Apache-2.0 OR MIT — Matt Mastracci <matthew@mastracci.com>
+- dyn-clone 1.0.20 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- ecb 0.2.1 — MIT OR Apache-2.0 — RustCrypto Developers
+- embed-resource 3.0.11 — MIT — наб <nabijaczleweli@nabijaczleweli.xyz>, Cat Plus Plus <piotrlegnica@piotrl.pl>, Liigo <liigo@qq.com>, azyobuzin <azyobuzin@users.sourceforge.jp>, Peter Atashian <retep998@gmail.com>, pravic <ehysta@gmail.com>, Gabriel Majeri <gabriel.majeri6@gmail.com>, SonnyX, Johan Andersson <repi@repi.se>, Jordan Poles <jpdev.noreply@gmail.com>, MSxDOS <melcodos@gmail.com>, Jim McGrath <jimmc2@gmail.com>, roblabla <unfiltered@roblab.la>, Jasper Bekkers <jasper@traverseresearch.nl>, Richard Markiewicz <rmarkiewicz@devolutions.net>, Emerson de Freitas Barcelos <emersonfxbx@gmail.com>, Li Keqing <me@kaze.ai>, Alexis Bourget <alexis.bourget@gmail.com>, Michael Farrell <micolous+git@gmail.com>, Jacob Okamoto <oko@oko.io>, Marijn Suijten <marijn@traverseresearch.nl>, Lucas Nogueira <lucas@tauri.app>, CharlesChen0823 <yongchen0823@gmail.com>, Daniel Schaefer <dhs@frame.work>, Rene Leonhardt, ssrlive, Kan-Ru Chen <kanru@kanru.info>, Tony <legendmastertony@gmail.com>, Berrysoft <Strawberry_Str@hotmail.com>, Marcus Ahlberg <marcus.ahlberg@kvaser.com>
+- embed_plist 1.2.2 — MIT OR Apache-2.0 — Nikolai Vazquez <hello@nikolaivazquez.com>
+- endi 1.1.1 — MIT — Zeeshan Ali Khan <zeenix@gmail.com>
+- enumflags2 0.7.12 — MIT OR Apache-2.0 — maik klein <maikklein@googlemail.com>, Maja Kądziołka <maya@compilercrim.es>
+- enumflags2_derive 0.7.12 — MIT OR Apache-2.0 — maik klein <maikklein@googlemail.com>, Maja Kądziołka <maya@compilercrim.es>
+- equivalent 1.0.2 — Apache-2.0 OR MIT
+- erased-serde 0.4.10 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- errno 0.3.14 — MIT OR Apache-2.0 — Chris Wong <lambda.fairy@gmail.com>, Dan Gohman <dev@sunfishcode.online>
+- event-listener 5.4.2 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>, John Nunley <dev@notgull.net>
+- event-listener-strategy 0.5.4 — Apache-2.0 OR MIT — John Nunley <dev@notgull.net>
+- fast-float2 0.2.4 — MIT OR Apache-2.0 — Ivan Smirnov <i.s.smirnov@gmail.com>, Alex Huszagh <ahuszagh@gmail.com>
+- fastrand 2.5.0 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>
+- fdeflate 0.3.7 — MIT OR Apache-2.0 — The image-rs Developers
+- field-offset 0.3.6 — MIT OR Apache-2.0 — Diggory Blake <diggsey@googlemail.com>
+- find-msvc-tools 0.1.12 — MIT OR Apache-2.0
+- flate2 1.1.10 — MIT OR Apache-2.0 — Alex Crichton <alex@alexcrichton.com>, Josh Triplett <josh@joshtriplett.org>
+- fnv 1.0.7 — Apache-2.0 / MIT — Alex Crichton <alex@alexcrichton.com>
+- foreign-types 0.5.0 — MIT/Apache-2.0 — Steven Fackler <sfackler@gmail.com>
+- foreign-types-macros 0.2.4 — MIT/Apache-2.0 — Steven Fackler <sfackler@gmail.com>
+- foreign-types-shared 0.3.1 — MIT/Apache-2.0 — Steven Fackler <sfackler@gmail.com>
+- form_urlencoded 1.2.2 — MIT OR Apache-2.0 — The rust-url developers
+- futures-channel 0.3.34 — MIT OR Apache-2.0
+- futures-core 0.3.34 — MIT OR Apache-2.0
+- futures-executor 0.3.34 — MIT OR Apache-2.0
+- futures-io 0.3.34 — MIT OR Apache-2.0
+- futures-lite 2.6.1 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>, Contributors to futures-rs
+- futures-macro 0.3.34 — MIT OR Apache-2.0
+- futures-sink 0.3.34 — MIT OR Apache-2.0
+- futures-task 0.3.34 — MIT OR Apache-2.0
+- futures-util 0.3.34 — MIT OR Apache-2.0
+- gdk 0.18.2 — MIT — The gtk-rs Project Developers
+- gdk-pixbuf 0.18.5 — MIT — The gtk-rs Project Developers
+- gdk-pixbuf-sys 0.18.0 — MIT — The gtk-rs Project Developers
+- gdk-sys 0.18.2 — MIT — The gtk-rs Project Developers
+- gdkwayland-sys 0.18.2 — MIT — The gtk-rs Project Developers
+- gdkx11 0.18.2 — MIT — The gtk-rs Project Developers
+- gdkx11-sys 0.18.2 — MIT — The gtk-rs Project Developers
+- generic-array 0.14.7 — MIT — Bartłomiej Kamiński <fizyk20@gmail.com>, Aaron Trent <novacrazy@gmail.com>
+- getrandom 0.2.17 — MIT OR Apache-2.0 — The Rand Project Developers
+- getrandom 0.3.4 — MIT OR Apache-2.0 — The Rand Project Developers
+- getrandom 0.4.3 — MIT OR Apache-2.0 — The Rand Project Developers
+- gio 0.18.4 — MIT — The gtk-rs Project Developers
+- gio-sys 0.18.1 — MIT — The gtk-rs Project Developers
+- glib 0.18.5 — MIT — The gtk-rs Project Developers
+- glib-macros 0.18.5 — MIT — The gtk-rs Project Developers
+- glib-sys 0.18.1 — MIT — The gtk-rs Project Developers
+- glob 0.3.4 — MIT OR Apache-2.0 — The Rust Project Developers
+- gobject-sys 0.18.0 — MIT — The gtk-rs Project Developers
+- gtk 0.18.2 — MIT — The gtk-rs Project Developers
+- gtk-sys 0.18.2 — MIT — The gtk-rs Project Developers
+- gtk3-macros 0.18.2 — MIT — The gtk-rs Project Developers
+- hashbrown 0.12.3 — MIT OR Apache-2.0 — Amanieu d'Antras <amanieu@gmail.com>
+- hashbrown 0.17.1 — MIT OR Apache-2.0
+- heck 0.4.1 — MIT OR Apache-2.0 — Without Boats <woboats@gmail.com>
+- heck 0.5.0 — MIT OR Apache-2.0
+- hermit-abi 0.5.3 — MIT OR Apache-2.0
+- hex 0.4.3 — MIT OR Apache-2.0 — KokaKiwi <kokakiwi@kokakiwi.net>
+- html5ever 0.38.0 — MIT OR Apache-2.0 — The html5ever Project Developers
+- http 1.5.0 — MIT OR Apache-2.0 — Alex Crichton <alex@alexcrichton.com>, Carl Lerche <me@carllerche.com>, Sean McArthur <sean@seanmonstar.com>
+- http-body 1.1.0 — MIT — Carl Lerche <me@carllerche.com>, Lucio Franco <luciofranco14@gmail.com>, Sean McArthur <sean@seanmonstar.com>
+- http-body-util 0.1.5 — MIT — Carl Lerche <me@carllerche.com>, Lucio Franco <luciofranco14@gmail.com>, Sean McArthur <sean@seanmonstar.com>
+- httparse 1.10.1 — MIT OR Apache-2.0 — Sean McArthur <sean@seanmonstar.com>
+- hybrid-array 0.4.15 — MIT OR Apache-2.0 — RustCrypto Developers
+- hyper 1.11.1 — MIT — Sean McArthur <sean@seanmonstar.com>
+- hyper-util 0.1.20 — MIT — Sean McArthur <sean@seanmonstar.com>
+- iana-time-zone 0.1.65 — MIT OR Apache-2.0 — Andrew Straw <strawman@astraw.com>, René Kijewski <rene.kijewski@fu-berlin.de>, Ryan Lopopolo <rjl@hyperbo.la>
+- iana-time-zone-haiku 0.1.2 — MIT OR Apache-2.0 — René Kijewski <crates.io@k6i.de>
+- ico 0.5.0 — MIT — Matthew D. Steele <mdsteele@alum.mit.edu>
+- ident_case 1.0.1 — MIT/Apache-2.0 — Ted Driggs <ted.driggs@outlook.com>
+- idna 1.1.0 — MIT OR Apache-2.0 — The rust-url developers
+- idna_adapter 1.2.2 — Apache-2.0 OR MIT — The rust-url developers
+- indexmap 1.9.3 — Apache-2.0 OR MIT
+- indexmap 2.14.2 — Apache-2.0 OR MIT
+- infer 0.19.0 — MIT — Bojan <dbojan@gmail.com>
+- inout 0.2.2 — MIT OR Apache-2.0 — RustCrypto Developers
+- ipnet 2.12.2 — MIT OR Apache-2.0 — Kris Price <kris@krisprice.nz>
+- is-docker 0.2.0 — MIT — Sean Larkin <TheLarkInn@users.noreply.github.com>
+- is-wsl 0.4.0 — MIT — Sean Larkin <TheLarkInn@users.noreply.github.com>
+- itoa 1.0.18 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- javascriptcore-rs 1.1.2 — MIT
+- javascriptcore-rs-sys 1.1.1 — MIT — The Gtk-rs Project Developers
+- jiff 0.2.37 — Unlicense OR MIT — Andrew Gallant <jamslam@gmail.com>
+- jiff-core 0.1.1 — Unlicense OR MIT — Andrew Gallant <jamslam@gmail.com>
+- jiff-static 0.2.37 — Unlicense OR MIT — Andrew Gallant <jamslam@gmail.com>
+- jiff-tzdb 0.1.8 — Unlicense OR MIT — Andrew Gallant <jamslam@gmail.com>
+- jiff-tzdb-platform 0.1.3 — Unlicense OR MIT — Andrew Gallant <jamslam@gmail.com>
+- jni 0.21.1 — MIT/Apache-2.0 — Josh Chase <josh@prevoty.com>
+- jni-sys 0.3.1 — MIT OR Apache-2.0 — Steven Fackler <sfackler@gmail.com>
+- jni-sys 0.4.1 — MIT OR Apache-2.0 — Steven Fackler <sfackler@gmail.com>, Robert Bragg <robert@sixbynine.org>
+- jni-sys-macros 0.4.1 — MIT OR Apache-2.0 — Robert Bragg <robert@sixbynine.org>
+- js-sys 0.3.105 — MIT OR Apache-2.0 — The wasm-bindgen Developers
+- json-patch 3.0.1 — MIT/Apache-2.0 — Ivan Dubrov <dubrov.ivan@gmail.com>
+- jsonptr 0.6.3 — MIT OR Apache-2.0 — chance dinkins, André Sá de Mello <codasm@pm.me>
+- keyboard-types 0.7.0 — MIT OR Apache-2.0 — Pyfisch <pyfisch@posteo.org>
+- libappindicator 0.9.0 — Apache-2.0 OR MIT
+- libappindicator-sys 0.9.0 — Apache-2.0 OR MIT
+- libc 0.2.189 — MIT OR Apache-2.0
+- libdbus-sys 0.2.7 — Apache-2.0/MIT — David Henningsson <diwic@ubuntu.com>
+- libredox 0.1.24 — MIT — 4lDO2 <4lDO2@protonmail.com>
+- linux-raw-sys 0.12.1 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT — Dan Gohman <dev@sunfishcode.online>
+- lock_api 0.4.14 — MIT OR Apache-2.0 — Amanieu d'Antras <amanieu@gmail.com>
+- log 0.4.34 — MIT OR Apache-2.0 — The Rust Project Developers
+- lopdf 0.45.0 — MIT — Junfeng Liu <china.liujunfeng@gmail.com>, Emulator <emulator@hotmail.it>
+- markup5ever 0.38.0 — MIT OR Apache-2.0 — The html5ever Project Developers
+- md-5 0.11.0 — MIT OR Apache-2.0 — RustCrypto Developers
+- memchr 2.8.3 — Unlicense OR MIT — Andrew Gallant <jamslam@gmail.com>, bluss
+- memoffset 0.9.1 — MIT — Gilad Naaman <gilad.naaman@gmail.com>
+- mime 0.3.17 — MIT OR Apache-2.0 — Sean McArthur <sean@seanmonstar.com>
+- miniz_oxide 0.8.9 — MIT OR Zlib OR Apache-2.0 — Frommi <daniil.liferenko@gmail.com>, oyvindln <oyvindln@users.noreply.github.com>, Rich Geldreich richgel99@gmail.com
+- miniz_oxide 0.9.1 — MIT OR Zlib OR Apache-2.0 — Frommi <daniil.liferenko@gmail.com>, oyvindln <oyvindln@users.noreply.github.com>, Rich Geldreich richgel99@gmail.com
+- mio 1.2.3 — MIT — Carl Lerche <me@carllerche.com>, Thomas de Zeeuw <thomasdezeeuw@gmail.com>, Tokio Contributors <team@tokio.rs>
+- muda 0.19.3 — Apache-2.0 OR MIT
+- multiversion 0.9.0 — MIT OR Apache-2.0 — Caleb Zulawski <caleb.zulawski@gmail.com>
+- multiversion-macros 0.9.0 — MIT OR Apache-2.0 — Caleb Zulawski <caleb.zulawski@gmail.com>
+- multiversion_no_op 1.0.0 — Apache-2.0 OR MIT — Henri Sivonen <hsivonen@hsivonen.fi>
+- ndk 0.9.0 — MIT OR Apache-2.0 — The Rust Mobile contributors
+- ndk-sys 0.6.0+11769913 — MIT OR Apache-2.0 — The Rust Windowing contributors
+- new_debug_unreachable 1.0.6 — MIT — Matt Brubeck <mbrubeck@limpet.net>, Jonathan Reem <jonathan.reem@gmail.com>
+- nom 8.0.0 — MIT — contact@geoffroycouprie.com
+- num-conv 0.2.2 — MIT OR Apache-2.0 — Jacob Pratt <jacob@jhpratt.dev>
+- num-traits 0.2.19 — MIT OR Apache-2.0 — The Rust Project Developers
+- num_enum 0.7.6 — BSD-3-Clause OR MIT OR Apache-2.0 — Daniel Wagner-Hall <dawagner@gmail.com>, Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>, Vincent Esche <regexident@gmail.com>
+- num_enum_derive 0.7.6 — BSD-3-Clause OR MIT OR Apache-2.0 — Daniel Wagner-Hall <dawagner@gmail.com>, Daniel Henry-Mantilla <daniel.henry.mantilla@gmail.com>, Vincent Esche <regexident@gmail.com>
+- objc2 0.6.4 — MIT — Mads Marquart <mads@marquart.dk>
+- objc2-app-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- objc2-cloud-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- objc2-core-data 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- objc2-core-foundation 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- objc2-core-graphics 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- objc2-core-image 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- objc2-core-location 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- objc2-core-text 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- objc2-encode 4.1.0 — MIT — Mads Marquart <mads@marquart.dk>
+- objc2-exception-helper 0.1.1 — Zlib OR Apache-2.0 OR MIT — Mads Marquart <mads@marquart.dk>
+- objc2-foundation 0.3.2 — MIT
+- objc2-io-surface 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- objc2-quartz-core 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- objc2-ui-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- objc2-user-notifications 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- objc2-web-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT
+- once_cell 1.21.4 — MIT OR Apache-2.0 — Aleksey Kladov <aleksey.kladov@gmail.com>
+- open 5.4.4 — MIT — Sebastian Thiel <byronimo@gmail.com>
+- ordered-stream 0.2.0 — MIT OR Apache-2.0 — Daniel De Graaf <code@danieldg.net>, Zeeshan Ali Khan <zeeshanak@gnome.org>
+- pango 0.18.3 — MIT — The gtk-rs Project Developers
+- pango-sys 0.18.0 — MIT — The gtk-rs Project Developers
+- parking 2.2.1 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>, The Rust Project Developers
+- parking_lot 0.12.5 — MIT OR Apache-2.0 — Amanieu d'Antras <amanieu@gmail.com>
+- parking_lot_core 0.9.12 — MIT OR Apache-2.0 — Amanieu d'Antras <amanieu@gmail.com>
+- percent-encoding 2.3.2 — MIT OR Apache-2.0 — The rust-url developers
+- phf 0.13.1 — MIT — Steven Fackler <sfackler@gmail.com>
+- phf_codegen 0.13.1 — MIT — Steven Fackler <sfackler@gmail.com>
+- phf_generator 0.13.1 — MIT — Steven Fackler <sfackler@gmail.com>
+- phf_macros 0.13.1 — MIT — Steven Fackler <sfackler@gmail.com>
+- phf_shared 0.13.1 — MIT — Steven Fackler <sfackler@gmail.com>
+- pin-project-lite 0.2.17 — Apache-2.0 OR MIT
+- piper 0.2.5 — MIT OR Apache-2.0 — Stjepan Glavina <stjepang@gmail.com>, John Nunley <dev@notgull.net>
+- pkg-config 0.3.34 — MIT OR Apache-2.0 — Alex Crichton <alex@alexcrichton.com>
+- plist 1.10.1 — MIT — Ed Barnard <eabarnard@gmail.com>
+- png 0.17.16 — MIT OR Apache-2.0 — The image-rs Developers
+- png 0.18.1 — MIT OR Apache-2.0 — The image-rs Developers
+- polling 3.11.0 — Apache-2.0 OR MIT — Stjepan Glavina <stjepang@gmail.com>, John Nunley <dev@notgull.net>
+- portable-atomic 1.15.0 — Apache-2.0 OR MIT
+- portable-atomic-util 0.2.8 — Apache-2.0 OR MIT
+- powerfmt 0.2.0 — MIT OR Apache-2.0 — Jacob Pratt <jacob@jhpratt.dev>
+- precomputed-hash 0.1.1 — MIT — Emilio Cobos Álvarez <emilio@crisal.io>
+- proc-macro-crate 1.3.1 — MIT OR Apache-2.0 — Bastian Köcher <git@kchr.de>
+- proc-macro-crate 2.0.2 — MIT OR Apache-2.0 — Bastian Köcher <git@kchr.de>
+- proc-macro-crate 3.5.0 — MIT OR Apache-2.0 — Bastian Köcher <git@kchr.de>
+- proc-macro-error 1.0.4 — MIT OR Apache-2.0 — CreepySkeleton <creepy-skeleton@yandex.ru>
+- proc-macro-error-attr 1.0.4 — MIT OR Apache-2.0 — CreepySkeleton <creepy-skeleton@yandex.ru>
+- proc-macro2 1.0.107 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>, Alex Crichton <alex@alexcrichton.com>
+- quick-xml 0.41.0 — MIT
+- quick-xml 0.42.0 — MIT
+- quote 1.0.47 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- r-efi 5.3.0 — MIT OR Apache-2.0 OR LGPL-2.1-or-later
+- r-efi 6.0.0 — MIT OR Apache-2.0 OR LGPL-2.1-or-later
+- rand 0.10.2 — MIT OR Apache-2.0 — The Rand Project Developers, The Rust Project Developers
+- rand_core 0.10.1 — MIT OR Apache-2.0 — The Rand Project Developers
+- rangemap 1.8.0 — MIT/Apache-2.0 — Jeff Parsons <jeff@parsons.io>
+- raw-window-handle 0.6.2 — MIT OR Apache-2.0 OR Zlib — Osspial <osspial@gmail.com>
+- redox_syscall 0.5.18 — MIT — Jeremy Soller <jackpot51@gmail.com>
+- redox_users 0.5.2 — MIT — Jose Narvaez <goyox86@gmail.com>, Wesley Hershberger <mggmugginsmc@gmail.com>
+- ref-cast 1.0.27 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- ref-cast-impl 1.0.27 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- regex 1.13.1 — MIT OR Apache-2.0 — The Rust Project Developers, Andrew Gallant <jamslam@gmail.com>
+- regex-automata 0.4.18 — MIT OR Apache-2.0 — The Rust Project Developers, Andrew Gallant <jamslam@gmail.com>
+- regex-syntax 0.8.11 — MIT OR Apache-2.0 — The Rust Project Developers, Andrew Gallant <jamslam@gmail.com>
+- reqwest 0.13.5 — MIT OR Apache-2.0 — Sean McArthur <sean@seanmonstar.com>
+- rfd 0.16.0 — MIT — Poly <marynczak.bartlomiej@gmail.com>
+- rust_xlsxwriter 0.99.1 — MIT OR Apache-2.0 — John McNamara <jmcnamara@cpan.org>
+- rustc-hash 2.1.3 — Apache-2.0 OR MIT — The Rust Project Developers
+- rustc_version 0.4.1 — MIT OR Apache-2.0
+- rustix 1.1.4 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT — Dan Gohman <dev@sunfishcode.online>, Jakub Konka <kubkon@jakubkonka.com>
+- rustversion 1.0.23 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- same-file 1.0.6 — Unlicense/MIT — Andrew Gallant <jamslam@gmail.com>
+- schemars 0.8.22 — MIT — Graham Esau <gesau@hotmail.co.uk>
+- schemars 0.9.0 — MIT — Graham Esau <gesau@hotmail.co.uk>
+- schemars 1.2.2 — MIT — Graham Esau <gesau@hotmail.co.uk>
+- schemars_derive 0.8.22 — MIT — Graham Esau <gesau@hotmail.co.uk>
+- scopeguard 1.2.0 — MIT OR Apache-2.0 — bluss
+- semver 1.0.28 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- serde 1.0.229 — MIT OR Apache-2.0 — Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>
+- serde-untagged 0.1.9 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- serde_core 1.0.229 — MIT OR Apache-2.0 — Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>
+- serde_derive 1.0.229 — MIT OR Apache-2.0 — Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>
+- serde_derive_internals 0.29.1 — MIT OR Apache-2.0 — Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>
+- serde_json 1.0.151 — MIT OR Apache-2.0 — Erick Tryzelaar <erick.tryzelaar@gmail.com>, David Tolnay <dtolnay@gmail.com>
+- serde_repr 0.1.21 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- serde_spanned 0.6.9 — MIT OR Apache-2.0
+- serde_spanned 1.1.1 — MIT OR Apache-2.0
+- serde_with 3.23.0 — MIT OR Apache-2.0 — Jonas Bushart, Marcin Kaźmierczak
+- serde_with_macros 3.23.0 — MIT OR Apache-2.0 — Jonas Bushart
+- serialize-to-javascript 0.1.2 — MIT OR Apache-2.0 — Chip Reed <chip@chip.sh>
+- serialize-to-javascript-impl 0.1.2 — MIT OR Apache-2.0 — Chip Reed <chip@chip.sh>
+- seroval 1.5.6 — MIT — Alexis Munsayac
+- seroval-plugins 1.5.6 — MIT — Alexis Munsayac
+- servo_arc 0.4.3 — MIT OR Apache-2.0 — The Servo Project Developers
+- sha2 0.10.9 — MIT OR Apache-2.0 — RustCrypto Developers
+- sha2 0.11.0 — MIT OR Apache-2.0 — RustCrypto Developers
+- shlex 2.0.1 — MIT OR Apache-2.0 — comex <comexk@gmail.com>, Fenhl <fenhl@fenhl.net>, Adrian Taylor <adetaylor@chromium.org>, Alex Touchet <alextouchet@outlook.com>, Daniel Parks <dp+git@oxidized.org>, Garrett Berg <googberg@gmail.com>
+- signal-hook-registry 1.4.8 — MIT OR Apache-2.0 — Michal 'vorner' Vaner <vorner@vorner.cz>, Masaki Hara <ackie.h.gmai@gmail.com>
+- simd-adler32 0.3.10 — MIT — Marvin Countryman <me@maar.vin>
+- simdutf8 0.1.5 — MIT OR Apache-2.0 — Hans Kratz <hans@appfour.com>
+- siphasher 1.0.3 — MIT/Apache-2.0 — Frank Denis <github@pureftpd.org>
+- slab 0.4.12 — MIT — Carl Lerche <me@carllerche.com>
+- smallvec 1.16.1 — MIT OR Apache-2.0 — The Servo Project Developers
+- socket2 0.6.5 — MIT OR Apache-2.0 — Alex Crichton <alex@alexcrichton.com>, Thomas de Zeeuw <thomasdezeeuw@gmail.com>
+- softbuffer 0.4.8 — MIT OR Apache-2.0
+- solid-js 1.9.15 — MIT — Ryan Carniato
+- soup3 0.5.0 — MIT
+- soup3-sys 0.5.0 — MIT — The Gtk-rs Project Developers
+- stable_deref_trait 1.2.1 — MIT OR Apache-2.0 — Robert Grosse <n210241048576@gmail.com>
+- string_cache 0.9.0 — MIT OR Apache-2.0 — The Servo Project Developers
+- string_cache_codegen 0.6.1 — MIT OR Apache-2.0 — The Servo Project Developers
+- stringprep 0.1.5 — MIT/Apache-2.0 — Steven Fackler <sfackler@gmail.com>
+- strsim 0.11.1 — MIT — Danny Guo <danny@dannyguo.com>, maxbachmann <oss@maxbachmann.de>
+- swift-rs 1.0.8 — MIT OR Apache-2.0 — The swift-rs contributors
+- syn 1.0.109 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- syn 2.0.119 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- syn 3.0.5 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- synstructure 0.13.2 — MIT — Nika Layzell <nika@thelayzells.com>
+- system-deps 6.2.2 — MIT OR Apache-2.0 — Guillaume Desmottes <guillaume.desmottes@collabora.com>, Josh Triplett <josh@joshtriplett.org>
+- tailwindcss 4.3.3 — MIT
+- tao-macros 0.1.4 — MIT OR Apache-2.0 — Tauri Programme within The Commons Conservancy
+- tauri 2.11.5 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-build 2.6.3 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-codegen 2.6.3 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-macros 2.6.3 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-plugin 2.6.3 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-plugin-dialog 2.7.3 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-plugin-fs 2.5.2 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-plugin-opener 2.5.5 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-plugin-window-state 2.4.1 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-runtime 2.11.3 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-runtime-wry 2.11.4 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-utils 2.9.3 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-winres 0.3.6 — MIT — Tauri Programme within The Commons Conservancy, Max Resch <resch.max@gmail.com>
+- tempfile 3.27.0 — MIT OR Apache-2.0 — Steven Allen <steven@stebalien.com>, The Rust Project Developers, Ashley Mannix <ashleymannix@live.com.au>, Jason White <me@jasonwhite.io>
+- tendril 0.5.1 — MIT OR Apache-2.0 — Keegan McAllister <mcallister.keegan@gmail.com>, Simon Sapin <simon.sapin@exyr.org>, Chris Morgan <me@chrismorgan.info>
+- thiserror 1.0.69 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- thiserror 2.0.20 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- thiserror-impl 1.0.69 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- thiserror-impl 2.0.20 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- time 0.3.55 — MIT OR Apache-2.0 — Jacob Pratt <open-source@jhpratt.dev>, Time contributors
+- time-core 0.1.9 — MIT OR Apache-2.0 — Jacob Pratt <open-source@jhpratt.dev>, Time contributors
+- time-macros 0.2.32 — MIT OR Apache-2.0 — Jacob Pratt <open-source@jhpratt.dev>, Time contributors
+- tinyvec 1.13.3 — Zlib OR Apache-2.0 OR MIT — Lokathor <zefria@gmail.com>
+- tokio 1.53.1 — MIT — Tokio Contributors <team@tokio.rs>
+- tokio-util 0.7.19 — MIT — Tokio Contributors <team@tokio.rs>
+- toml 0.8.2 — MIT OR Apache-2.0 — Alex Crichton <alex@alexcrichton.com>
+- toml 0.9.12+spec-1.1.0 — MIT OR Apache-2.0
+- toml 1.1.6+spec-1.1.0 — MIT OR Apache-2.0
+- toml_datetime 0.6.3 — MIT OR Apache-2.0 — Alex Crichton <alex@alexcrichton.com>
+- toml_datetime 0.7.5+spec-1.1.0 — MIT OR Apache-2.0
+- toml_datetime 1.1.1+spec-1.1.0 — MIT OR Apache-2.0
+- toml_edit 0.19.15 — MIT OR Apache-2.0 — Andronik Ordian <write@reusable.software>, Ed Page <eopage@gmail.com>
+- toml_edit 0.20.2 — MIT OR Apache-2.0 — Andronik Ordian <write@reusable.software>, Ed Page <eopage@gmail.com>
+- toml_edit 0.25.15+spec-1.1.0 — MIT OR Apache-2.0
+- toml_parser 1.1.3+spec-1.1.0 — MIT OR Apache-2.0
+- toml_writer 1.1.2+spec-1.1.0 — MIT OR Apache-2.0
+- tower 0.5.3 — MIT — Tower Maintainers <team@tower-rs.com>
+- tower-http 0.6.11 — MIT — Tower Maintainers <team@tower-rs.com>
+- tower-layer 0.3.3 — MIT — Tower Maintainers <team@tower-rs.com>
+- tower-service 0.3.3 — MIT — Tower Maintainers <team@tower-rs.com>
+- tracing 0.1.44 — MIT — Eliza Weisman <eliza@buoyant.io>, Tokio Contributors <team@tokio.rs>
+- tracing-attributes 0.1.31 — MIT — Tokio Contributors <team@tokio.rs>, Eliza Weisman <eliza@buoyant.io>, David Barsky <dbarsky@amazon.com>
+- tracing-core 0.1.36 — MIT — Tokio Contributors <team@tokio.rs>
+- tray-icon 0.24.2 — MIT OR Apache-2.0
+- try-lock 0.2.5 — MIT — Sean McArthur <sean@seanmonstar.com>
+- typed-path 0.12.3 — MIT OR Apache-2.0 — Chip Senkbeil <chip@senkbeil.org>
+- typeid 1.0.3 — MIT OR Apache-2.0 — David Tolnay <dtolnay@gmail.com>
+- typenum 1.20.1 — MIT OR Apache-2.0
+- uds_windows 1.2.1 — MIT — Azure IoT Edge Devs, Harald Hoyer <harald@redhat.com>
+- unic-char-property 0.9.0 — MIT/Apache-2.0 — The UNIC Project Developers
+- unic-char-range 0.9.0 — MIT/Apache-2.0 — The UNIC Project Developers
+- unic-common 0.9.0 — MIT/Apache-2.0 — The UNIC Project Developers
+- unic-ucd-ident 0.9.0 — MIT/Apache-2.0 — The UNIC Project Developers
+- unic-ucd-version 0.9.0 — MIT/Apache-2.0 — The UNIC Project Developers
+- unicode-bidi 0.3.18 — MIT OR Apache-2.0 — The Servo Project Developers
+- unicode-normalization 0.1.25 — MIT OR Apache-2.0 — kwantam <kwantam@gmail.com>, Manish Goregaokar <manishsmail@gmail.com>
+- unicode-properties 0.1.4 — MIT/Apache-2.0 — Charles Lew <crlf0710@gmail.com>, Manish Goregaokar <manishsmail@gmail.com>
+- unicode-segmentation 1.13.3 — MIT OR Apache-2.0 — kwantam <kwantam@gmail.com>, Manish Goregaokar <manishsmail@gmail.com>
+- url 2.5.8 — MIT OR Apache-2.0 — The rust-url developers
+- urlpattern 0.3.0 — MIT — the Deno authors, crowlKats <crowlkats@toaxl.com>
+- utf8_iter 1.0.4 — Apache-2.0 OR MIT — Henri Sivonen <hsivonen@hsivonen.fi>
+- uuid 1.26.1 — Apache-2.0 OR MIT — Ashley Mannix<ashleymannix@live.com.au>, Dylan DPC<dylan.dpc@gmail.com>, Hunar Roop Kahlon<hunar.roop@gmail.com>
+- version-compare 0.2.1 — MIT — Tim Visee <3a4fb3964f@sinenomine.email>
+- version_check 0.9.5 — MIT/Apache-2.0 — Sergio Benitez <sb@sergio.bz>
+- vite 7.3.6 — MIT — Evan You
+- vite-plugin-solid 2.11.14 — MIT — Alexandre Mouton-Brady <amoutonbrady@gmail.com>
+- vswhom 0.1.0 — MIT — nabijaczleweli <nabijaczleweli@gmail.com>
+- vswhom-sys 0.1.3 — MIT — наб <nabijaczleweli@nabijaczleweli.xyz>, forrestsmithfb <forrest.smith@fb.com>
+- walkdir 2.5.0 — Unlicense/MIT — Andrew Gallant <jamslam@gmail.com>
+- want 0.3.1 — MIT — Sean McArthur <sean@seanmonstar.com>
+- wasi 0.11.1+wasi-snapshot-preview1 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT — The Cranelift Project Developers
+- wasip2 1.0.4+wasi-0.2.12 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
+- wasm-bindgen 0.2.128 — MIT OR Apache-2.0 — The wasm-bindgen Developers
+- wasm-bindgen-futures 0.4.78 — MIT OR Apache-2.0 — The wasm-bindgen Developers
+- wasm-bindgen-macro 0.2.128 — MIT OR Apache-2.0 — The wasm-bindgen Developers
+- wasm-bindgen-macro-support 0.2.128 — MIT OR Apache-2.0 — The wasm-bindgen Developers
+- wasm-bindgen-shared 0.2.128 — MIT OR Apache-2.0 — The wasm-bindgen Developers
+- wasm-streams 0.5.0 — MIT OR Apache-2.0 — Mattias Buelens <mattias@buelens.com>
+- web-sys 0.3.105 — MIT OR Apache-2.0 — The wasm-bindgen Developers
+- web_atoms 0.2.6 — MIT OR Apache-2.0 — The html5ever Project Developers
+- webkit2gtk 2.0.2 — MIT
+- webkit2gtk-sys 2.0.2 — MIT
+- webview2-com 0.38.2 — MIT
+- webview2-com-macros 0.8.1 — MIT
+- webview2-com-sys 0.38.2 — MIT
+- weezl 0.2.1 — MIT OR Apache-2.0 — The image-rs Developers
+- winapi 0.3.9 — MIT/Apache-2.0 — Peter Atashian <retep998@gmail.com>
+- winapi-i686-pc-windows-gnu 0.4.0 — MIT/Apache-2.0 — Peter Atashian <retep998@gmail.com>
+- winapi-util 0.1.11 — Unlicense OR MIT — Andrew Gallant <jamslam@gmail.com>
+- winapi-x86_64-pc-windows-gnu 0.4.0 — MIT/Apache-2.0 — Peter Atashian <retep998@gmail.com>
+- window-vibrancy 0.6.0 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- windows 0.61.3 — MIT OR Apache-2.0 — Microsoft
+- windows-collections 0.2.0 — MIT OR Apache-2.0
+- windows-core 0.61.2 — MIT OR Apache-2.0 — Microsoft
+- windows-core 0.62.2 — MIT OR Apache-2.0
+- windows-future 0.2.1 — MIT OR Apache-2.0
+- windows-implement 0.60.2 — MIT OR Apache-2.0
+- windows-interface 0.59.3 — MIT OR Apache-2.0
+- windows-link 0.1.3 — MIT OR Apache-2.0 — Microsoft
+- windows-link 0.2.1 — MIT OR Apache-2.0
+- windows-numerics 0.2.0 — MIT OR Apache-2.0
+- windows-result 0.3.4 — MIT OR Apache-2.0 — Microsoft
+- windows-result 0.4.1 — MIT OR Apache-2.0
+- windows-strings 0.4.2 — MIT OR Apache-2.0 — Microsoft
+- windows-strings 0.5.1 — MIT OR Apache-2.0
+- windows-sys 0.45.0 — MIT OR Apache-2.0 — Microsoft
+- windows-sys 0.59.0 — MIT OR Apache-2.0 — Microsoft
+- windows-sys 0.60.2 — MIT OR Apache-2.0 — Microsoft
+- windows-sys 0.61.2 — MIT OR Apache-2.0
+- windows-targets 0.42.2 — MIT OR Apache-2.0 — Microsoft
+- windows-targets 0.52.6 — MIT OR Apache-2.0 — Microsoft
+- windows-targets 0.53.5 — MIT OR Apache-2.0
+- windows-threading 0.1.0 — MIT OR Apache-2.0 — Microsoft
+- windows-version 0.1.7 — MIT OR Apache-2.0
+- windows_aarch64_gnullvm 0.42.2 — MIT OR Apache-2.0 — Microsoft
+- windows_aarch64_gnullvm 0.52.6 — MIT OR Apache-2.0 — Microsoft
+- windows_aarch64_gnullvm 0.53.1 — MIT OR Apache-2.0
+- windows_aarch64_msvc 0.42.2 — MIT OR Apache-2.0 — Microsoft
+- windows_aarch64_msvc 0.52.6 — MIT OR Apache-2.0 — Microsoft
+- windows_aarch64_msvc 0.53.1 — MIT OR Apache-2.0
+- windows_i686_gnu 0.42.2 — MIT OR Apache-2.0 — Microsoft
+- windows_i686_gnu 0.52.6 — MIT OR Apache-2.0 — Microsoft
+- windows_i686_gnu 0.53.1 — MIT OR Apache-2.0
+- windows_i686_gnullvm 0.52.6 — MIT OR Apache-2.0 — Microsoft
+- windows_i686_gnullvm 0.53.1 — MIT OR Apache-2.0
+- windows_i686_msvc 0.42.2 — MIT OR Apache-2.0 — Microsoft
+- windows_i686_msvc 0.52.6 — MIT OR Apache-2.0 — Microsoft
+- windows_i686_msvc 0.53.1 — MIT OR Apache-2.0
+- windows_x86_64_gnu 0.42.2 — MIT OR Apache-2.0 — Microsoft
+- windows_x86_64_gnu 0.52.6 — MIT OR Apache-2.0 — Microsoft
+- windows_x86_64_gnu 0.53.1 — MIT OR Apache-2.0
+- windows_x86_64_gnullvm 0.42.2 — MIT OR Apache-2.0 — Microsoft
+- windows_x86_64_gnullvm 0.52.6 — MIT OR Apache-2.0 — Microsoft
+- windows_x86_64_gnullvm 0.53.1 — MIT OR Apache-2.0
+- windows_x86_64_msvc 0.42.2 — MIT OR Apache-2.0 — Microsoft
+- windows_x86_64_msvc 0.52.6 — MIT OR Apache-2.0 — Microsoft
+- windows_x86_64_msvc 0.53.1 — MIT OR Apache-2.0
+- winnow 0.5.40 — MIT
+- winnow 0.7.15 — MIT
+- winnow 1.0.4 — MIT
+- winreg 0.55.0 — MIT — Igor Shaula <gentoo90@gmail.com>
+- wit-bindgen 0.57.1 — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT — Alex Crichton <alex@alexcrichton.com>
+- wry 0.55.1 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- x11 2.21.0 — MIT — daggerbot <daggerbot@gmail.com>, Erle Pereira <erle@erlepereira.com>, AltF02 <contact@altf2.dev>
+- x11-dl 2.21.0 — MIT — daggerbot <daggerbot@gmail.com>, Erle Pereira <erle@erlepereira.com>, AltF02 <contact@altf2.dev>
+- zbus 5.19.0 — MIT — Zeeshan Ali Khan <zeeshanak@gnome.org>
+- zbus_macros 5.19.0 — MIT — Marc-André Lureau <marcandre.lureau@redhat.com>, Zeeshan Ali Khan <zeeshanak@gnome.org>
+- zbus_names 4.3.4 — MIT — Zeeshan Ali Khan <zeeshanak@gnome.org>
+- zcheapstr 1.1.0 — MIT — Zeeshan Ali Khan <zeeshanak@gnome.org>
+- zip 8.6.0 — MIT — Mathijs van de Nes <git@mathijs.vd-nes.nl>, Marli Frost <marli@frost.red>, Ryan Levick <ryan.levick@gmail.com>, Chris Hennick <hennickc@amazon.com>
+- zmij 1.0.23 — MIT — David Tolnay <dtolnay@gmail.com>
+- zvariant 5.15.0 — MIT — Zeeshan Ali Khan <zeeshanak@gnome.org>
+- zvariant_derive 5.15.0 — MIT — Zeeshan Ali Khan <zeeshanak@gnome.org>
+- zvariant_utils 4.2.0 — MIT — Zeeshan Ali Khan <zeeshanak@gnome.org>, turbocooler <turbocooler@cocaine.ninja>
+
+## Apache-2.0
+
+- dunce 1.0.5 — CC0-1.0 OR MIT-0 OR Apache-2.0 — Kornel <kornel@geekhood.net>
+- selenium-webdriver 4.49.0 — Apache-2.0
+- sync_wrapper 1.0.2 — Apache-2.0 — Actyx AG <developer@actyx.io>
+- tao 0.35.3 — Apache-2.0 — Tauri Programme within The Commons Conservancy, The winit contributors
+- target-lexicon 0.12.16 — Apache-2.0 WITH LLVM-exception — Dan Gohman <sunfish@mozilla.com>
+- typescript 5.9.3 — Apache-2.0 — Microsoft Corp.
+- zopfli 0.8.3 — Apache-2.0
+
+## ISC
+
+- libloading 0.7.4 — ISC — Simonas Kazlauskas <libloading@kazlauskas.me>
+
+## BSD-*
+
+- alloc-no-stdlib 2.0.4 — BSD-3-Clause — Daniel Reiter Horn <danielrh@dropbox.com>
+- alloc-stdlib 0.2.4 — BSD-3-Clause — Daniel Reiter Horn <danielrh@dropbox.com>
+
+## 其他 / 未知
+
+- brotli 8.0.4 — BSD-3-Clause AND MIT — Daniel Reiter Horn <danielrh@dropbox.com>, The Brotli Authors
+- cssparser 0.36.0 — MPL-2.0 — Simon Sapin <simon.sapin@exyr.org>
+- cssparser-macros 0.6.1 — MPL-2.0 — Simon Sapin <simon.sapin@exyr.org>
+- dpi 0.1.2 — Apache-2.0 AND MIT
+- dtoa-short 0.3.5 — MPL-2.0 — Xidorn Quan <me@upsuper.org>
+- encoding_rs 0.8.41 — (Apache-2.0 OR MIT) AND BSD-3-Clause — Henri Sivonen <hsivonen@hsivonen.fi>
+- foldhash 0.2.0 — Zlib — Orson Peters <orsonpeters@gmail.com>
+- icu_collections 2.3.0 — Unicode-3.0 — The ICU4X Project Developers
+- icu_locale_core 2.3.0 — Unicode-3.0 — The ICU4X Project Developers
+- icu_normalizer 2.3.0 — Unicode-3.0 — The ICU4X Project Developers
+- icu_normalizer_data 2.3.0 — Unicode-3.0 — The ICU4X Project Developers
+- icu_properties 2.3.0 — Unicode-3.0 — The ICU4X Project Developers
+- icu_properties_data 2.3.0 — Unicode-3.0 — The ICU4X Project Developers
+- icu_provider 2.3.1 — Unicode-3.0 — The ICU4X Project Developers
+- litemap 0.8.3 — Unicode-3.0 — The ICU4X Project Developers
+- option-ext 0.2.0 — MPL-2.0 — Simon Ochsenreither <simon@ochsenreither.de>
+- potential_utf 0.1.6 — Unicode-3.0 — The ICU4X Project Developers
+- selectors 0.36.1 — MPL-2.0 — The Servo Project Developers
+- tinystr 0.8.4 — Unicode-3.0 — The ICU4X Project Developers
+- unicode-ident 1.0.24 — (MIT OR Apache-2.0) AND Unicode-3.0 — David Tolnay <dtolnay@gmail.com>
+- writeable 0.6.4 — Unicode-3.0 — The ICU4X Project Developers
+- yoke 0.8.3 — Unicode-3.0 — Manish Goregaokar <manishsmail@gmail.com>
+- yoke-derive 0.8.2 — Unicode-3.0 — Manish Goregaokar <manishsmail@gmail.com>
+- zerofrom 0.1.8 — Unicode-3.0 — The ICU4X Project Developers
+- zerofrom-derive 0.1.7 — Unicode-3.0 — Manish Goregaokar <manishsmail@gmail.com>
+- zerotrie 0.2.5 — Unicode-3.0 — The ICU4X Project Developers
+- zerovec 0.11.8 — Unicode-3.0 — The ICU4X Project Developers
+- zerovec-derive 0.11.6 — Unicode-3.0 — Manish Goregaokar <manishsmail@gmail.com>
+- zlib-rs 0.6.8 — Zlib
+
+## 需要留意（copyleft / 无许可证 / 自定义）
+
+这一节只**点名**，不代表脚本可以动依赖 —— 换不换、怎么合规，是产品/法务的决定。
+
+- Rust cssparser 0.36.0 — MPL-2.0
+- Rust cssparser-macros 0.6.1 — MPL-2.0
+- Rust dtoa-short 0.3.5 — MPL-2.0
+- Rust option-ext 0.2.0 — MPL-2.0
+- Rust r-efi 5.3.0 — MIT OR Apache-2.0 OR LGPL-2.1-or-later
+- Rust r-efi 6.0.0 — MIT OR Apache-2.0 OR LGPL-2.1-or-later
+- Rust selectors 0.36.1 — MPL-2.0
