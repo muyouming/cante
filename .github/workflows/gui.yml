@@ -24,6 +24,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+
+      # The cheapest gate goes first: this repository is public, and a key or a
+      # machine home directory that reaches the history cannot be washed out
+      # afterwards. The script only reads `git ls-files`, so it looks at the
+      # tracked sources — not the build output — and answers in a few seconds.
+      # Same step in both jobs: a secret does not care which OS compiled it.
+      - name: Secret scan (keys, private IPs, machine home directories)
+        run: bash gui/scripts/secret-scan.sh
+
       - uses: oven-sh/setup-bun@v2
 
       # Tauri 2 renders in WebKitGTK on Linux and the webkit2gtk crate links
@@ -67,6 +76,11 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+
+      # Same first gate as the Linux job — see the comment there.
+      - name: Secret scan (keys, private IPs, machine home directories)
+        run: bash gui/scripts/secret-scan.sh
+
       - uses: oven-sh/setup-bun@v2
       - uses: actions-rust-lang/setup-rust-toolchain@v2.0.0
         with:
