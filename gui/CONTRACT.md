@@ -241,8 +241,17 @@ ToolEnd
 UsageUpdate
 TurnEnd
 Info
+Error
 Goodbye
 ```
+
+除了上面这份事件清单，夹具还演出了三个**真实守护进程会出现、界面真的读**的状态，让没有守护进程的机器（CI 就是）也能把它们跑通：
+
+* **一批多次审批**（`FAKE_CANTE_APPROVAL_BATCH=<n>`）：一次 `TurnPause` 的 `reason.Approval.tools` 里放 n 条调用（默认 1，最多 4）。审批卡就是按「一批」设计的，所以这是必须有的一条；`fixtures/fake-cante.test.ts` 断言两条都在、`store.test.ts` 断言审批卡一次列出两条并各自翻译成中文动作。
+* **审批被拒**：由 `ApprovalResponse` 里那一条自己的 `decision` 驱动——接受的那条以 `Completed` 收尾，拒绝的那条以 `Denied` 收尾，而且 `TurnResume` 之后**没有** `ToolStart`（被拒的调用从未真正开始）。这是输入驱动的，不是写死的第二条路径：同一批里可以一半接受一半拒绝。
+* **中途出错**（`FAKE_CANTE_TURN_ERROR=1`）：一条 `Error`（原始报错原话）后面跟一个非 `Completed` 的 `TurnEnd`（`status.Error` 带 `kind` / `headline` / `details`），也就是出错页与失败记录读的那个形状。
+
+「用量」这一条**没有补**：`UsageUpdate` 虽然夹具本来就在演，但 `store.ts` 的归约里根本没有它对应的分支（简单界面没有任何一处读 token 用量或上下文占用），补一条只有守卫在看的用量脚本就是死代码。真要看用量，唯一被读的是 `ContextReport`（上面「夹具没演的事件」里那一行）。
 
 ### 夹具没演的事件
 
@@ -255,7 +264,6 @@ Goodbye
 | Thinking | 夹具只演流式的 ThinkingDelta，没演一次性发整段思考的 Thinking | 真实守护进程在同一轮里既发 Thinking 也发 ThinkingDelta（2026-09 真机 excel.merge 两轮分别见过 11 和 12 次 Thinking），何时发哪种只能在真机上验 | 前端 store.ts 有分支；store.test.ts 的恶意形状与随机流覆盖了形状 |
 | InfoBlockStart | 夹具只演单行 Info，没演带 header 的分组信息块（例如 MCP 预热） | 真实后台分组信息何时出现、header 写什么，只能在真机上验 | store.test.ts 的形状与随机流用例覆盖了渲染 |
 | InfoBlockAppend | 夹具没演分组信息块的子行 | 真实子行何时追加、内容是什么，只能在真机上验 | store.test.ts 的形状与随机流用例覆盖了渲染 |
-| Error | 夹具从不失败，也不会发 Error | 真实的网络、鉴权或网关错误何时以 Error 到达，只能在真机上验 | Rust 状态归约 state.rs；store.test.ts 覆盖了渲染与失败归因；真机错误在 sweep 报告里出现过 |
 | CompactStart | 夹具不压缩历史，也从不发压缩开始事件 | 真实上下文占用到阈值后是否触发压缩，只能在真机上验 | store.test.ts 覆盖了渲染形状 |
 | CompactEnd | 夹具不压缩历史，也从不发压缩结束事件 | 压缩摘要来自真实模型，只能在真机上验 | store.test.ts 覆盖了渲染形状（summary 有和无两种） |
 | ContextReport | 夹具不回答 ContextReport（要真会话才有分类占用） | 真实会话的分类 token 占用，只能在真机上验 | store.test.ts 覆盖了渲染形状 |
