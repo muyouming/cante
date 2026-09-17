@@ -61,6 +61,17 @@ jobs:
           bun install --frozen-lockfile
           bun run build
 
+      # 产物闸门：打开**真的打出来的东西**看（不是看配置）。只在 macOS 跑 ——
+      # Windows 的“安装目录”要先装一次才有，CI 里不装（那台 Windows 真机的验收
+      # 是另一条路，见 gui/WINDOWS-ACCEPTANCE-3.md）。失败就停在上传之前：
+      # 一个少了自带工具的 dmg，比一次红掉的构建贵得多（#141）。
+      - name: Verify the bundle really contains the sidecars (macOS)
+        if: runner.os == 'macOS'
+        working-directory: gui
+        run: |
+          dmg="$(find src-tauri/target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)"
+          bash scripts/verify-bundle.sh --dmg "$dmg"
+
       - name: Upload the bundles
         uses: actions/upload-artifact@v7
         with:

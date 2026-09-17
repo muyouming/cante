@@ -1,16 +1,22 @@
 // 打包相关的守卫。
 //
 // 这里挡的是一类"单元测试看不见、只有打包时才炸"的故障：桌面应用这个 crate
-// 除了窗口本体，还带两个给助手用的命令行工具（cante-sheets / cante-pdf）。
-// Cargo 允许一个 crate 有多个 binary，但 tauri-bundler 必须被明确告知哪个才是
-// 应用本体，否则会报 "failed to find main binary, make sure you have a
-// `package > default-run`" —— 本地 `cargo test`、`bun test`、CI 的 e2e 全绿，
-// 等到出安装包时才红，而发布流水线只在打 tag 时跑。
+// 除了窗口本体，还带三个给助手用的命令行工具（cante-sheets / cante-pdf /
+// cante-bridge）。Cargo 允许一个 crate 有多个 binary，但 tauri-bundler 必须被明确
+// 告知哪个才是应用本体，否则会报 "failed to find main binary, make sure you
+// have a `package > default-run`" —— 本地 `cargo test`、`bun test`、CI 的 e2e
+// 全绿，等到出安装包时才红，而发布流水线只在打 tag 时跑。
 //
 // 所以这条测试直接读 Cargo.toml 与 tauri.conf.json 做一致性检查：便宜、确定、
 // 在三个平台上都能跑，而且失败信息直接告诉你缺哪一行。
+//
+// ⚠️ 但它只覆盖**配置层**（"我们打算这样打包"）。#141 的教训是：配置里声明得
+// 再对，也不等于**打出来的东西**里有那四个文件 —— 上一版发出去的 dmg 就是靠
+// 这几条静态断言"看着绿"的。**产物层**由 `gui/scripts/verify-bundle.sh` 验
+// （打开真的 .app / .dmg / 安装目录看），它接在发布流水线里；本文件最后一条测试
+// 负责防止有人把那个闸门删掉。
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const SRC_TAURI = path.resolve(import.meta.dir, "..", "src-tauri");
@@ -63,6 +69,37 @@ function resourceEntries(bundle: Record<string, unknown>): string[] {
   if (!resources) return [];
   return Array.isArray(resources) ? resources.map(String) : Object.keys(resources as object);
 }
+
+// 产物层的闸门：配置层的断言只说明"我们打算怎么打"，它证明不了"打出来的包里
+// 到底有没有"。这份静态测试挡不住"配置对了、产物缺了"（#141 就是这样漏过三轮
+// 真机验收的），所以真正的证据在 verify-bundle.sh —— 它挂载 dmg / 打开 .app，
+// 检查 Contents/MacOS 里真的有那四个可执行文件、能就地跑出版本号、没有 .d 与
+// 0 字节垃圾。下面这条只做一件事：确保那个闸门本身还在、还可执行、还检查着
+// 那四个名字（防止有人把它删掉却全绿）。
+test("产物闸门 verify-bundle.sh 存在、可执行，且检查那四个文件", () => {
+  const script = path.resolve(import.meta.dir, "..", "scripts", "verify-bundle.sh");
+  expect(
+    existsSync(script),
+    `缺少 gui/scripts/verify-bundle.sh：配置层的断言证明不了产物里真的有工具，` +
+      `产物必须由它打开打出来的 .app / .dmg 来验（#141）。`,
+  ).toBe(true);
+
+  const body = readFileSync(script, "utf8");
+  for (const name of ["cante-gui", ...BUNDLED_BINARIES]) {
+    expect(
+      body.includes(name),
+      `verify-bundle.sh 没有检查 ${name}：闸门必须逐个点名四个文件，` +
+        `否则工具少一个它也会绿。`,
+    ).toBe(true);
+  }
+
+  // 它会被 workflow 用 `bash scripts/verify-bundle.sh` 调用，可执行位是给人直接
+  // `./scripts/verify-bundle.sh` 用的；缺了位会让"本地也能跑同一个闸门"落空。
+  expect(
+    statSync(script).mode & 0o111,
+    "verify-bundle.sh 必须可执行（chmod +x）",
+  ).toBeGreaterThan(0);
+});
 
 test("多个 binary 时必须声明 default-run，否则打安装包会失败", () => {
   const cargo = readFileSync(path.join(SRC_TAURI, "Cargo.toml"), "utf8");
