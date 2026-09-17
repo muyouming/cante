@@ -22,6 +22,8 @@ import {
   toggleOption,
 } from "./simple/question.ts";
 import { SCHEDULE_STORAGE_KEY } from "./simple/schedule.ts";
+// #140 — notice 的四个写方在界面上的说法（结果卡片 / 选文件那一步 / 出错页）。
+import { PICK_KINDS, UNDO_KINDS, noticeView, visibleNotice } from "./simple/copy-notice.ts";
 
 // ---------------------------------------------------------------------------
 // Fake bridge — must be installed before store.ts is imported.
@@ -43,6 +45,10 @@ let hydration: {
   state: { status: "idle", session: null, pending_approval: null },
 };
 let healthSession: unknown = null;
+// #140 — 这几个开关只给「notice 有出口了」那组测试用：让撤销/选文件窗口的结果可控。
+let undoReply: { restored?: unknown; failed?: unknown } = { restored: [], failed: [] };
+let undoFails = false;
+let pickerFails = false;
 
 function emit(channel: string, payload: unknown): void {
   for (const handler of handlers.get(channel) ?? []) handler(payload);
@@ -52,6 +58,9 @@ function reset(): void {
   handlers.clear();
   calls.length = 0;
   healthSession = null;
+  undoReply = { restored: [], failed: [] };
+  undoFails = false;
+  pickerFails = false;
   hydration = { cursor: 0, truncated: false, events: [], state: { status: "idle", session: null, pending_approval: null } };
   clearStorage();
 }
@@ -105,6 +114,15 @@ mock.module("./tauri.ts", () => ({
         return hydration;
       case "catalog":
         return { providers: [{ id: "anthropic", display_name: "Anthropic", models: [{ id: "sonnet", display_name: "Sonnet" }] }] };
+      case "undo_run":
+        if (undoFails) throw new Error("the file is locked");
+        return { ok: true, ...undoReply };
+      case "pick_files":
+        if (pickerFails) throw new Error("no file dialog on this machine");
+        return { paths: [] };
+      case "pick_folder":
+        if (pickerFails) throw new Error("no file dialog on this machine");
+        return { path: null };
       default:
         return { ok: true };
     }
@@ -1627,6 +1645,110 @@ describe("夹具驱动的关键界面状态（没有守护进程也能跑）", (
       assertInvariants(store);
     } finally {
       await fake.close();
+      dispose();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// #140 — store 的 notice 原本只写不读。这一组把它四条活路径都跑一遍，断言
+// 界面会拿到的就是那句中文（撤销成功与撤销失败必须是不同的话）。
+// ---------------------------------------------------------------------------
+
+describe("#140 notice 的四个写方在界面上都有话说", () => {
+  test("撤销成功：notice 就是「已经放回去了：2 个文件恢复原样。」", async () => {
+    undoReply = { restored: ["/work/a.xlsx", "/work/b.xlsx"], failed: [] };
+    const { store, dispose } = await setup();
+    try {
+      await store.undoRun("run_1");
+      expect(store.notice()).toBe("已经放回去了：2 个文件恢复原样。");
+      const view = visibleNotice(store.notice(), UNDO_KINDS);
+      expect(view?.kind).toBe("undo-ok");
+      // 结果卡片上会出现的正是这一句。
+      expect(view?.what).toBe("已经放回去了：2 个文件恢复原样。");
+      expect(view?.how.length).toBeGreaterThan(0);
+    } finally {
+      dispose();
+    }
+  });
+
+  test("撤销失败：notice 是「没能撤销。」，和成功那句不同（不谎称已撤回）", async () => {
+    undoFails = true;
+    const { store, dispose } = await setup();
+    try {
+      await store.undoRun("run_1");
+      expect(store.notice()).toContain("没能撤销。");
+      const view = visibleNotice(store.notice(), UNDO_KINDS);
+      expect(view?.kind).toBe("undo-failed");
+      expect(view?.what).toBe("没能撤销。");
+      expect(view?.what).not.toContain("已经放回去");
+      expect(view?.how).not.toBe(noticeView("已经放回去了：1 个文件恢复原样。")?.how);
+    } finally {
+      dispose();
+    }
+  });
+
+  test("只放回去一部分：notice 说清还有几个要她自己动手", async () => {
+    undoReply = { restored: ["/work/a.xlsx"], failed: ["/work/b.xlsx", "/work/c.xlsx"] };
+    const { store, dispose } = await setup();
+    try {
+      await store.undoRun("run_1");
+      expect(store.notice()).toContain("还有 2 个没能自动还原");
+      const view = visibleNotice(store.notice(), UNDO_KINDS);
+      expect(view?.kind).toBe("undo-partial");
+      expect(view?.how.length).toBeGreaterThan(0);
+    } finally {
+      dispose();
+    }
+  });
+
+  test("选文件窗口打不开：notice 有话说，而且告诉她还能怎么选", async () => {
+    pickerFails = true;
+    const { store, dispose } = await setup();
+    try {
+      expect(await store.pickFiles({ multiple: true })).toEqual([]);
+      expect(store.notice()).toContain("打不开选择文件的窗口。");
+      const view = visibleNotice(store.notice(), PICK_KINDS);
+      expect(view?.kind).toBe("pick-files");
+      expect(view?.what).toBe("打不开选择文件的窗口。");
+      expect(view?.how).toContain("再点一次");
+      expect(view?.how).toContain("拖");
+
+      expect(await store.pickFolder()).toBeNull();
+      expect(store.notice()).toContain("打不开选择文件夹的窗口。");
+      expect(visibleNotice(store.notice(), PICK_KINDS)?.kind).toBe("pick-folder");
+    } finally {
+      dispose();
+    }
+  });
+
+  test("窗口这次开起来了，上一次「打不开」的提示就退场", async () => {
+    pickerFails = true;
+    const { store, dispose } = await setup();
+    try {
+      await store.pickFiles();
+      expect(store.notice()).toContain("打不开");
+      pickerFails = false;
+      await store.pickFiles();
+      expect(store.notice()).toBeNull();
+    } finally {
+      dispose();
+    }
+  });
+
+  test("换一件活来做，上一件留下的提示不跟过来", async () => {
+    undoReply = { restored: ["/work/a.xlsx"], failed: [] };
+    const { store, dispose } = await setup();
+    try {
+      await store.undoRun("run_1");
+      expect(store.notice()).toContain("已经放回去了");
+      await store.startRun(
+        { id: "excel.merge", title: "把两张表合成一张", plan: ["打开这两张表"] },
+        [],
+        "合成一张",
+      );
+      expect(store.notice()).toBeNull();
+    } finally {
       dispose();
     }
   });

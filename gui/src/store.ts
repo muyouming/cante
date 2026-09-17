@@ -1056,6 +1056,8 @@ export function createStore(): Store {
         multiple: opts.multiple ?? false,
         extensions: opts.extensions ?? [],
       })) as { paths?: unknown };
+      // 这一次窗口开起来了：上一次「打不开」的提示该退场（#140 的提示就挂在这一步上）。
+      setNotice(null);
       return stringList(response?.paths);
     } catch (error) {
       setNotice(`打不开选择文件的窗口。${trustDetail(error)}`);
@@ -1066,6 +1068,7 @@ export function createStore(): Store {
   async function pickFolder(): Promise<string | null> {
     try {
       const response = (await invokeOp("pick_folder", {})) as { path?: unknown };
+      setNotice(null);
       return typeof response?.path === "string" && response.path ? response.path : null;
     } catch (error) {
       setNotice(`打不开选择文件夹的窗口。${trustDetail(error)}`);
@@ -1216,6 +1219,8 @@ export function createStore(): Store {
     files: string[],
     instruction: string,
   ): Promise<void> {
+    // 换一件来做：上一件留下的提示（「已经放回去了」之类）不该跟到这一件上。
+    setNotice(null);
     // 换一件来做：上一件还停在确认页上（比如她点了「再跑一次」）就先退回队里
     // 等着，不丢掉；上一次的结果也不该再挂在屏幕上。
     releaseStaged();
