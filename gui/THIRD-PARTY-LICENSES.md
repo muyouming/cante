@@ -17,7 +17,7 @@
 - npm `devDependencies` 的**传递**依赖（vite / rollup / esbuild 那一整棵构建、测试期的树）。它们是构建期工具、不进安装包；要把它们纳进来，得先解决「平台专有的二进制包在不同机器上装的不一样」这件事，否则这份文件会随机器变。
 - 系统库与运行时：WebView2、WebKitGTK、Node / Bun、操作系统自带的 C 库。
 - 不在本仓库依赖树里、另行分发的组件（例如将来若把 `pi` 宿主随包分发，它自带的依赖树要另出一份清单）。
-- 各许可证的**原文**：本文件只列名字 / 版本 / 许可证表达式 / 版权行，不内嵌全文。
+- 各许可证的**原文**：本文件只列名字 / 版本 / 许可证表达式 / 版权行，不内嵌全文；许可原文已随前端产物分发（`gui/src/simple/third-party-notices.ts`，界面里的「关于」页就是读它）。
 
 ## 统计
 
@@ -29,6 +29,55 @@
 | BSD-* | 2 | 0 | 2 |
 | 其他 / 未知 | 29 | 0 | 29 |
 | **合计** | **528** | **15** | **543** |
+
+## 许可原文
+
+- 附带原文的包：**500** 个；按内容去重后 **218** 份不同文本（去重前 4380.0 KB，去重后 1911.8 KB）。原文已随前端产物分发：`gui/src/simple/third-party-notices.ts`。
+- 未附带原文的包：**43** 个（脚本不替它们编原文）。
+
+  - Rust alloc-stdlib 0.2.4 — BSD-3-Clause
+  - Rust block2 0.6.2 — MIT
+  - Rust cesu8 1.1.0 — Apache-2.0/MIT
+  - Rust defmt-parser 1.0.0 — MIT OR Apache-2.0
+  - Rust dispatch2 0.3.1 — Zlib OR Apache-2.0 OR MIT
+  - Rust dlopen2 0.8.2 — MIT
+  - Rust dlopen2_derive 0.4.3 — MIT
+  - Rust jni-sys-macros 0.4.1 — MIT OR Apache-2.0
+  - Rust libappindicator-sys 0.9.0 — Apache-2.0 OR MIT
+  - Rust ndk 0.9.0 — MIT OR Apache-2.0
+  - Rust ndk-sys 0.6.0+11769913 — MIT OR Apache-2.0
+  - Rust objc2 0.6.4 — MIT
+  - Rust objc2-app-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-cloud-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-core-data 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-core-foundation 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-core-graphics 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-core-image 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-core-location 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-core-text 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-encode 4.1.0 — MIT
+  - Rust objc2-exception-helper 0.1.1 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-foundation 0.3.2 — MIT
+  - Rust objc2-io-surface 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-quartz-core 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-ui-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-user-notifications 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust objc2-web-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT
+  - Rust r-efi 5.3.0 — MIT OR Apache-2.0 OR LGPL-2.1-or-later
+  - Rust r-efi 6.0.0 — MIT OR Apache-2.0 OR LGPL-2.1-or-later
+  - Rust selectors 0.36.1 — MPL-2.0
+  - Rust tauri-plugin 2.6.3 — Apache-2.0 OR MIT
+  - Rust unic-char-property 0.9.0 — MIT/Apache-2.0
+  - Rust unic-char-range 0.9.0 — MIT/Apache-2.0
+  - Rust unic-common 0.9.0 — MIT/Apache-2.0
+  - Rust unic-ucd-ident 0.9.0 — MIT/Apache-2.0
+  - Rust unic-ucd-version 0.9.0 — MIT/Apache-2.0
+  - npm vite-plugin-solid 2.11.14 — MIT
+  - Rust webview2-com 0.38.2 — MIT
+  - Rust webview2-com-macros 0.8.1 — MIT
+  - Rust webview2-com-sys 0.38.2 — MIT
+  - Rust winapi-i686-pc-windows-gnu 0.4.0 — MIT/Apache-2.0
+  - Rust winapi-x86_64-pc-windows-gnu 0.4.0 — MIT/Apache-2.0
 
 ## MIT
 

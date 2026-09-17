@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # 第三方开源组件与许可证清单 —— 生成它，并让「清单过期」变成 CI 能挡的失败。
 #
-#   bash gui/scripts/license-inventory.sh             重新生成 gui/THIRD-PARTY-LICENSES.md
-#   bash gui/scripts/license-inventory.sh --check     重新生成并与已提交的文件比对；过期退出 1，
-#                                                     并点名是哪些组件变了（不是「文件不同」）
-#   bash gui/scripts/license-inventory.sh --stdout    只打印到 stdout，不落盘
-#   bash gui/scripts/license-inventory.sh --self-check  真的跑两遍，断言两次逐字节相同
+#   bash gui/scripts/license-inventory.sh             重新生成两个产物，都落盘：
+#                                                       gui/THIRD-PARTY-LICENSES.md（给人看）
+#                                                       gui/src/simple/third-party-notices.ts（随软件发给她）
+#   bash gui/scripts/license-inventory.sh --check     重新生成并与两个已提交的文件比对；任一个过期
+#                                                     就退出 1，并点名是哪些组件/哪份原文变了
+#   bash gui/scripts/license-inventory.sh --stdout    只把 markdown 打印到 stdout，不落盘
+#   bash gui/scripts/license-inventory.sh --stdout-ts 只把 third-party-notices.ts 打印到 stdout
+#   bash gui/scripts/license-inventory.sh --self-check  两个产物各跑两遍，断言逐字节相同
+#
+# 为什么有两个产物：markdown 是给评审看的清单；third-party-notices.ts 是许可说明本身，
+# 随前端产物一起发出去（她不会去安装目录或网页里找许可，见 gui/docs/DECISION-windows-runtime.md §10）。
+# 两者的输入完全相同，所以必须同时新鲜：只更新一个 = 过期。
 #
 # 输入：
 #   Rust  gui/src-tauri/Cargo.lock  —— 经 `cargo metadata --locked` 解析（含构建期/开发期依赖）
@@ -15,7 +22,8 @@
 # 同一份输入两次运行逐字节相同（--self-check 会真的跑两遍来证）。
 #
 # 为什么 npm 侧要读 node_modules：许可证与版权行只存在于每个包自己的 package.json 里，
-# bun.lock 里没有这两个字段。所以这一步必须排在 `bun install` 之后 —— e2e.sh 里就是这么放的。
+# bun.lock 里没有这两个字段；许可原文也在包里（npm 是 node_modules/<包>/LICENSE*，cargo 是
+# 包自己的目录里）。所以这一步必须排在 `bun install` 之后 —— e2e.sh 里就是这么放的。
 #
 # 依赖：bash + cargo + bun（本项目 e2e 本来就都要）。不联网取元数据：
 # cargo 用本地 registry 缓存，npm 用已安装的包。
@@ -25,15 +33,17 @@ set -euo pipefail
 here="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 gui_root="$(cd -- "$here/.." && pwd)"
 out="$gui_root/THIRD-PARTY-LICENSES.md"
+ts_out="$gui_root/src/simple/third-party-notices.ts"
 
 mode="write"
 case "${1:-}" in
   "" | --write) mode="write" ;;
   --check) mode="check" ;;
   --stdout) mode="stdout" ;;
+  --stdout-ts) mode="stdout-ts" ;;
   --self-check) mode="self-check" ;;
   -h | --help)
-    sed -n '2,21p' "${BASH_SOURCE[0]}"
+    sed -n '2,28p' "${BASH_SOURCE[0]}"
     exit 0
     ;;
   *)
@@ -42,20 +52,24 @@ case "${1:-}" in
     ;;
 esac
 
-# --self-check：把「两次运行逐字节相同」变成一条真的会跑的断言。
+# --self-check：把「两次运行逐字节相同」变成一条真的会跑的断言（两个产物都要）。
 if [ "$mode" = "self-check" ]; then
   self="$here/$(basename -- "${BASH_SOURCE[0]}")"
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' EXIT
-  bash "$self" --stdout > "$tmp/first.md"
-  bash "$self" --stdout > "$tmp/second.md"
-  if ! cmp -s "$tmp/first.md" "$tmp/second.md"; then
-    printf 'license-inventory: 确定性自检失败 —— 两次生成不一致：\n' >&2
-    diff -u "$tmp/first.md" "$tmp/second.md" | head -40 >&2 || true
-    exit 1
-  fi
-  printf 'license-inventory: 确定性自检通过（两次生成逐字节相同，%s 行）\n' \
-    "$(wc -l < "$tmp/first.md" | tr -d ' ')"
+  for pair in "md:--stdout" "ts:--stdout-ts"; do
+    tag="${pair%%:*}"
+    flag="${pair#*:}"
+    bash "$self" "$flag" > "$tmp/first.$tag"
+    bash "$self" "$flag" > "$tmp/second.$tag"
+    if ! cmp -s "$tmp/first.$tag" "$tmp/second.$tag"; then
+      printf 'license-inventory: 确定性自检失败 —— %s 两次生成不一致：\n' "$tag" >&2
+      diff -u "$tmp/first.$tag" "$tmp/second.$tag" | head -40 >&2 || true
+      exit 1
+    fi
+    printf 'license-inventory: 确定性自检通过：%s 两次生成逐字节相同（%s 行）\n' \
+      "$tag" "$(wc -l < "$tmp/first.$tag" | tr -d ' ')"
+  done
   exit 0
 fi
 
@@ -90,9 +104,15 @@ cat > "$tmp/inventory.mjs" <<'INVENTORY_JS'
 //   - Rust：cargo metadata 的 packages（去掉 workspace 成员，即我们这个仓库自己的 crate）。
 //   - npm ：package.json 的直接依赖 + dependencies 的传递闭包，元数据取自已安装的包。
 
+import { createHash } from "node:crypto";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
+
 const mode = process.env.MODE;
 const gui = process.env.GUI_ROOT;
 const outPath = process.env.OUT_PATH;
+const tsOutPath = process.env.TS_OUT_PATH;
 const newOut = process.env.NEW_OUT || "";
 
 const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
@@ -133,6 +153,9 @@ for (const p of meta.packages) {
     version: p.version,
     license,
     authors: Array.isArray(p.authors) ? p.authors.join(", ") : "",
+    // 许可原文就在这个包自己的目录里；license_file 是相对 manifest 的路径。
+    dir: p.manifest_path ? dirname(p.manifest_path) : "",
+    licenseFile: p.license_file || "",
   });
 }
 const rustCount = entries.length;
@@ -210,7 +233,15 @@ for (const name of [...npmNames].sort(cmp)) {
     authors = [a.name, a.email ? `<${a.email}>` : ""].filter(Boolean).join(" ");
   }
 
-  entries.push({ kind: "npm", name, version, license, authors });
+  entries.push({
+    kind: "npm",
+    name,
+    version,
+    license,
+    authors,
+    dir: `${gui}/node_modules/${name}`,
+    licenseFile: "",
+  });
 }
 const npmCount = entries.length - rustCount;
 
@@ -220,6 +251,88 @@ for (let i = 1; i < entries.length; i++) {
   if (cmp(entries[i - 1].name, entries[i].name) > 0) throw new Error("内部错误：条目没有按名字排好序");
 }
 for (const e of entries) if (!e.license) throw new Error(`内部错误：${e.name} 没有许可证`);
+
+// ---------------------------------------------------------------------------
+// 许可原文：从每个包自己的目录里找，找不到就如实标成「未附带原文」，不替它编。
+//
+// 为什么要去重：几百个包里大量是同一份 MIT / Apache-2.0 文本，逐字节重复几千次没有
+// 意义。按**内容**去重（同一份只存一份），条目用 textHash 指过去；哈希算在规范化后的
+// 文本上（换行统一成 \n、行尾空白去掉）——否则同一个包在 Windows 与 macOS 上会算出
+// 两个哈希，--check 会在 CI 上左右横跳。
+// ---------------------------------------------------------------------------
+
+const LICENSE_FILE_RE = /^(licen[cs]e|copying|notice)/i;
+
+function licenseFilesIn(dir) {
+  if (!dir) return [];
+  const out = [];
+  const addDir = (d, filter) => {
+    let names;
+    try {
+      names = readdirSync(d);
+    } catch {
+      return;
+    }
+    for (const name of names.sort(cmp)) {
+      if (filter && !filter(name)) continue;
+      const full = join(d, name);
+      try {
+        if (statSync(full).isFile()) out.push(full);
+      } catch {
+        // 读不到的单个文件不当成失败：它进不了清单，会在下面被记成「未附带原文」。
+      }
+    }
+  };
+  addDir(dir, (name) => LICENSE_FILE_RE.test(name));
+  // 少数包按 REUSE 约定把授权文件放进 LICENSES/ 子目录。
+  for (const sub of ["LICENSES", "licenses"]) addDir(join(dir, sub), null);
+  return out;
+}
+
+function normalizeLicenseText(text) {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+$/, ""))
+    .join("\n")
+    .replace(/^\n+/, "")
+    .replace(/\n+$/, "\n");
+}
+
+const TEXTS = new Map(); // hash -> 许可原文（规范化后）
+let rawTextBytes = 0; // 去重前：每个包各算一次
+const missingText = [];
+
+for (const e of entries) {
+  const files = [];
+  if (e.licenseFile) {
+    const named = join(e.dir, e.licenseFile);
+    try {
+      if (statSync(named).isFile()) files.push(named);
+    } catch {
+      // license_file 指向的文件不在：继续按目录扫描找。
+    }
+  }
+  for (const file of licenseFilesIn(e.dir)) if (!files.includes(file)) files.push(file);
+
+  let text = "";
+  if (files.length) {
+    text = normalizeLicenseText(
+      files.map((file) => readFileSync(file, "utf8")).join("\n\n"),
+    );
+  }
+  if (!text.trim()) {
+    e.textHash = null;
+    missingText.push(e);
+    continue;
+  }
+  rawTextBytes += Buffer.byteLength(text, "utf8");
+  const hash = createHash("sha256").update(text, "utf8").digest("hex").slice(0, 16);
+  e.textHash = hash;
+  if (!TEXTS.has(hash)) TEXTS.set(hash, text);
+}
+
+const uniqueTextBytes = [...TEXTS.values()].reduce((sum, text) => sum + Buffer.byteLength(text, "utf8"), 0);
 
 // ---------------------------------------------------------------------------
 // 渲染
@@ -258,7 +371,7 @@ function render(list) {
   L.push(
     "- 不在本仓库依赖树里、另行分发的组件（例如将来若把 `pi` 宿主随包分发，它自带的依赖树要另出一份清单）。",
   );
-  L.push("- 各许可证的**原文**：本文件只列名字 / 版本 / 许可证表达式 / 版权行，不内嵌全文。");
+  L.push("- 各许可证的**原文**：本文件只列名字 / 版本 / 许可证表达式 / 版权行，不内嵌全文；许可原文已随前端产物分发（`gui/src/simple/third-party-notices.ts`，界面里的「关于」页就是读它）。");
   L.push("");
   L.push("## 统计");
   L.push("");
@@ -268,6 +381,17 @@ function render(list) {
     L.push(`| ${g} | ${countOf(g, "Rust")} | ${countOf(g, "npm")} | ${byGroup.get(g).length} |`);
   }
   L.push(`| **合计** | **${rustCount}** | **${npmCount}** | **${entries.length}** |`);
+  L.push("");
+  L.push("## 许可原文");
+  L.push("");
+  L.push(
+    `- 附带原文的包：**${entries.length - missingText.length}** 个；按内容去重后 **${TEXTS.size}** 份不同文本（去重前 ${(rawTextBytes / 1024).toFixed(1)} KB，去重后 ${(uniqueTextBytes / 1024).toFixed(1)} KB）。原文已随前端产物分发：\`gui/src/simple/third-party-notices.ts\`。`,
+  );
+  L.push(`- 未附带原文的包：**${missingText.length}** 个（脚本不替它们编原文）。`);
+  if (missingText.length) {
+    L.push("");
+    for (const e of missingText) L.push(`  - ${e.kind} ${e.name} ${e.version} — ${e.license}`);
+  }
   L.push("");
   for (const g of GROUPS) {
     L.push(`## ${g}`);
@@ -299,8 +423,61 @@ function render(list) {
   return L.join("\n");
 }
 
+/**
+ * 第二个产物：许可说明本身（随前端产物发出去）。
+ *
+ * 它是**数据**：条目的形状固定，原文按内容去重后放在 TEXTS。生成物不写时间戳，
+ * 两次运行逐字节相同（--self-check 会真的跑两遍来证）。
+ */
+function renderTs(list) {
+  const L = [];
+  L.push("// 第三方许可说明 —— 由 gui/scripts/license-inventory.sh 生成，不要手改。");
+  L.push("//");
+  L.push("// 为什么许可说明在代码里，而不只在 gui/THIRD-PARTY-LICENSES.md 里：");
+  L.push("// 许可说明必须随软件一起到她手上（她不会去安装目录或网页里找），而前端产物");
+  L.push("// 两个平台都会带上它。清单文件是给评审看的，这里是给她的。");
+  L.push("//");
+  L.push("// 原文按内容去重：同一份文本只存一份，条目用 textHash 指过去。");
+  L.push("// textHash 为 null = 这个包没有附带可读的许可原文，我们不替它编。");
+  L.push("");
+  L.push("export interface ThirdPartyNotice {");
+  L.push("  readonly name: string;");
+  L.push("  readonly version: string;");
+  L.push("  readonly license: string;");
+  L.push("  /** 许可原文的索引入口（见 TEXTS）；null = 未附带原文。 */");
+  L.push("  readonly textHash: string | null;");
+  L.push("}");
+  L.push("");
+  L.push("export const NOTICES: readonly ThirdPartyNotice[] = [");
+  for (const e of list) {
+    const hash = e.textHash === null ? "null" : JSON.stringify(e.textHash);
+    L.push(
+      `  { name: ${JSON.stringify(e.name)}, version: ${JSON.stringify(e.version)}, license: ${JSON.stringify(e.license)}, textHash: ${hash} },`,
+    );
+  }
+  L.push("];");
+  L.push("");
+  L.push("/** textHash -> 许可原文（同一份文本只存一份）。 */");
+  L.push("export const TEXTS: Readonly<Record<string, string>> = {");
+  for (const hash of [...TEXTS.keys()].sort(cmp)) {
+    L.push(`  ${JSON.stringify(hash)}: ${JSON.stringify(TEXTS.get(hash))},`);
+  }
+  L.push("};");
+  L.push("");
+  L.push("/** 给界面用的数字：包数、不同原文份数、没附带原文的包数。 */");
+  L.push("export const NOTICE_SUMMARY = {");
+  L.push(`  packages: ${list.length},`);
+  L.push(`  uniqueTexts: ${TEXTS.size},`);
+  L.push(`  missingText: ${missingText.length},`);
+  L.push("} as const;");
+  L.push("");
+  return L.join("\n");
+}
+
 const md = render(entries);
 if (render(entries) !== md) throw new Error("内部错误：渲染结果不稳定");
+const ts = renderTs(entries);
+if (renderTs(entries) !== ts) throw new Error("内部错误：许可说明渲染结果不稳定");
 
 // ---------------------------------------------------------------------------
 // 模式
@@ -308,21 +485,48 @@ if (render(entries) !== md) throw new Error("内部错误：渲染结果不稳�
 
 if (mode === "stdout") {
   process.stdout.write(md);
+} else if (mode === "stdout-ts") {
+  process.stdout.write(ts);
 } else if (mode === "write") {
   await Bun.write(outPath, md);
+  await Bun.write(tsOutPath, ts);
   console.error(
     `license-inventory: 已写出 ${outPath}（Rust ${rustCount} + npm ${npmCount} = ${entries.length} 条）`,
   );
+  console.error(
+    `license-inventory: 已写出 ${tsOutPath}（原文 ${TEXTS.size} 份，去重后 ${(uniqueTextBytes / 1024).toFixed(1)} KB；${missingText.length} 个包未附带原文）`,
+  );
 } else if (mode === "check") {
-  const existing = (await Bun.file(outPath).exists()) ? await Bun.file(outPath).text() : "";
-  if (existing === md) {
+  let stale = false;
+
+  const existingMd = (await Bun.file(outPath).exists()) ? await Bun.file(outPath).text() : "";
+  if (existingMd !== md) {
+    stale = true;
+    if (newOut) await Bun.write(newOut, md);
+    reportMarkdownStale(existingMd);
+  }
+
+  const existingTs = (await Bun.file(tsOutPath).exists()) ? await Bun.file(tsOutPath).text() : "";
+  if (existingTs !== ts) {
+    stale = true;
+    await reportTsStale(existingTs);
+  }
+
+  if (!stale) {
     console.log(
-      `license-inventory: 清单是最新的（Rust ${rustCount} + npm ${npmCount} = ${entries.length} 条）`,
+      `license-inventory: 清单是最新的，许可说明也是最新的（Rust ${rustCount} + npm ${npmCount} = ${entries.length} 条；原文 ${TEXTS.size} 份）`,
     );
     process.exit(0);
   }
-  if (newOut) await Bun.write(newOut, md);
+  console.error("  重新生成：bash gui/scripts/license-inventory.sh");
+  process.exit(1);
+} else {
+  console.error(`license-inventory: 内部错误：未知模式 ${mode}`);
+  process.exit(2);
+}
 
+/** 清单（markdown）过期：沿用旧写法，点名是哪些组件变了。 */
+function reportMarkdownStale(existing) {
   // 只解析「许可类别」小节里的条目；「需要留意」那一节的行不算条目。
   const parse = (text) => {
     const map = new Map();
@@ -371,17 +575,81 @@ if (mode === "stdout") {
   if (!added.length && !removed.length && !changed.length) {
     console.error("  组件没有增减，是文件格式/表头变了（重新生成即可）。");
   }
-  console.error("  重新生成：bash gui/scripts/license-inventory.sh");
-  process.exit(1);
-} else {
-  console.error(`license-inventory: 内部错误：未知模式 ${mode}`);
-  process.exit(2);
+}
+
+/**
+ * 许可说明（third-party-notices.ts）过期：把旧文件真的 import 进来比，所以点得出
+ * 名字——组件变了还是某份原文变了。
+ */
+async function reportTsStale(existing) {
+  console.error(
+    "license-inventory: 许可说明过期 —— gui/src/simple/third-party-notices.ts 与现在的依赖树对不上。",
+  );
+  if (!existing.trim()) {
+    console.error("  文件不存在或是空的（第一次生成时正常）。");
+    return;
+  }
+  let old;
+  try {
+    old = await import(pathToFileURL(tsOutPath).href);
+  } catch (error) {
+    console.error(`  读不出旧文件（${error?.message ?? error}），重新生成即可。`);
+    return;
+  }
+  const oldNotices = Array.isArray(old.NOTICES) ? old.NOTICES : null;
+  const oldTexts = old.TEXTS && typeof old.TEXTS === "object" ? old.TEXTS : null;
+  if (!oldNotices || !oldTexts) {
+    console.error("  旧文件里没有 NOTICES / TEXTS（格式变了），重新生成即可。");
+    return;
+  }
+  const keyOf = (item) => `${item.name} ${item.version}`;
+  const oldMap = new Map(oldNotices.map((item) => [keyOf(item), item]));
+  const newMap = new Map(entries.map((item) => [keyOf(item), item]));
+  const added = [...newMap.keys()].filter((k) => !oldMap.has(k)).sort(cmp);
+  const removed = [...oldMap.keys()].filter((k) => !newMap.has(k)).sort(cmp);
+  const changed = [...newMap.keys()]
+    .filter((k) => {
+      if (!oldMap.has(k)) return false;
+      const o = oldMap.get(k);
+      const n = newMap.get(k);
+      return o.version !== n.version || o.license !== n.license || o.textHash !== n.textHash;
+    })
+    .sort(cmp);
+  for (const k of added.slice(0, 25)) console.error(`  + ${k}`);
+  for (const k of removed.slice(0, 25)) console.error(`  - ${k}`);
+  for (const k of changed.slice(0, 25)) {
+    const o = oldMap.get(k);
+    const n = newMap.get(k);
+    const bits = [];
+    if (o.version !== n.version) bits.push(`${o.version} → ${n.version}`);
+    if (o.license !== n.license) bits.push(`${o.license} → ${n.license}`);
+    if (o.textHash !== n.textHash) bits.push(`原文 ${o.textHash ?? "(无)"} → ${n.textHash ?? "(无)"}`);
+    console.error(`  ~ ${k}（${bits.join("；")}）`);
+  }
+  if (added.length + removed.length + changed.length === 0) {
+    console.error("  条目没变，是许可原文（TEXTS）里改了字：");
+  }
+  const union = new Set([...Object.keys(oldTexts), ...TEXTS.keys()]);
+  let shown = 0;
+  for (const hash of [...union].sort(cmp)) {
+    if (oldTexts[hash] === TEXTS.get(hash)) continue;
+    const users = entries.filter((item) => item.textHash === hash).map((item) => item.name);
+    const who = users.length
+      ? `用于 ${users.slice(0, 5).join("、")}${users.length > 5 ? ` 等 ${users.length} 个包` : ""}`
+      : "已不再被任何包使用";
+    console.error(`  ~ 许可原文变了：${hash}（${who}）`);
+    if (++shown >= 10) {
+      console.error("  …（还有更多原文差异）");
+      break;
+    }
+  }
 }
 INVENTORY_JS
 
 export CARGO_META="$(to_native "$tmp/cargo-meta.json")"
 export GUI_ROOT="$(to_native "$gui_root")"
 export OUT_PATH="$(to_native "$out")"
+export TS_OUT_PATH="$(to_native "$ts_out")"
 export MODE="$mode"
 export NEW_OUT=""
 if [ "$mode" = "check" ]; then
