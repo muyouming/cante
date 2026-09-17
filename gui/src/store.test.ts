@@ -1220,3 +1220,81 @@ describe("r13 队列（一次说好几件事）", () => {
     second.dispose();
   });
 });
+
+// ---------------------------------------------------------------------------
+// #107 —— 夹具演不出、而且至今没人验的能力。
+//
+// 逐条决定写进了 CONTRACT.md 的「没人验的能力：逐条定论（#107）」。这一节把其中
+// 「不接，但明确」的几条钉住：它们在 reducer 里被**有意**丢掉（store.ts 的
+// IGNORED_EVENTS），不是悄悄没人管。真机 sweep 里 ExtensionRefreshed 真的出现过，
+// 而简单界面既没有技能/命令入口、也没有终端位置，所以丢掉是对的；但「对」要能被
+// 验证，否则下一个人只能靠读注释猜。
+// ---------------------------------------------------------------------------
+describe("有意忽略的事件（#107 的定论）", () => {
+  /**
+   * 往一个已经进入非默认状态的 store 里喂一个事件，断言它既不出行、也不改状态机、
+   * 也不换会话——也就是「有意忽略」而不是「碰巧没反应」。
+   */
+  async function assertIgnored(name: string, payload: unknown): Promise<void> {
+    const { store, dispose } = await setup();
+    emit("event", event("TurnStart", { turn_id: "t1" }));
+    const rowsBefore = store.rows().length;
+    const statusBefore = store.daemonStatus();
+    const sessionBefore = store.session();
+
+    emit("event", event(name, payload));
+
+    expect(store.rows().length, `${name} 不该出行`).toBe(rowsBefore);
+    expect(store.daemonStatus(), `${name} 不该改状态`).toBe(statusBefore);
+    expect(store.session(), `${name} 不该换会话`).toBe(sessionBefore);
+    assertInvariants(store);
+    dispose();
+  }
+
+  test("ExtensionRefreshed：真机会发，但简单界面没有技能/命令入口", async () => {
+    await assertIgnored("ExtensionRefreshed", {
+      session_id: "ses_TEST",
+      skills: [{ name: "simplify", description: "review the diff" }],
+      subagents: [{ name: "researcher" }],
+      mcp_servers: [{ name: "sheets", command: "cante-sheets", args: [], tools: [] }],
+    });
+  });
+
+  test("ShellOutput：没有终端或命令行入口，命令原文不该进界面", async () => {
+    await assertIgnored("ShellOutput", {
+      command: "ls -la",
+      stdout: "total 0\n",
+      stderr: "",
+      exit_code: 0,
+    });
+  });
+
+  test("Ambient：没人去问，就没有位置摆这条建议", async () => {
+    await assertIgnored("Ambient", {
+      kind: "ThinkingPhrase",
+      req_id: 1,
+      text: "正在打开那几张表",
+    });
+  });
+
+  test("起步时 skills 为空是允许的：刷新补齐不改变任何用户可见状态", async () => {
+    // 真实守护进程可能先给一个空 skills 的 SessionStart，稍后再用
+    // ExtensionRefreshed 补齐（#107）。这条锁定的是决定：简单界面根本不读 skills，
+    // 所以「起步为空、后来补齐」对用户没有任何可见影响。
+    const empty = { ...SESSION, skills: [] };
+    const { store, dispose } = await setup([], empty);
+    expect(store.session()?.skills).toEqual([]);
+
+    emit("event", event("ExtensionRefreshed", {
+      session_id: "ses_TEST",
+      skills: [{ name: "simplify" }],
+      subagents: [],
+      mcp_servers: [],
+    }));
+
+    // 刷新事件不写回会话：简单界面认的还是那一份（空的）skills。
+    expect(store.session()?.skills).toEqual([]);
+    assertInvariants(store);
+    dispose();
+  });
+});

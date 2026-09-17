@@ -235,6 +235,37 @@ const PING_MS = 4_000;
 /** #55 — 应用运行期间每分钟看一眼有没有到点的自动任务。 */
 const SCHEDULE_TICK_MS = 60_000;
 
+/**
+ * 事件归约里**有意忽略**的协议事件（#107 的定论）。
+ *
+ * 单列一份，是为了让「忽略」是一条有理由的决定，而不是被 reducer 那个 `default:`
+ * 顺手吞掉的东西——`default:` 挡的是还没见过的新事件，这里挡的是**已经见过、也
+ * 想清楚了不用**的：
+ *
+ *   * `ExtensionRefreshed`：带的是 skills / subagents / MCP 清单（crates/protocol-shape/src/msg.rs
+ *     的 ExtensionRefreshed）。简单界面没有技能或命令入口（pro 的命令面板已删，见本文件
+ *     顶部注释），`src/simple/**` 与本文件都没有任何一处读 `SessionInfo.skills`；它也不带
+ *     model / provider，刷新不了简单界面唯一会读的会话字段（`support_vision`，见
+ *     simple/capabilities.ts 的 visionAvailable）。2026-09 真机 sweep excel.merge 两轮各
+ *     见过 1 次，所以这是「见过、决定不接」，不是「没见过」。
+ *   * `ShellOutput`：命令的 stdout / stderr / 退出码。产品没有终端、也没有命令面板，
+ *     `send_input` 只以 `mode: "prompt"` 发过一次（见 sendRunInstruction），因此永远不会
+ *     触发 shell 命令；把命令原文摆给用户，等于把「终端 / 路径」这类黑名单词端到界面上
+ *     （gui/src/simple/copy-guard.test.ts），而且没有可操作的去处。
+ *   * `Ambient`：思考短语或输入建议，要先由前端发 AmbientPhrase / AmbientSuggestion 去问
+ *     才有回包；tauri.ts 的 Commands 里没有这两个 op，简单界面也没有状态栏短语或输入提示
+ *     的位置，所以它只会是没人要的回包。
+ *
+ * 什么时候重开这些决定：简单界面第一次出现「按名字调用一项技能 / 命令」的入口时，第一条
+ * 必须重开（那时也要处理「起步 skills 为空、稍后由刷新补齐」）；出现终端或命令行入口时，
+ * 第二条必须重开。store.test.ts 里对应的断言会先红。
+ */
+const IGNORED_EVENTS: ReadonlySet<string> = new Set([
+  "ExtensionRefreshed",
+  "ShellOutput",
+  "Ambient",
+]);
+
 function clampText(text: string, limit: number): string {
   if (text.length <= limit) return text;
   return `${text.slice(0, limit - 1)}…`;
@@ -606,6 +637,11 @@ export function createStore(): Store {
     if (dedupe && !remember(message.id)) return;
     const event = message.event;
     const name = eventName(event);
+    // #107 —— 有意忽略的事件：协议里真实存在（真机会发），但简单界面没有对应的入口
+    // 或位置。丢掉它们是**决定**，写进了 CONTRACT.md 的「没人验的能力：逐条定论（#107）」，
+    // 由 store.test.ts 与 fixture-parity.test.ts 钉住；不是漏了处理，所以也不进状态机、
+    // 不出行。
+    if (IGNORED_EVENTS.has(name)) return;
     const at = eventTime(message);
     transition(name, event);
 
