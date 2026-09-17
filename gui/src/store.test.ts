@@ -12,6 +12,8 @@ import { createRoot } from "solid-js";
 
 import { eventName, type EventMsg } from "./protocol.ts";
 import { describeApproval } from "./simple/approval.ts";
+// #173 — 出错页真正渲染的是 explainError(run.error)，不是 run.error 本身。
+import { explainError } from "./simple/copy.ts";
 import { FOLLOW_RECOMMENDATION_NOTE } from "./simple/copy-question.ts";
 import {
   DISMISSED_REPLY,
@@ -946,6 +948,42 @@ describe("失败记录：可核对的原因不能被洗掉（r17）", () => {
     expect(store.currentRun()?.state).toBe("failed");
     expect(error?.cause).toContain("Permission denied");
     expect(error?.what).not.toContain("Permission");
+    dispose();
+  });
+
+  test("#173 跑到一半没消息了：停滞那条 Error 真能把 run 收尾，并换成停滞那两句", async () => {
+    // 这是桥在服务方长时间没消息时自己发的那句（bridge.rs 的 STALL_HEADLINE）。
+    // 它走的就是普通的 Error 事件路：到得了收尾，也到得了出错页。
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/报表.xlsx"], "把这两张表合成一张");
+    await store.confirmRun();
+    emit(
+      "event",
+      event(
+        "Error",
+        "连不上帮你处理的服务方，可能网络断了。已经做到第 3 步，原来的文件都还在。网络好了，点「再试一次」。",
+      ),
+    );
+    await Bun.sleep(25);
+
+    expect(store.currentRun()?.state).toBe("failed");
+    const error = store.currentRun()?.error as {
+      what: string;
+      how: string;
+      detail: string;
+      cause?: string;
+    } | null;
+    // 记在 run 上的仍是通用那两句（和别的失败一样），可核对的原文在 cause/detail。
+    expect(error?.what).toBe("这件事没有做完。");
+    expect(error?.cause).toContain("连不上帮你处理的服务方");
+    expect(error?.detail).toBe(error?.cause);
+    // 出错页真正给她看的两句：停滞专用，带上做到第几步，并再说一次文件没事。
+    const human = explainError(error);
+    expect(human.what).toBe("连不上帮你处理的服务方，可能网络断了。");
+    expect(human.how).toContain("已经做到第 3 步");
+    expect(human.how).toContain("原来的文件都还在");
+    // 停滞时不给结果卡：那个 run 没有做完，不装成做完了。
+    expect(store.currentRun()?.result).toBeNull();
     dispose();
   });
 });

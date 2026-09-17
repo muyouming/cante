@@ -54,6 +54,22 @@ const STATE_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long `pi` may keep running after its stdin is closed before it is killed.
 const PI_EXIT_GRACE: Duration = Duration::from_secs(5);
 
+/// #173 — how long a live turn may show the window **nothing at all** before the
+/// adapter stops waiting and tells it. 600s is 10 minutes; the reasoning is in
+/// `CONTRACT.md` (“A turn that goes quiet”). Kept as one constant so the shipped
+/// value and the one the docs argue about cannot drift apart.
+const STALL_TIMEOUT: Duration = Duration::from_secs(600);
+/// #173 — override for tests (`CANTE_BRIDGE_STALL_SECS`); `0` disables the
+/// watchdog. Tests cannot wait 15 minutes for a clock, so they move the clock.
+const STALL_ENV: &str = "CANTE_BRIDGE_STALL_SECS";
+/// How often the watchdog looks at the clock. Small enough that the window sees
+/// the report within a fraction of a second of the budget running out.
+const STALL_TICK: Duration = Duration::from_millis(200);
+/// #173 — the opening words of the adapter's own stall report. `gui/src/simple/
+/// copy.ts` matches on this to give the failure its own plain-Chinese page, so
+/// changing it here means changing it there too.
+const STALL_HEADLINE: &str = "连不上帮你处理的服务方";
+
 /// Version tag for the adapter↔extension approval encoding. `options[0]` of the
 /// dialog request and the JSON in the response value both carry it, so a future
 /// change on one side cannot silently speak the old language to the other.
@@ -69,6 +85,23 @@ const DEFAULT_DENY_REASON: &str = "用户拒绝了这个操作";
 /// adapter that the desktop app depends on.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// #173 — the sentence the window shows when a turn went quiet. It is written
+/// here, not in the frontend, because only the adapter knows how far the turn
+/// got; `gui/src/simple/copy.ts` matches on [`STALL_HEADLINE`] to give it a
+/// stall-specific 发生了什么 / 你可以怎么做 page. `steps` is the number of
+/// assistant replies that already landed in the window.
+fn stall_message(steps: u32) -> String {
+    if steps > 0 {
+        format!(
+            "{STALL_HEADLINE}，可能网络断了。已经做到第 {steps} 步，原来的文件都还在。网络好了，点「再试一次」。"
+        )
+    } else {
+        format!(
+            "{STALL_HEADLINE}，可能网络断了。原来的文件都还在。网络好了，点「再试一次」。"
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +146,15 @@ struct TurnState {
     /// not clear it. `None` means pi did not report a limit, and the context
     /// snapshot is then left out rather than guessed.
     context_limit: Option<u32>,
+    /// #173 — a prompt is out and no `agent_settled` has closed it yet: the
+    /// window is waiting for the assistant, so silence from `pi` is suspicious.
+    /// Set when a prompt is written and again on `agent_start`; cleared on
+    /// `agent_settled` and by the stall report itself.
+    waiting: bool,
+    /// #173 — the watchdog gave up on this turn. Its late events must not
+    /// resurrect it (least of all as a successful `TurnEnd`); only a fresh
+    /// `agent_start` starts listening again.
+    abandoned: bool,
 }
 
 /// One `extension_ui_request` from the gate extension, waiting for the
@@ -164,6 +206,25 @@ impl TurnState {
         self.denied_ahead.clear();
         self.denied_reported.clear();
         self.gate = None;
+        self.deny_reason.clear();
+        self.waiting = true;
+        self.abandoned = false;
+    }
+
+    /// #173 — stop waiting on this turn after the watchdog reported it silent.
+    /// The next prompt gets a clean turn instead of being steered into a dead
+    /// one, and the abandoned turn's late events are dropped (see `translate`).
+    fn abandon_turn(&mut self) {
+        self.waiting = false;
+        self.abandoned = true;
+        self.active = false;
+        self.turn_id = None;
+        self.partials.clear();
+        self.seqs.clear();
+        self.held_starts.clear();
+        self.allowed_ahead.clear();
+        self.denied_ahead.clear();
+        self.denied_reported.clear();
         self.deny_reason.clear();
     }
 
@@ -348,6 +409,12 @@ fn usage_event(usage: Option<&Value>, context_limit: Option<u32>) -> Option<Valu
 /// Events that are part of the RPC sub-protocol (`response`,
 /// `extension_ui_request`) are handled by the runtime, not here.
 fn translate(event: &Value, state: &mut TurnState) -> Vec<Value> {
+    // #173 — a turn the watchdog has given up on is dead: its late events must
+    // not resurrect it (a `TurnEnd` would close whatever run the window has
+    // moved on to). Only a fresh `agent_start` starts a new turn.
+    if state.abandoned && str_field(event, "type") != "agent_start" {
+        return Vec::new();
+    }
     match str_field(event, "type") {
         "agent_start" => {
             // pi emits `agent_start` again when a run continues (observed:
@@ -481,6 +548,7 @@ fn translate(event: &Value, state: &mut TurnState) -> Vec<Value> {
             // whatever start is still held so no row is left "running".
             let mut out = state.flush_cancelled();
             state.active = false;
+            state.waiting = false;
             state.gate = None;
             state.partials.clear();
             state.seqs.clear();
@@ -812,6 +880,9 @@ struct Shared {
     /// pi tool names the user chose "allow from now on" for. Scoped to this
     /// bridge process: `AcceptAlways` is **not** persisted (BRIDGE-gate.md).
     always_allowed: HashSet<String>,
+    /// #173 — when anything was last heard from `pi`. Every stdout line resets
+    /// it (`handle_pi_line`); the watchdog compares it against the budget.
+    last_pi_message: Instant,
 }
 
 /// The running `pi` child.
@@ -853,14 +924,30 @@ struct Session {
 
 impl Session {
     fn new(sink: Sink) -> Self {
+        let shared = Arc::new(Mutex::new(Shared {
+            parent: None,
+            turn: TurnState::default(),
+            always_allowed: HashSet::new(),
+            last_pi_message: Instant::now(),
+        }));
+        let shutting_down = Arc::new(AtomicBool::new(false));
+        // #173 — one watchdog for the process. It only reads shared state, so it
+        // can never block the stdin or stdout threads.
+        if let Some(timeout) = stall_timeout() {
+            let ctx = StallCtx {
+                sink: Arc::clone(&sink),
+                shared: Arc::clone(&shared),
+                shutting_down: Arc::clone(&shutting_down),
+                timeout,
+            };
+            let _ = thread::Builder::new()
+                .name("cante-bridge-stall".to_string())
+                .spawn(move || stall_watch(ctx));
+        }
         Self {
             sink,
-            shared: Arc::new(Mutex::new(Shared {
-                parent: None,
-                turn: TurnState::default(),
-                always_allowed: HashSet::new(),
-            })),
-            shutting_down: Arc::new(AtomicBool::new(false)),
+            shared,
+            shutting_down,
             started: Arc::new(AtomicBool::new(false)),
             pi: None,
             state_rx: None,
@@ -948,7 +1035,16 @@ impl Session {
             return;
         }
         let streaming = lock(&self.shared).turn.active;
-        lock(&self.shared).parent = Some(id.to_string());
+        {
+            // #173 — a prompt is out: from here on, silence from `pi` is
+            // something to report. `abandoned` is *not* cleared here: a late
+            // settle from an earlier, given-up turn must stay dropped until a
+            // real `agent_start` opens a new one.
+            let mut shared = lock(&self.shared);
+            shared.parent = Some(id.to_string());
+            shared.turn.waiting = true;
+            shared.last_pi_message = Instant::now();
+        }
         // The daemon echoes the prompt as `UserInput`; the transcript's "you"
         // row is rendered from it (the store does not render the local send).
         emit(&self.sink, json!({ "UserInput": text }), Some(id));
@@ -1169,6 +1265,69 @@ impl Session {
     }
 }
 
+/// #173 — the pieces the stall watchdog needs. Everything it touches is behind
+/// the same mutex the reader thread uses, so the two can only interleave at
+/// whole events, never mid-line.
+struct StallCtx {
+    sink: Sink,
+    shared: Arc<Mutex<Shared>>,
+    shutting_down: Arc<AtomicBool>,
+    timeout: Duration,
+}
+
+/// The shipped silence budget, or an override from [`STALL_ENV`]. `0` disables
+/// the watchdog (used by nothing in production; kept so a future caller can
+/// turn it off without a rebuild).
+fn stall_timeout() -> Option<Duration> {
+    match std::env::var(STALL_ENV) {
+        Ok(raw) => match raw.trim().parse::<u64>() {
+            Ok(0) => None,
+            Ok(secs) => Some(Duration::from_secs(secs)),
+            Err(_) => Some(STALL_TIMEOUT),
+        },
+        Err(_) => Some(STALL_TIMEOUT),
+    }
+}
+
+/// #173 — “this turn is alive, but the service provider has said nothing for a
+/// long time.” When the budget runs out, report an `Error` of our own and stop
+/// waiting on the turn. It deliberately does **not** claim success, does not
+/// abort the assistant's running work (killing a tool mid-write could damage a
+/// file), and does not touch files itself.
+fn stall_watch(ctx: StallCtx) {
+    loop {
+        thread::sleep(STALL_TICK);
+        if ctx.shutting_down.load(Ordering::SeqCst) {
+            return;
+        }
+        let now = Instant::now();
+        let mut parent = None;
+        let mut message = None;
+        {
+            let mut shared = lock(&ctx.shared);
+            // An open approval sheet is the window waiting on the *user*, not
+            // the provider: `pi` is idle by design. Treat that wait as activity
+            // so an answered sheet does not land on an already-expired clock.
+            if shared.turn.gate.is_some() {
+                shared.last_pi_message = now;
+            }
+            if shared.turn.waiting
+                && shared.turn.gate.is_none()
+                && now.duration_since(shared.last_pi_message) >= ctx.timeout
+            {
+                let steps = shared.turn.steps;
+                shared.turn.abandon_turn();
+                parent = shared.parent.clone();
+                message = Some(stall_message(steps));
+            }
+        }
+        if let Some(message) = message {
+            eprintln!("cante-bridge: no message from the assistant for {:?}; reporting a stall", ctx.timeout);
+            emit(&ctx.sink, json!({ "Error": message }), parent.as_deref());
+        }
+    }
+}
+
 /// Read `pi` stdout, translate events, and forward logs.
 fn pi_reader(stdout: ChildStdout, ctx: ReaderCtx) {
     let mut reader = BufReader::new(stdout);
@@ -1237,6 +1396,13 @@ fn handle_pi_line(line: &str, ctx: &ReaderCtx) {
         let events = translate(&value, &mut shared.turn);
         (parent, events)
     };
+    // #173 — the clock resets on what the *window* receives, not on every raw
+    // line from `pi`. A real cut produced 920 s in which the window got nothing
+    // while `pi` retried the dead request internally (three attempts, ~305 s
+    // apart): the spinner was frozen, so internal lines must not keep it alive.
+    if !events.is_empty() {
+        lock(&ctx.shared).last_pi_message = Instant::now();
+    }
     for event in events {
         emit(&ctx.sink, event, parent.as_deref());
     }
@@ -1991,5 +2157,41 @@ mod tests {
     fn timestamps_are_rfc3339_utc() {
         assert_eq!(iso8601_from_ms(0), "1970-01-01T00:00:00.000Z");
         assert_eq!(iso8601_from_ms(1_700_000_000_123), "2023-11-14T22:13:20.123Z");
+    }
+
+    /// #173 — the sentence has to be the one the window matches on, and it has
+    /// to say how far the turn got without claiming it finished.
+    #[test]
+    fn the_stall_report_names_the_marker_and_the_step_count() {
+        let message = stall_message(3);
+        assert!(message.starts_with(STALL_HEADLINE), "{message}");
+        assert!(message.contains("已经做到第 3 步"), "{message}");
+        assert!(message.contains("原来的文件都还在"), "{message}");
+        assert!(!message.contains("完成"), "a stall must not read as success: {message}");
+
+        // Nothing happened yet: do not invent a step number.
+        let early = stall_message(0);
+        assert!(early.starts_with(STALL_HEADLINE), "{early}");
+        assert!(!early.contains("第"), "{early}");
+    }
+
+    /// #173 — after the watchdog gives up, the abandoned turn's late settle is
+    /// dropped; only a fresh `agent_start` opens a new one.
+    #[test]
+    fn an_abandoned_turn_does_not_settle_but_the_next_one_starts() {
+        let mut state = TurnState::default();
+        let started = translate(&json!({ "type": "agent_start" }), &mut state);
+        assert_eq!(started.len(), 1, "the first agent_start opens a turn");
+        assert!(state.waiting, "a live turn is being waited on");
+
+        state.abandon_turn();
+        assert!(!state.waiting && state.abandoned && !state.active);
+        assert!(translate(&json!({ "type": "agent_settled" }), &mut state).is_empty());
+        assert!(translate(&json!({ "type": "message_update", "assistantMessageEvent": { "type": "text_delta", "delta": "迟到" } }), &mut state).is_empty());
+        assert!(state.abandoned, "only a new agent_start may revive the translator");
+
+        let restarted = translate(&json!({ "type": "agent_start" }), &mut state);
+        assert_eq!(restarted.len(), 1, "a new turn starts cleanly");
+        assert!(state.waiting && !state.abandoned, "the retry is watched again");
     }
 }

@@ -14,7 +14,7 @@
 //
 // `context.needs` 说明这件事本来需要什么，用来挑合适的那个出口：要文件就给「重新
 // 选文件」，要文件夹就给「打开文件夹」，纯文字的就不硬塞一个选文件的按钮。
-import { RECOVERY } from "./copy-recovery.ts";
+import { RECOVERY, STALLED_MARKER } from "./copy-recovery.ts";
 import { DAEMON_RECOVERY } from "./copy-daemon.ts";
 
 export type RecoveryKind =
@@ -252,6 +252,11 @@ export function actionsFor(error: RecoveryError, context?: RecoveryContext): Rec
     actions = [action("retry", RECOVERY.cleanDisk)];
   } else if (IMAGE.test(text)) {
     actions = [action("explain-in-words", RECOVERY.explainInWords)];
+  } else if (STALLED_MARKER.test(text)) {
+    // #173 —— 已经在做、做到一半，然后彻底没消息了。这不是「刚开始就连接被拒」，
+    // 所以出路是先确认网络、再从头走一遍；文件安全那句在 `copy.ts` 的停滞文案里。
+    // 这一条要排在 NETWORK 前面：两者都命中时，更具体的那条才是真的。
+    actions = [action("retry", RECOVERY.stalled)];
   } else if (NETWORK.test(text)) {
     actions = [action("retry", RECOVERY.retryLater)];
   } else if (AUTH.test(text)) {

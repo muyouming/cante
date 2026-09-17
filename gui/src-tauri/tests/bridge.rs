@@ -93,7 +93,7 @@ impl FakeModel {
             while !stop_thread.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
-                        let _ = serve_connection(stream, scenario);
+                        let _ = serve_connection(stream, scenario, &stop_thread);
                     }
                     Err(ref error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(5));
@@ -115,7 +115,7 @@ impl Drop for FakeModel {
     }
 }
 
-fn serve_connection(stream: TcpStream, scenario: &str) -> std::io::Result<()> {
+fn serve_connection(stream: TcpStream, scenario: &str, stop: &AtomicBool) -> std::io::Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
     let mut writer = stream.try_clone()?;
@@ -175,6 +175,28 @@ fn serve_connection(stream: TcpStream, scenario: &str) -> std::io::Result<()> {
         .and_then(|messages| messages.last())
         .map(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
         .unwrap_or(false);
+    let tool_results = request
+        .get("messages")
+        .and_then(Value::as_array)
+        .map(|messages| {
+            messages
+                .iter()
+                .filter(|message| message.get("role").and_then(Value::as_str) == Some("tool"))
+                .count()
+        })
+        .unwrap_or(0);
+
+    // `stall` — the provider goes quiet where dropped wifi does: right after the
+    // second tool call. The request is read, then nothing is ever written and
+    // the socket is held open (no FIN), which is what a dead network looks like
+    // to the client. `stop` bounds the hold so the test's Drop cannot hang.
+    if scenario == "stall" && tool_results >= 2 {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while !stop.load(Ordering::SeqCst) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(50));
+        }
+        return Ok(());
+    }
 
     begin_sse(&mut writer)?;
     match scenario {
@@ -185,6 +207,34 @@ fn serve_connection(stream: TcpStream, scenario: &str) -> std::io::Result<()> {
                 thread::sleep(Duration::from_millis(120));
             }
             write_chunk(&mut writer, &chunk(&model, json!({}), json!("stop")))?;
+        }
+        // `trickle`: slow but alive. Its total runtime is longer than the test's
+        // silence budget while every single gap is shorter than it, pinning the
+        // promise that the watchdog measures *silence from the assistant*, never
+        // total duration. 26 × 700 ms ≈ 18 s.
+        "trickle" => {
+            for part in ["一", "二", "三", "四", "五", "六", "七", "八", "九", "十", "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十", "二十一", "二十二", "二十三", "二十四", "二十五", "二十六"] {
+                let frame = chunk(&model, json!({ "role": "assistant", "content": part }), Value::Null);
+                write_chunk(&mut writer, &frame)?;
+                thread::sleep(Duration::from_millis(700));
+            }
+            write_chunk(&mut writer, &chunk(&model, json!({}), json!("stop")))?;
+        }
+        // `stall`: one tool call per reply, so the cut lands with two completed
+        // calls behind it — the turn is demonstrably alive when it goes quiet.
+        "stall" => {
+            let index = tool_results; // 0 → tool #1, 1 → tool #2
+            for part in ["我先看一下", "，然后用工具。"] {
+                write_chunk(&mut writer, &chunk(&model, json!({ "role": "assistant", "content": part }), Value::Null))?;
+                thread::sleep(Duration::from_millis(20));
+            }
+            let call = json!({ "tool_calls": [{ "index": 0, "id": format!("call_stall_{}", index + 1), "type": "function",
+                "function": { "name": "bash", "arguments": "" } }] });
+            write_chunk(&mut writer, &chunk(&model, call, Value::Null))?;
+            let arguments = json!({ "command": format!("echo stall-tool-{}", index + 1) }).to_string();
+            let delta = json!({ "tool_calls": [{ "index": 0, "function": { "arguments": arguments } }] });
+            write_chunk(&mut writer, &chunk(&model, delta, Value::Null))?;
+            write_chunk(&mut writer, &chunk(&model, json!({}), json!("tool_calls")))?;
         }
         // `gate`: one bash call whose command writes a marker file, so
         // "did the command really run?" is a filesystem fact. `gate2` puts two
@@ -298,6 +348,12 @@ impl BridgeRun {
     /// Spawn the adapter, or return `None` (with a loud `SKIP`) when `pi` is not
     /// installed on this machine.
     fn start(label: &str, scenario: &'static str) -> Option<Self> {
+        Self::start_with_stall(label, scenario, None)
+    }
+
+    /// #173 — same, but with the shipped silence budget moved down to `secs` so
+    /// the watchdog can be watched firing in a test instead of in 15 minutes.
+    fn start_with_stall(label: &str, scenario: &'static str, secs: Option<u64>) -> Option<Self> {
         let program = std::env::var("PI_BIN").unwrap_or_else(|_| "pi".to_string());
         if !binary_answers(&program) {
             eprintln!("SKIP cante-bridge {label}: `{program}` is not installed (or never answered --version)");
@@ -319,7 +375,8 @@ impl BridgeRun {
         #[cfg(windows)]
         let work = PathBuf::from(work.to_string_lossy().trim_start_matches(r"\\?\"));
 
-        let mut child = Command::new(env!("CARGO_BIN_EXE_cante-bridge"))
+        let mut command = Command::new(env!("CARGO_BIN_EXE_cante-bridge"));
+        command
             .arg("serve")
             .current_dir(&work)
             .env("PI_BIN", program)
@@ -330,9 +387,11 @@ impl BridgeRun {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             // Inherit stderr so a broken pi or adapter shows up in the test log.
-            .stderr(Stdio::inherit())
-            .spawn()
-            .expect("spawn cante-bridge");
+            .stderr(Stdio::inherit());
+        if let Some(secs) = secs {
+            command.env("CANTE_BRIDGE_STALL_SECS", secs.to_string());
+        }
+        let mut child = command.spawn().expect("spawn cante-bridge");
         let stdin = child.stdin.take().expect("bridge stdin");
         let stdout = child.stdout.take().expect("bridge stdout");
         let (tx, rx) = mpsc::channel();
@@ -836,6 +895,85 @@ fn bridge_reports_an_interrupted_turn() {
     for turn_end in run.turn_ends() {
         assert_ne!(turn_end["status"], json!("Completed"), "a stopped turn must never read as done");
     }
+}
+
+/// #173 — the provider goes quiet mid-turn (dropped wifi, a gateway that never
+/// comes back). The window must not spin forever: within the silence budget the
+/// adapter reports its own `Error`, and that report never claims success.
+/// The budget is 10 s — long enough that a loaded machine's second tool call
+/// still gets through before the silence is called, short enough for the suite.
+#[test]
+fn bridge_reports_a_turn_that_goes_quiet() {
+    let Some(mut run) = BridgeRun::start_with_stall("stall", "stall", Some(10)) else {
+        return;
+    };
+    run.send(
+        json!({ "StartSession": { "provider": "probe", "model": "probe-model", "permission_mode": "auto" } }),
+        "op_start",
+    );
+    run.wait_for("SessionStart", is("SessionStart"));
+    run.send(json!({ "UserInput": "把这件事做了" }), "op_input");
+    run.wait_for("TurnStart", is("TurnStart"));
+
+    // Let the first tool call through for the rest of the session, so the
+    // second one runs without another sheet. The cut then lands with the turn
+    // demonstrably alive: two completed calls behind it.
+    let pause = run.wait_for("TurnPause", is("TurnPause"));
+    approve(
+        &mut run,
+        &paused_turn_id(&pause),
+        json!([decision("call_stall_1", "AcceptForSession")]),
+    );
+
+    let error = run.wait_for("the stall report", is("Error"));
+    let message = error["event"]["Error"].as_str().unwrap_or("");
+    assert!(
+        message.starts_with("连不上帮你处理的服务方"),
+        "the report must carry the marker the window matches on: {message:?}"
+    );
+    assert!(message.contains("已经做到第"), "she is told how far it got: {message:?}");
+    assert!(message.contains("原来的文件都还在"), "file safety is restated: {message:?}");
+    assert_eq!(error["parent"], json!("op_input"), "the report belongs to the prompt");
+
+    // Two calls really ran before the silence: this is a live turn, not a
+    // startup failure.
+    assert!(run.events_named("ToolStart").len() >= 2, "saw {:?}", run.names());
+    assert!(run.events_named("ToolEnd").len() >= 2, "saw {:?}", run.names());
+    // And the turn is never reported as finished — not by the adapter, not by a
+    // late settle from the assistant either.
+    assert!(run.turn_ends().is_empty(), "a stalled turn must not close as a turn: {:?}", run.turn_ends());
+}
+
+/// #173 — slow is not the same as disconnected. A stream that outlives the
+/// silence budget in total, but never falls silent for the budget, finishes
+/// normally: the watchdog measures silence from the assistant, never duration.
+/// The budget here is 12 s so a loaded machine's slow first token cannot trip
+/// it; the run itself is ~18 s.
+#[test]
+fn bridge_does_not_report_a_slow_but_alive_turn() {
+    let Some(mut run) = BridgeRun::start_with_stall("trickle", "trickle", Some(12)) else {
+        return;
+    };
+    run.send(
+        json!({ "StartSession": { "provider": "probe", "model": "probe-model", "permission_mode": "auto" } }),
+        "op_start",
+    );
+    run.wait_for("SessionStart", is("SessionStart"));
+    let started = Instant::now();
+    run.send(json!({ "UserInput": "慢慢来" }), "op_input");
+
+    let end = run.wait_for("TurnEnd", is("TurnEnd"));
+    assert_eq!(end["event"]["TurnEnd"]["status"], json!("Completed"));
+    assert!(
+        started.elapsed() >= Duration::from_secs(12),
+        "the run must really have outlived the budget (took {:?})",
+        started.elapsed()
+    );
+    assert!(
+        run.events_named("Error").is_empty(),
+        "a slow turn must not be called stalled: {:?}",
+        run.names()
+    );
 }
 
 // ---------------------------------------------------------------------------
