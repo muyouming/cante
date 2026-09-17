@@ -17,6 +17,7 @@ import type { Row } from "./rows.ts";
 import { createStore, type Store } from "./store.ts";
 import { isBridgeAvailable } from "./tauri.ts";
 import { APP_NAME, COMMON, TASK_FLOW } from "./simple/copy.ts";
+import AboutEntry from "./simple/About.tsx";
 import ErrorView from "./simple/ErrorView.tsx";
 import Home from "./simple/Home.tsx";
 import Wizard, { shouldShowWizard } from "./simple/Wizard.tsx";
@@ -157,6 +158,7 @@ function SimpleApp(props: SimpleAppProps): JSX.Element {
           >
             {COMMON.privacy}
           </button>
+          <AboutEntry />
         </div>
       </header>
 

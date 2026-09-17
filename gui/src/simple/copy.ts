@@ -14,6 +14,8 @@ export const APP_NAME = "Cante";
 export const COMMON = {
   privacy: "隐私",
   history: "历史",
+  /** #151 — 「关于」入口：许可说明随软件一起给她，她不用去别处找。 */
+  about: "关于",
   back: "返回",
   retry: "重试",
   alternative: "换个方法",
