@@ -512,6 +512,23 @@ if (mode === "stdout") {
     await reportTsStale(existingTs);
   }
 
+  // 生成物怎么被引用，也是这份清单要管的事（#157）：许可说明必须随前端产物发出去，
+  // 而且必须是**点开「关于」才取**（动态 import()），不能静态 import 回主包——静态
+  // 回去就是 1911.8 KB 又一次每次启动白运、白解析。有人改回去就点名。
+  const aboutPath = join(gui, "src", "simple", "About.tsx");
+  const aboutSrc = (await Bun.file(aboutPath).exists()) ? await Bun.file(aboutPath).text() : "";
+  const staticValueImports = aboutSrc
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => !/^import\s+type\b/.test(line))
+    .filter((line) => /^import\s+.*?from\s+["'][^"']*third-party-notices\.ts["']/.test(line));
+  if (!aboutSrc.includes('import("./third-party-notices.ts")') || staticValueImports.length > 0) {
+    stale = true;
+    console.error(
+      "license-inventory: 许可说明的引用方式不对 —— gui/src/simple/About.tsx 必须用动态 import（打开「关于」时才取），不许静态 import 回主包。",
+    );
+  }
+
   if (!stale) {
     console.log(
       `license-inventory: 清单是最新的，许可说明也是最新的（Rust ${rustCount} + npm ${npmCount} = ${entries.length} 条；原文 ${TEXTS.size} 份）`,
