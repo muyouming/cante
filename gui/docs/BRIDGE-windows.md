@@ -159,6 +159,36 @@ Rust 在 Windows 上用 `CreateProcessW`，它**不会**按 `PATHEXT` 找 `.cmd`
 起得来但启动失败（杀毒软件拦未签名程序是 Windows 上最现实的一种）说的是另一句：
 「动手的组件没能启动。重新安装一次 Cante，或者请技术同事看一下。」
 
+#### 3.1.2 它怎么进包（#150 第二步）：构建期取回 + 产物闸门
+
+这一份不是手摆的，是构建的一部分：
+
+1. `gui/executor/versions.json` 钉住 pi 与 bun 的版本、下载地址、**sha256**、许可与来源；
+2. `tauri.conf.json` 的 `build.beforeBuildCommand` 在打壳前跑 `bun scripts/stage-executor.ts`：
+   下载 → **按 sha256 校验**（对不上就删掉并非零退出，绝不“下载完直接用”）→ 摆成上面那个
+   形状（`gui/src-tauri/executor/pi/`，构建产物、不入版本库）。缓存按 sha256 命中，重复构建不
+   再下载；
+3. `tauri.windows.conf.json` 的 `bundle.resources` 用**映射写法**把 `executor/pi` 放到 `pi/`
+   （**只有 Windows**：macOS 用上游 cante 守护进程）；
+4. 产物层由 `gui/scripts/verify-bundle.sh` 的第 ④ 条检查：Windows 上少了
+   `pi\bun.exe` / `pi\dist\bundle\cli.js` / `pi\package.json` / `pi\THIRD-PARTY-NOTICES.md`，
+   或者那个 `bun.exe` 在安装目录里跑不起来，就红；非 Windows 不要求它（**在场却残缺**照样红）。
+
+量到的大小（本机实测）：pi 的 `dist` 16.7 MB + `bun.exe` 82.1 MB = 打包前 98.9 MB；
+Windows 安装包从 **3.39 MB → 35.5 MB**（37,204,183 字节，NSIS，比 7z 估的略大）。
+
+真机验收走的是 [`scripts/windows/accept-install.ps1`](scripts/windows/accept-install.ps1)
+ 的 **`-ZeroEnv`** 模式（不设任何环境变量，让应用自己在旁边找）。这道闸门真的抓住了东西：
+上一条（PATH 上的 `pi` 盖过随包那一组）就是它先红的 —— 而第一步的验收当时把 PATH 清了，
+永远看不到它。**验收的环境要像王姐的机器，不是像我们的实验室。**
+
+**杀毒软件那条要如实说**：本机实测（把随包的 `bun.exe` 拷到一个全新临时目录里跑）
+`bun.exe --version` 0.53 秒、经它跑 `pi` 1.08 秒，没有被拦、没被隔离、没有拦截记录 ——
+但**这台机器的实时保护是关的**（`RealTimeProtectionEnabled = False`），所以它
+**不能**证明「王姐那台开着实时保护的机器上不会被拦」。未签名安装包的 SmartScreen 弹窗
+是另一道门（下载来的文件带 MotW 才会触发），本轮没有交互桌面、没验；
+而中文出路已经写好了（「动手的组件没能启动。重新安装一次 Cante，或者请技术同事看一下。」）。
+
 ### 3.2 路径分隔符与临时文件：审批扩展的落盘（**已修**）
 
 闸门扩展是 `include_str!` 编进二进制的，运行时按内容哈希写到 `std::env::temp_dir()`，

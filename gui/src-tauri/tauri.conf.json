@@ -5,7 +5,7 @@
   "identifier": "dev.cante.gui",
   "build": {
     "beforeDevCommand": "bun run dev:web",
-    "beforeBuildCommand": "bun run build:web",
+    "beforeBuildCommand": "bun scripts/stage-executor.ts && bun run build:web",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../dist"
   },

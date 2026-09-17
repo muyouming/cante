@@ -23,6 +23,12 @@ const env = process.env;
 const APP = env.ACCEPT_APP ?? "";
 const CANTE_BIN = env.ACCEPT_CANTE_BIN ?? "";
 const PI_BIN = env.ACCEPT_PI_BIN ?? "";
+/**
+ * 零环境变量模式（#150 第二步）：不替她设 CANTE_BIN / PI_BIN，让**应用自己**在它旁边
+ * 找桥与执行组件。这一步真正要证的是"装完就能用"——环境变量是脚本替她做的，
+ * 那层便利能盖住"包里根本没带组件"这种错。
+ */
+const ZERO_ENV = env.ACCEPT_ZERO_ENV === "1";
 const MSEDGEDRIVER = env.ACCEPT_MSEDGEDRIVER ?? "";
 const TAURI_DRIVER = env.ACCEPT_TAURI_DRIVER ?? "";
 const WORKDIR = env.ACCEPT_WORKDIR ?? "";
@@ -60,11 +66,17 @@ function requireFile(label, value) {
   if (!value || !existsSync(value)) fail(`${label} 不存在：${value || "(空)"}`);
 }
 
-/** 给子进程一份干净的环境：把本机 pi 会话/网关那些 PI_* 拿掉，只留我们指定的。 */
+/** 给子进程一份干净的环境：把本机 pi 会话/网关那些 PI_* 拿掉，只留我们指定的。
+ *  零环境变量模式下连 PI_BIN 与 CANTE_BIN 一起拿掉 —— 否则"它自己找到的"就说不清。 */
 function cleanEnv(extra) {
   const merged = { ...env, ...extra };
   for (const key of Object.keys(merged)) {
-    if (key.startsWith("PI_") && key !== "PI_BIN") delete merged[key];
+    if (key.startsWith("PI_") && (ZERO_ENV || key !== "PI_BIN")) delete merged[key];
+  }
+  if (ZERO_ENV) {
+    delete merged.CANTE_BIN;
+    delete merged.CANTE_SHEETS_BIN;
+    delete merged.CANTE_PDF_BIN;
   }
   return merged;
 }
@@ -203,8 +215,12 @@ function listOutputs() {
 
 async function main() {
   requireFile("应用", APP);
-  requireFile("包里的桥", CANTE_BIN);
-  requireFile("pi", PI_BIN);
+  if (ZERO_ENV) {
+    if (CANTE_BIN || PI_BIN) fail("零环境变量模式下不该再传 ACCEPT_CANTE_BIN / ACCEPT_PI_BIN");
+  } else {
+    requireFile("包里的桥", CANTE_BIN);
+    requireFile("pi", PI_BIN);
+  }
   requireFile("msedgedriver", MSEDGEDRIVER);
   requireFile("tauri-driver", TAURI_DRIVER);
   requireFile("输入文件", INPUT);
@@ -218,8 +234,12 @@ async function main() {
   );
 
   log(`==> 应用：${APP}`);
-  log(`==> 包里的桥：${CANTE_BIN}`);
-  log(`==> pi：${PI_BIN}`);
+  if (ZERO_ENV) {
+    log("==> 零环境变量模式：不设 CANTE_BIN / PI_BIN，桥与执行组件由应用自己在旁边找");
+  } else {
+    log(`==> 包里的桥：${CANTE_BIN}`);
+    log(`==> pi：${PI_BIN}`);
+  }
   log(`==> 工作目录：${WORKDIR}`);
 
   let driver = null;
@@ -228,8 +248,7 @@ async function main() {
   try {
     driverProc = spawn(TAURI_DRIVER, ["--port", String(PORT), "--native-driver", MSEDGEDRIVER], {
       env: cleanEnv({
-        CANTE_BIN,
-        PI_BIN,
+        ...(ZERO_ENV ? {} : { CANTE_BIN, PI_BIN }),
         CANTE_ADMIN_CONFIG: adminFile,
       }),
       stdio: ["ignore", "pipe", "pipe"],

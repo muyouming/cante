@@ -1,0 +1,43 @@
+{
+  "_note": [
+    "随安装包一起发的执行组件（#150 第二步）。构建期按这里的 sha256 取回并校验；",
+    "用户机器上首次运行**绝不下载**任何东西（决定的一部分，见 gui/docs/DECISION-windows-runtime.md §10）。",
+    "改版本时三处一起改：本文件、gui/executor/licenses/ 里那份原文的来源说明、",
+    "以及 gui/scripts/stage-executor.ts 里对布局的断言 —— 少改一处，闸门会红（这是有意的）。",
+    "所有 sha256 都是 2026-09-17 从下面 url 实际下载后算的，不是抄来的。"
+  ],
+  "pi": {
+    "package": "@earendil-works/pi-coding-agent",
+    "version": "0.85.1",
+    "url": "https://registry.npmjs.org/@earendil-works/pi-coding-agent/-/pi-coding-agent-0.85.1.tgz",
+    "sha256": "1f498729649bdce647d1160993b4d92bf3c614cc819213bee2f91dd34f2a7af4",
+    "bytes": 6986356,
+    "license": "MIT",
+    "licenseFile": "licenses/pi-MIT.txt",
+    "licenseSource": "https://raw.githubusercontent.com/earendil-works/pi/main/LICENSE",
+    "licenseSha256": "0457f5bcec3b3b211605dfb5d1a49042fd638f3686a410fe099c24a25af13c48",
+    "projectUrl": "https://github.com/earendil-works/pi",
+    "publisher": "Mario Zechner"
+  },
+  "bun": {
+    "version": "1.4.2",
+    "target": "windows-x64",
+    "url": "https://github.com/oven-sh/bun/releases/download/bun-v1.4.2/bun-windows-x64.zip",
+    "sha256": "ce4c17497b2f29712a99d3d53f028de28cd42e3bacb8589599e7f000e49b6405",
+    "bytes": 39807510,
+    "member": "bun-windows-x64/bun.exe",
+    "license": "MIT (含 JavaScriptCore 等；原文里逐段列出)",
+    "licenseFile": "licenses/bun-MIT.md",
+    "licenseSource": "https://raw.githubusercontent.com/oven-sh/bun/main/LICENSE.md",
+    "licenseSha256": "b9caf52728691b4057e371232c221a132883198be2f3d2ddf92c90404c984b1a",
+    "projectUrl": "https://github.com/oven-sh/bun"
+  },
+  "layout": {
+    "staged": "gui/src-tauri/executor/pi",
+    "installed": "pi/",
+    "entry": "dist/bundle/cli.js",
+    "runtime": "bun.exe",
+    "readBy": "gui/src-tauri/src/program.rs（locate_assistant：应用旁边 pi\\bun.exe + pi\\dist\\bundle\\cli.js）",
+    "platforms": "windows-x64（macOS 用上游 cante 守护进程，不发这一份；tauri.windows.conf.json 才把 resources 指到这里）"
+  }
+}
