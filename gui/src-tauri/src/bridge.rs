@@ -617,19 +617,62 @@ fn gate_extension_path() -> Result<PathBuf, String> {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     let name = format!("cante-bridge-gate-{hash:016x}.ts");
-    let dir = std::env::temp_dir();
-    let path = dir.join(&name);
-    if std::fs::read_to_string(&path).ok().as_deref() == Some(GATE_EXTENSION) {
-        return Ok(path);
-    }
-    let scratch = dir.join(format!("{name}.{}.tmp", std::process::id()));
-    std::fs::write(&scratch, GATE_EXTENSION)
-        .map_err(|error| format!("没能准备好审批要用的文件（{scratch:?}）：{error}"))?;
-    std::fs::rename(&scratch, &path).map_err(|error| {
-        let _ = std::fs::remove_file(&scratch);
-        format!("没能准备好审批要用的文件（{path:?}）：{error}")
-    })?;
+    let path = std::env::temp_dir().join(&name);
+    materialize(&path, GATE_EXTENSION)?;
     Ok(path)
+}
+
+/// Put `contents` at `path`, atomically where the platform allows it.
+///
+/// The content-addressed name means the common case is "already there": two
+/// bridge processes (or two test binaries) share one temp dir and one file, and
+/// whoever gets there first must not be punished. The bytes go to a pid-named
+/// scratch file first and are then moved into place, so a reader never sees
+/// half a file.
+///
+/// The retry around `rename` is a **Windows** fact: unix replaces the
+/// destination silently, but `MoveFile` fails with `AlreadyExists` when the
+/// target exists. Without the retry a stale file — a crash between write and
+/// rename, or a gate left by an older build whose content hash differed — would
+/// make every later session fail with "没能准备好审批要用的文件", on the one
+/// platform this whole bridge exists for.
+fn materialize(path: &Path, contents: &str) -> Result<(), String> {
+    if std::fs::read_to_string(path).ok().as_deref() == Some(contents) {
+        return Ok(());
+    }
+    let scratch = scratch_path(path);
+    std::fs::write(&scratch, contents)
+        .map_err(|error| format!("没能准备好审批要用的文件（{scratch:?}）：{error}"))?;
+    match std::fs::rename(&scratch, path) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            // A sibling process may have won the race with the same bytes —
+            // that is success, not failure. Otherwise the file in the way is
+            // stale and has to go before we can move ours in.
+            if std::fs::read_to_string(path).ok().as_deref() == Some(contents) {
+                let _ = std::fs::remove_file(&scratch);
+                return Ok(());
+            }
+            let _ = std::fs::remove_file(path);
+            match std::fs::rename(&scratch, path) {
+                Ok(()) => Ok(()),
+                Err(retry) => {
+                    let _ = std::fs::remove_file(&scratch);
+                    Err(format!("没能准备好审批要用的文件（{path:?}）：{retry}"))
+                }
+            }
+        }
+    }
+}
+
+/// Where [`materialize`] writes before moving the file into place. Named by pid
+/// so two processes never write each other's bytes.
+fn scratch_path(path: &Path) -> PathBuf {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    path.with_file_name(format!("{name}.{}.tmp", std::process::id()))
 }
 
 fn pi_program() -> String {
@@ -1712,6 +1755,51 @@ mod tests {
         assert!(written.contains(GATE_MARKER), "the extension must speak the adapter's marker");
         // Calling again reuses the same content-addressed file.
         assert_eq!(gate_extension_path().expect("reuse it"), path);
+    }
+
+    /// A file with the wrong bytes is exactly what a Windows `rename` refuses to
+    /// overwrite, so this is the case that used to wedge every later session
+    /// there. Uses its own directory: the shared content-addressed path belongs
+    /// to every other test in this file.
+    #[test]
+    fn a_stale_gate_file_is_replaced_not_blamed() {
+        let dir = std::env::temp_dir().join(format!(
+            "cante-gate-stale-{}-{}",
+            std::process::id(),
+            protocol::ulid()
+        ));
+        std::fs::create_dir_all(&dir).expect("make the scratch dir");
+        let path = dir.join("gate.ts");
+        std::fs::write(&path, "an older bridge left this here").expect("seed the stale file");
+
+        materialize(&path, GATE_EXTENSION).expect("replace the stale file");
+        assert_eq!(std::fs::read_to_string(&path).expect("read it back"), GATE_EXTENSION);
+
+        // And once it is right, the next call is a no-op that leaves no scratch.
+        materialize(&path, GATE_EXTENSION).expect("reuse the file");
+        assert_eq!(std::fs::read_to_string(&path).expect("read it back"), GATE_EXTENSION);
+        let leftovers: Vec<String> = std::fs::read_dir(&dir)
+            .expect("list the dir")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "scratch files were left behind: {leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn materialize_writes_the_gate_file_when_the_directory_is_empty() {
+        let dir = std::env::temp_dir().join(format!(
+            "cante-gate-empty-{}-{}",
+            std::process::id(),
+            protocol::ulid()
+        ));
+        std::fs::create_dir_all(&dir).expect("make the scratch dir");
+        let path = dir.join("gate.ts");
+        materialize(&path, GATE_EXTENSION).expect("write the file");
+        assert_eq!(std::fs::read_to_string(&path).expect("read it back"), GATE_EXTENSION);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
