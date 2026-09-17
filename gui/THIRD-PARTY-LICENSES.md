@@ -32,52 +32,58 @@
 
 ## 许可原文
 
-- 附带原文的包：**500** 个；按内容去重后 **218** 份不同文本（去重前 4380.0 KB，去重后 1911.8 KB）。原文已随前端产物分发：`gui/src/simple/third-party-notices.ts`。
-- 未附带原文的包：**43** 个（脚本不替它们编原文）。
+- 附带原文的包：**543** 个；按内容去重后 **230** 份不同文本（去重前 4618.5 KB，去重后 2010.8 KB）。原文已随前端产物分发：`gui/src/simple/third-party-notices.ts`。
+- 其中 **43** 个是**补回**的（发布到 registry 时没把 LICENSE 打进包，原文照下一节的链接取回，不是脚本编的）。
+- 未附带原文的包：**0** 个（脚本不替它们编原文）。
 
-  - Rust alloc-stdlib 0.2.4 — BSD-3-Clause
-  - Rust block2 0.6.2 — MIT
-  - Rust cesu8 1.1.0 — Apache-2.0/MIT
-  - Rust defmt-parser 1.0.0 — MIT OR Apache-2.0
-  - Rust dispatch2 0.3.1 — Zlib OR Apache-2.0 OR MIT
-  - Rust dlopen2 0.8.2 — MIT
-  - Rust dlopen2_derive 0.4.3 — MIT
-  - Rust jni-sys-macros 0.4.1 — MIT OR Apache-2.0
-  - Rust libappindicator-sys 0.9.0 — Apache-2.0 OR MIT
-  - Rust ndk 0.9.0 — MIT OR Apache-2.0
-  - Rust ndk-sys 0.6.0+11769913 — MIT OR Apache-2.0
-  - Rust objc2 0.6.4 — MIT
-  - Rust objc2-app-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-cloud-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-core-data 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-core-foundation 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-core-graphics 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-core-image 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-core-location 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-core-text 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-encode 4.1.0 — MIT
-  - Rust objc2-exception-helper 0.1.1 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-foundation 0.3.2 — MIT
-  - Rust objc2-io-surface 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-quartz-core 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-ui-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-user-notifications 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust objc2-web-kit 0.3.2 — Zlib OR Apache-2.0 OR MIT
-  - Rust r-efi 5.3.0 — MIT OR Apache-2.0 OR LGPL-2.1-or-later
-  - Rust r-efi 6.0.0 — MIT OR Apache-2.0 OR LGPL-2.1-or-later
-  - Rust selectors 0.36.1 — MPL-2.0
-  - Rust tauri-plugin 2.6.3 — Apache-2.0 OR MIT
-  - Rust unic-char-property 0.9.0 — MIT/Apache-2.0
-  - Rust unic-char-range 0.9.0 — MIT/Apache-2.0
-  - Rust unic-common 0.9.0 — MIT/Apache-2.0
-  - Rust unic-ucd-ident 0.9.0 — MIT/Apache-2.0
-  - Rust unic-ucd-version 0.9.0 — MIT/Apache-2.0
-  - npm vite-plugin-solid 2.11.14 — MIT
-  - Rust webview2-com 0.38.2 — MIT
-  - Rust webview2-com-macros 0.8.1 — MIT
-  - Rust webview2-com-sys 0.38.2 — MIT
-  - Rust winapi-i686-pc-windows-gnu 0.4.0 — MIT/Apache-2.0
-  - Rust winapi-x86_64-pc-windows-gnu 0.4.0 — MIT/Apache-2.0
+## 补回的许可原文（来源链接）
+
+这 43 个包发布到 registry 时没把 LICENSE 打进包（所以包目录里翻不到），原文是按下面的链接取回来的；其中 5 个连上游仓库里都没有任何许可文件，取的是许可证官方公开的原文。
+原文本身在 `gui/src/simple/third-party-notices.ts` 里（随软件发出去），这里列的是来源，方便逐字核对。
+
+- Rust alloc-stdlib 0.2.4 — https://github.com/dropbox/rust-alloc-no-stdlib/blob/ae42d22078b9/LICENSE
+- Rust block2 0.6.2 — https://github.com/madsmtm/objc2/blob/b4167b582b2f/LICENSE.md
+- Rust cesu8 1.1.0（上游仓库里没有许可文件，用的是官方原文） — https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT.txt https://www.apache.org/licenses/LICENSE-2.0.txt
+- Rust defmt-parser 1.0.0 — https://github.com/knurling-rs/defmt/blob/4a8cdb44891e/LICENSE-APACHE https://github.com/knurling-rs/defmt/blob/4a8cdb44891e/LICENSE-MIT
+- Rust dispatch2 0.3.1 — https://github.com/madsmtm/objc2/blob/8852b424193c/LICENSE.md
+- Rust dlopen2 0.8.2 — https://github.com/OpenByteDev/dlopen2/blob/cc80e4a0a90d/LICENSE
+- Rust dlopen2_derive 0.4.3 — https://github.com/OpenByteDev/dlopen2/blob/cc80e4a0a90d/LICENSE
+- Rust jni-sys-macros 0.4.1 — https://github.com/jni-rs/jni-sys/blob/64d77b7a5f11/LICENSE-APACHE https://github.com/jni-rs/jni-sys/blob/64d77b7a5f11/LICENSE-MIT
+- Rust libappindicator-sys 0.9.0 — https://github.com/tauri-apps/libappindicator-rs/blob/eafd1e3682a1/LICENSE-APACHE https://github.com/tauri-apps/libappindicator-rs/blob/eafd1e3682a1/LICENSE-MIT
+- Rust ndk 0.9.0 — https://github.com/rust-mobile/ndk/blob/49bbbba16c58/LICENSE-APACHE https://github.com/rust-mobile/ndk/blob/49bbbba16c58/LICENSE-MIT
+- Rust ndk-sys 0.6.0+11769913 — https://github.com/rust-mobile/ndk/blob/49bbbba16c58/LICENSE-APACHE https://github.com/rust-mobile/ndk/blob/49bbbba16c58/LICENSE-MIT
+- Rust objc2 0.6.4 — https://github.com/madsmtm/objc2/blob/8852b424193c/LICENSE.md
+- Rust objc2-app-kit 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-cloud-kit 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-core-data 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-core-foundation 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-core-graphics 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-core-image 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-core-location 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-core-text 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-encode 4.1.0 — https://github.com/madsmtm/objc2/blob/8d214f547736/LICENSE.md
+- Rust objc2-exception-helper 0.1.1 — https://github.com/madsmtm/objc2/blob/8d214f547736/LICENSE.md
+- Rust objc2-foundation 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-io-surface 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-quartz-core 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-ui-kit 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-user-notifications 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust objc2-web-kit 0.3.2 — https://github.com/madsmtm/objc2/blob/7b1abfd750a2/LICENSE.md
+- Rust r-efi 5.3.0（上游仓库里没有许可文件，用的是官方原文） — https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT.txt https://www.apache.org/licenses/LICENSE-2.0.txt
+- Rust r-efi 6.0.0（上游仓库里没有许可文件，用的是官方原文） — https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT.txt https://www.apache.org/licenses/LICENSE-2.0.txt
+- Rust selectors 0.36.1（上游仓库里没有许可文件，用的是官方原文） — https://www.mozilla.org/media/MPL/2.0/index.txt
+- Rust tauri-plugin 2.6.3 — https://github.com/tauri-apps/tauri/blob/6f6ab1207bb3/LICENSE_APACHE-2.0 https://github.com/tauri-apps/tauri/blob/6f6ab1207bb3/LICENSE_MIT
+- Rust unic-char-property 0.9.0 — https://github.com/open-i18n/rust-unic/blob/5878605364af/LICENSE-APACHE https://github.com/open-i18n/rust-unic/blob/5878605364af/LICENSE-MIT
+- Rust unic-char-range 0.9.0 — https://github.com/open-i18n/rust-unic/blob/5878605364af/LICENSE-APACHE https://github.com/open-i18n/rust-unic/blob/5878605364af/LICENSE-MIT
+- Rust unic-common 0.9.0 — https://github.com/open-i18n/rust-unic/blob/5878605364af/LICENSE-APACHE https://github.com/open-i18n/rust-unic/blob/5878605364af/LICENSE-MIT
+- Rust unic-ucd-ident 0.9.0 — https://github.com/open-i18n/rust-unic/blob/8a6ce83063d9/LICENSE-APACHE https://github.com/open-i18n/rust-unic/blob/8a6ce83063d9/LICENSE-MIT
+- Rust unic-ucd-version 0.9.0 — https://github.com/open-i18n/rust-unic/blob/5878605364af/LICENSE-APACHE https://github.com/open-i18n/rust-unic/blob/5878605364af/LICENSE-MIT
+- npm vite-plugin-solid 2.11.14（上游仓库里没有许可文件，用的是官方原文） — https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT.txt
+- Rust webview2-com 0.38.2 — https://github.com/wravery/webview2-rs/blob/b74dc5e2b394/LICENSE
+- Rust webview2-com-macros 0.8.1 — https://github.com/wravery/webview2-rs/blob/dffa41a8a46d/LICENSE
+- Rust webview2-com-sys 0.38.2 — https://github.com/wravery/webview2-rs/blob/b74dc5e2b394/LICENSE
+- Rust winapi-i686-pc-windows-gnu 0.4.0 — https://github.com/retep998/winapi-rs/blob/5b1829956ef645f3c2f8236ba18bb198ca4c2468/LICENSE-APACHE https://github.com/retep998/winapi-rs/blob/5b1829956ef645f3c2f8236ba18bb198ca4c2468/LICENSE-MIT
+- Rust winapi-x86_64-pc-windows-gnu 0.4.0 — https://github.com/retep998/winapi-rs/blob/5b1829956ef645f3c2f8236ba18bb198ca4c2468/LICENSE-APACHE https://github.com/retep998/winapi-rs/blob/5b1829956ef645f3c2f8236ba18bb198ca4c2468/LICENSE-MIT
 
 ## MIT
 
