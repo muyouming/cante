@@ -15,6 +15,11 @@ import type { Accessor, JSX } from "solid-js";
 import type { Store } from "../store.ts";
 import { isBridgeAvailable } from "../tauri.ts";
 import { PROGRESS_COPY } from "./copy.ts";
+// #88 — 选完文件就地做一次格式预检：读不了的格式（WPS / 苹果自己的）在这里先说一声，
+// 而不是等到跑起来才知道。判断和确认页共用 format-check.ts 的那一份。
+import { formatAdviceNote } from "./capabilities.ts";
+import { FORMAT_COPY } from "./copy-capability.ts";
+import { inspectSelection, nothingReadable, pickStepLine } from "./format-check.ts";
 // r13 — 排队里的事：每一件动手前还是会先停下来问她。
 import { QUEUE } from "./copy-queue.ts";
 import { jobFor, nextWaiting, positionOf, queueSummary, type QueuedJob } from "./queue.ts";
@@ -81,6 +86,8 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
   const [dismissed, setDismissed] = createSignal(false);
   const [dropping, setDropping] = createSignal(false);
   const [localError, setLocalError] = createSignal<string | null>(null);
+  // #88 — 选文件那一步的「怎么办」展开了没有。
+  const [showPickAdvice, setShowPickAdvice] = createSignal(false);
 
   const pickable = (): boolean => props.task.needs === "files" || props.task.needs === "folder";
 
@@ -94,6 +101,13 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
   };
 
   const currentRun = (): TaskRun | null => (dismissed() ? null : (store.currentRun?.() ?? null));
+
+  // #88 — 选文件那一步的格式预检。判断、话说、出路全部来自共用的那两个模块，
+  // 这一层只负责排版；真正拦住「开始」的仍然是确认页。
+  const pickVerdict = () => inspectSelection(selection());
+  const pickNote = () => pickStepLine(pickVerdict(), selection().length);
+  const pickNothingReadable = (): boolean => nothingReadable(pickVerdict());
+  const pickAdvice = () => formatAdviceNote(pickVerdict());
 
   // r13 — 队列把下一件摆到确认页时，先把上一件的结果留给她看完。
   //
@@ -522,6 +536,50 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
                   )}
                 </For>
               </ul>
+            </Show>
+
+            {/* #88 — 选完就在这里说一句「你选的几份里，有几份我打不开」，出路放在
+                「怎么办」这个展开里（和确认页同一句话）。选文件这层只说，不拦：
+                拦的是确认页上那个「开始」按钮。 */}
+            <Show when={pickNote()}>
+              {(note) => (
+                <div
+                  class="mt-4 rounded-xl border px-4 py-3"
+                  classList={{
+                    "border-amber-600 bg-amber-950/40": pickNothingReadable(),
+                    "border-slate-600 bg-slate-800/50": !pickNothingReadable(),
+                  }}
+                >
+                  <p
+                    class="text-[16px] leading-relaxed"
+                    classList={{
+                      "text-amber-100": pickNothingReadable(),
+                      "text-slate-200": !pickNothingReadable(),
+                    }}
+                  >
+                    {note()}
+                  </p>
+                  <button
+                    type="button"
+                    class="mt-1 min-h-[44px] rounded-lg px-2 text-[16px] text-sky-300 hover:bg-slate-800"
+                    aria-expanded={showPickAdvice()}
+                    onClick={() => setShowPickAdvice((open) => !open)}
+                  >
+                    {FORMAT_COPY.pickAdviceToggle}
+                  </button>
+                  <Show when={showPickAdvice()}>
+                    <p
+                      class="mt-1 text-[16px] leading-relaxed"
+                      classList={{
+                        "text-amber-100/90": pickNothingReadable(),
+                        "text-slate-300": !pickNothingReadable(),
+                      }}
+                    >
+                      {pickAdvice()}
+                    </p>
+                  </Show>
+                </div>
+              )}
             </Show>
 
             <div class="mt-6 flex items-center gap-3">

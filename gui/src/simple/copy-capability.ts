@@ -83,6 +83,18 @@ export const FORMAT_COPY = {
   /** 一个都读不了时，开始按钮旁边那句「为什么现在别开始」。 */
   startBlocked:
     "先别开始：这几份文件我打不开，现在开始也拿不到结果。先按上面的办法另存一份，再交给我。",
+  /**
+   * 选文件那一步的一句话：几份打不开（都打不开、而且只有一份时单独说）。
+   *
+   * 只说「有几份打不开」，出路放在「怎么办」那个展开里——选文件这一步不该用
+   * 一大段话把屏幕占满。
+   */
+  pickLine: (blocked: number, total: number): string => {
+    if (blocked < total) return `你选的 ${total} 份里，有 ${blocked} 份我打不开`;
+    return total === 1 ? "你选的这份我打不开" : `你选的 ${total} 份我都打不开`;
+  },
+  /** 选文件那一步「怎么办」按钮上的字：点开看到的就是上面那几句里的出路。 */
+  pickAdviceToggle: "怎么办",
 } as const;
 
 /** 会被当成 Excel 文件的扩展名。 */
