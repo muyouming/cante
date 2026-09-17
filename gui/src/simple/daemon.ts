@@ -9,8 +9,8 @@
 //   * 给向导「检查电脑」那一节算出该显示什么（不在时才有这一节）。
 //
 // 文案全部来自 copy-daemon.ts，这里不写中文。
+import { DAEMON, DAEMON_REINSTALL } from "./copy-daemon.ts";
 import { invoke } from "../tauri.ts";
-import { DAEMON } from "./copy-daemon.ts";
 
 /** 后端 `daemon_capability` 的返回形状。 */
 export interface DaemonCapability {
@@ -19,6 +19,8 @@ export interface DaemonCapability {
   why?: string | null;
   /** 探测时实际找过的位置；不可用时才有，给「复制详情」凑事实。 */
   searched?: string[] | null;
+  /** #150 —— 出路是不是「把这个软件重新装一次」；缺随包发的那一块时才是 true。 */
+  reinstall?: boolean | null;
 }
 
 /** 向导「检查电脑」里这一节的内容。 */
@@ -43,9 +45,10 @@ export function normalizeDaemon(raw: DaemonCapability | null | undefined): Daemo
       path: null,
       why: raw?.why ?? null,
       searched,
+      reinstall: raw?.reinstall === true,
     };
   }
-  return { available: true, path: raw.path ?? null, why: null, searched: [] };
+  return { available: true, path: raw.path ?? null, why: null, searched: [], reinstall: false };
 }
 
 /**
@@ -75,7 +78,8 @@ export function daemonNotice(cap: DaemonCapability | null): DaemonNotice | null 
     title: DAEMON.title,
     what: cap.why ?? DAEMON.what,
     body: DAEMON.body,
-    action: DAEMON.action,
+    // #150 —— 缺的是随包发的那一块时，她自己重装一次就行，不绕技术同事那一步。
+    action: cap.reinstall ? DAEMON_REINSTALL.action : DAEMON.action,
     copyLabel: DAEMON.copy,
     copyFailed: DAEMON.copyFailed,
     details: daemonDetails(cap),

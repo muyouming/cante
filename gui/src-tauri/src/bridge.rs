@@ -747,12 +747,11 @@ fn scratch_path(path: &Path) -> PathBuf {
     path.with_file_name(format!("{name}.{}.tmp", std::process::id()))
 }
 
-fn pi_program() -> String {
-    std::env::var("PI_BIN")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "pi".to_string())
-}
+/// 找不到、或者起不来时给用户看的那句话：中文、没有术语、带一个具体下一步。
+/// 可核对的事实（找过哪些位置、系统原话）只进 stderr，给来帮忙的技术同事看——
+/// 不往她脸上丢路径。
+const ASSISTANT_MISSING: &str = "这台电脑上缺一个动手的组件，重新安装一次 Cante 就能补上。";
+const ASSISTANT_UNSTARTABLE: &str = "动手的组件没能启动。重新安装一次 Cante，或者请技术同事看一下。";
 
 /// Windows: `pi` is a console program; spawning it from the window process
 /// would flash a console. Same treatment `daemon.rs` gives `cante`.
@@ -1064,20 +1063,29 @@ impl Session {
             return Ok(());
         }
         let cwd = self.cwd_path();
-        let program = pi_program();
+        let assistant = crate::program::assistant_here();
+        if assistant.path().is_none() && !assistant.from_env() {
+            eprintln!("cante-bridge: 没找到动手的组件；找过：{:?}", assistant.searched());
+            return Err(ASSISTANT_MISSING.to_string());
+        }
+        // 规格可能是「运行时 + 入口脚本」（随包发的形态），所以交给同一个切分函数。
+        let (program, leading) = crate::daemon::split_binary(assistant.spec());
         let extension = gate_extension_path()?;
         let args = pi_args(&self.args, Some(&extension));
         let mut command = Command::new(&program);
         command
+            .args(&leading)
             .args(&args)
             .current_dir(&cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         hide_console(&mut command);
-        let mut child = command
-            .spawn()
-            .map_err(|error| format!("没能把助手启动起来（{program}）：{error}"))?;
+        let mut child = command.spawn().map_err(|error| {
+            // 起不来最常见的原因就是杀毒软件把它拦了（未签名的程序，Windows 上很现实）。
+            eprintln!("cante-bridge: 起不来 {program}：{error}");
+            ASSISTANT_UNSTARTABLE.to_string()
+        })?;
         let stdin = child.stdin.take().ok_or_else(|| "没拿到助手的输入管道".to_string())?;
         let stdout = child.stdout.take().ok_or_else(|| "没拿到助手的输出管道".to_string())?;
         let stderr = child.stderr.take().ok_or_else(|| "没拿到助手的错误管道".to_string())?;

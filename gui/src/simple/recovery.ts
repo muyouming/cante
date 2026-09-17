@@ -82,6 +82,14 @@ const BRIDGE =
 const DAEMON_MISSING =
   /could not start[^\n]{0,200}serve|is not recognized as an internal or external command|不是内部或外部命令|command not found/i;
 
+/**
+ * #150 —— 桥在、但动手的那个组件不在（或起不来）。认的是桥自己给的那两句原文
+ * （`bridge.rs` 的 `ASSISTANT_MISSING` / `ASSISTANT_UNSTARTABLE`），都是「动手的
+ * 组件」开头那半句。这一条与 `DAEMON_MISSING` 分开：那种缺的是上游守护进程，
+ * 出路是找同事；这种缺的是随包发的那一块，出路是她自己把安装包再运行一次。
+ */
+const ASSISTANT_MISSING = /动手的组件/;
+
 /** 文件被人挪走 / 删掉。 */
 const NOT_FOUND =
   /no such file|file not found|cannot find the (file|path|folder)|path not found|\bENOENT\b|os error 2\b|找不到(该)?文件|文件不存在|已经?被(移动|移走|删除|删掉)|被移走|被删除/i;
@@ -206,6 +214,9 @@ export function actionsFor(error: RecoveryError, context?: RecoveryContext): Rec
   if (BRIDGE.test(text)) {
     // 浏览器预览里点了一张卡：出路是先打开桌面程序，别的动作都谈不上。
     actions = [action("retry", RECOVERY.retryBridge)];
+  } else if (ASSISTANT_MISSING.test(text)) {
+    // 东西随包发了、这台电脑上没有：她自己重装一次就行。
+    actions = [action("retry", RECOVERY.reinstall)];
   } else if (DAEMON_MISSING.test(text)) {
     // 不是文件的问题：这台电脑缺一个必须的组件，她自己装不了。把可核对的事实
     // 交给技术同事，而不是让她对着「找不到文件」一遍遍重选文件。

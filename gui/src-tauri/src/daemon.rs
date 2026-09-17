@@ -124,17 +124,23 @@ pub struct Daemon {
 }
 
 impl Daemon {
-    /// Build a daemon using `CANTE_BIN` (or `cante`) and the current directory.
+    /// Build a daemon using the component this computer has: the environment
+    /// variable, then a `cante`/`cante-bridge` next to the app, then
+    /// `$HOME/.cante/bin`, then `cante` on `PATH`. The order lives in
+    /// [`crate::program`], which the 「检查你的电脑」probe calls too — so the
+    /// probe and this spawn can never disagree about what is installed.
     pub fn new(emitter: Arc<dyn Emitter>) -> Self {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         Self::with_config(emitter, cwd, None)
     }
 
     /// Build a daemon with an explicit working directory and optional binary.
+    ///
+    /// An explicit `bin` (tests, callers that already resolved it) wins; otherwise
+    /// the lookup in [`crate::program::daemon_here`] decides — that is what makes
+    /// 「装完就能用」true without setting anything (issue #150).
     pub fn with_config(emitter: Arc<dyn Emitter>, cwd: PathBuf, bin: Option<String>) -> Self {
-        let bin = bin
-            .or_else(|| std::env::var("CANTE_BIN").ok().filter(|value| !value.is_empty()))
-            .unwrap_or_else(|| "cante".to_string());
+        let bin = bin.unwrap_or_else(|| crate::program::daemon_here().spec().to_string());
         Self {
             inner: Arc::new(Mutex::new(Inner {
                 proc: None,

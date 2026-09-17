@@ -113,6 +113,52 @@ Rust 在 Windows 上用 `CreateProcessW`，它**不会**按 `PATHEXT` 找 `.cmd`
 就没法在本机验证了（`reap` 只 kill 直接子进程，Windows 不杀进程树）。宁可在报告里写清前提，
 也不要在不能验证的平台上改收尾路径。**这是给那台机器的第一条检查项（§5 第 3 步）。**
 
+#### 3.1.1 #150 定下的形态：随包发「运行时 + 入口脚本」（**已实测**）
+
+决定走 C 之后（`DECISION-windows-runtime.md` §10），执行组件随安装包一起发，用户那台
+机器上没有任何东西可以指路。所以**应用旁边的那一份**有固定形态，桥和探测都按它找：
+
+```
+<安装目录>\
+  cante-gui.exe
+  cante-bridge.exe
+  cante-sheets.exe
+  cante-pdf.exe
+  pi\
+    bun.exe          ← 官方 bun 单文件（实测 83 MB），当运行时
+    package.json     ← pi 自己的（它靠它认版本/找自己的东西）
+    dist\            ← pi 发布的整份 `dist/`（实测 19 MB）：
+      bundle\cli.js  ←   入口就是它，运行时是 `pi\bun.exe` + 这个参数
+      bundle\chunks\…←   它 import 的同目录分片
+      modes\…          ←   主题等运行时要读的 JSON：**少了它 pi 一起就挂**
+```
+
+**实测踩过的坑**（两句都是真机上的报错原文，不是推演）：
+
+- 只把 `dist/bundle/{cli.js,chunks}` 拷贝进 `pi\` → 起不来：
+  `ENOENT: no such file or directory, open '…\pi\chunks\dist\modes\interactive\theme\dark.json'`。
+  所以随包发的是**整份 pi 发布内容（package.json + dist/）**，不是把 cli.js 抠出来 —— 少一层
+  目录就会在启动时找 `modes/interactive/theme/*.json` 之类的东西。
+- 官方那个 `pi.exe`（`bun install -g` 落在 `~\.bun\bin\` 的 shim）自己要求 `bun` 在 PATH 上：
+  `error: bun is not installed in %PATH%`。我们的安装包不能要求用户 PATH 里有 bun（也可能被人
+  改过），所以桥直接起旁边的 `pi\bun.exe`，把入口脚本当第一个参数 —— 运行时不依赖 PATH，
+  引号由 `daemon::split_binary` 管（安装目录带空格、用户名非 ASCII 都不会被拆碎）。
+
+找的顺序只有一份实现（`gui/src-tauri/src/program.rs`），探测（`commands.rs` 的
+「检查你的电脑」）与拉起进程（`daemon.rs` / `bridge.rs`）都调它 —— 这样探测说「就绪」
+就一定起得来：
+
+1. **环境变量**（`CANTE_BIN` / `PI_BIN` 原样当命令规格用，一旦给了就不再往下找）；
+2. **应用自己旁边**：守护进程先认 `cante`、再认 `cante-bridge`；执行组件先认 `pi.exe` /
+   `pi\pi.exe`，再认上面那一组 `pi\bun.exe` + `pi\dist\bundle\cli.js`；
+3. `$HOME/.cante/bin/`；
+4. `PATH`。
+
+找不到时给用户看的是**中文人话 + 一个具体下一步**（「这台电脑上缺一个动手的组件，
+重新安装一次 Cante 就能补上。」），技术细节（找过哪些位置、系统原话）只进 stderr。
+起得来但启动失败（杀毒软件拦未签名程序是 Windows 上最现实的一种）说的是另一句：
+「动手的组件没能启动。重新安装一次 Cante，或者请技术同事看一下。」
+
 ### 3.2 路径分隔符与临时文件：审批扩展的落盘（**已修**）
 
 闸门扩展是 `include_str!` 编进二进制的，运行时按内容哈希写到 `std::env::temp_dir()`，

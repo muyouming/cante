@@ -6,6 +6,7 @@ pub mod commands;
 pub mod daemon;
 pub mod files;
 pub mod pdf;
+pub mod program;
 pub mod protocol;
 pub mod sheets;
 
