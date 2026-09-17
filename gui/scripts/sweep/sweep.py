@@ -228,6 +228,83 @@ CARDS: list[dict] = [
         "files": ["chat"],
         "instruction": "有好几条要回，帮我列个清单，再一条条写好草稿。",
     },
+    # -----------------------------------------------------------------------
+    # #161：以前这 12 张从来没进过普查计划（覆盖率 20/32）。现在每张都配了能真跑的输入。
+    # 说明：这里的 instruction 用卡片自己的 example 写法，不另写一套话——提示词由
+    # prompts.ts 调卡片自己的 prompt() 拼。
+    # -----------------------------------------------------------------------
+    {
+        "id": "check.totals",
+        "files": ["totals"],
+        "instruction": "帮我核对这张表，看看合计和小计加起来对不对",
+    },
+    {
+        "id": "check.reconcile",
+        "files": ["reconcile_a", "reconcile_b"],
+        "instruction": "帮我核对这两张表，对一下账，看看哪些单子对不上",
+    },
+    {
+        "id": "invoice.ledger",
+        "files": ["invoice_pdf_1", "invoice_pdf_2", "invoice_pdf_3"],
+        "instruction": "把这堆电子发票整理成一张台账，写上发票号码、开票日期、销方名称和价税合计",
+    },
+    {
+        "id": "invoice.dupes",
+        "files": ["invoice_sheet"],
+        "instruction": "帮我看看这些发票里有没有重复的，把重复的标出来，别删",
+    },
+    {
+        "id": "invoice.crosscheck",
+        "files": ["invoice_book", "reimburse"],
+        "instruction": "把这张发票台账和这份报销明细对一下，看看哪些对不上",
+    },
+    {
+        "id": "admin.byperson",
+        "files": ["attend", "roster", "salary"],
+        "instruction": "把考勤表、花名册和工资表按人合成一张，工号对得上的并成一行",
+    },
+    {
+        "id": "admin.changes",
+        "files": ["staff_prev", "staff_now"],
+        "instruction": "对比上个月和这个月的员工名单，看看谁新来了、谁走了、谁的信息改了",
+    },
+    {
+        "id": "admin.expiry",
+        "files": ["contracts"],
+        "instruction": "把这张台账里 30 天内要到期的合同挑出来，已经过期的也单独列一份",
+    },
+    {
+        # 看图卡：夹具是我们自己画的一张表格照片（拉丁字母+数字，见 generate.py 的说明）。
+        # 能不能真的验，还取决于跑这一轮的模型支不支持看图——报告里会写清楚。
+        "id": "vision.table",
+        "files": ["table_photo"],
+        "instruction": "把这张表的照片变成 Excel，看不清的地方空着，别猜",
+    },
+    {
+        # 资料调研：没有文件，要查的东西写在话里（needs: text）。
+        "id": "research.brief",
+        "files": [],
+        "instruction": "帮我查一下现在出差住宿费报销的标准，整理成一页，每条都写上是从哪查到的",
+    },
+    {
+        # 接龙：内容整段贴进话里（needs: text）。
+        "id": "wechat.rollcall",
+        "files": [],
+        "scenario": "贴进来",
+        "instruction": (
+            "群里接龙的内容我贴进来了，帮我整理成一张表：\n"
+            "1. 陈嘉怡 一大一小\n2. 刘思远 一大一小\n3. 王梓涵 两大\n"
+            "4. 张梦琪 一大一小\n5. 李昊然 一大\n6. 周雨萱 两大一小"
+        ),
+    },
+    {
+        "id": "wechat.missing",
+        "files": ["class_roster"],
+        "instruction": (
+            "这是我们班的花名册，群里接龙谁还没报名？帮我列出来。\n"
+            "接龙内容：1. 陈嘉怡 2. 刘思远 3. 王梓涵 4. 张梦琪 6. 周雨萱"
+        ),
+    },
 ]
 
 # 每张卡的产出应该是什么，用来核对（不改变提示词，只决定怎么读回来）。
@@ -252,6 +329,19 @@ EXPECTED = {
     "doc.summary": "doc",
     "wechat.draft": "doc",
     "wechat.batch": "doc",
+    # #161 后补的 12 张卡（产出按卡片自己说的「另存为一个新文件」来定）
+    "check.totals": "sheet",
+    "check.reconcile": "sheet",
+    "invoice.ledger": "sheet",
+    "invoice.dupes": "sheet",
+    "invoice.crosscheck": "sheet",
+    "admin.byperson": "sheet",
+    "admin.changes": "sheet",
+    "admin.expiry": "sheet",
+    "vision.table": "sheet",
+    "research.brief": "doc",
+    "wechat.rollcall": "sheet",
+    "wechat.missing": "sheet",
 }
 
 SHEET_EXT = {".xlsx", ".xls", ".xlsm", ".xlsb", ".ods", ".csv"}
@@ -392,14 +482,28 @@ def desktop_dirs() -> list[str]:
     """
     home = os.path.expanduser("~")
     if not home or home in ("/", ""):
-        return []
+        home = ""
     found: list[str] = []
-    bases = [home] + sorted(glob.glob(os.path.join(home, "OneDrive*")))
+    bases = ([home] if home else []) + sorted(glob.glob(os.path.join(home, "OneDrive*")))
     for base in bases:
         for name in ("Desktop", "桌面"):
             candidate = os.path.join(base, name)
             if os.path.isdir(candidate) and candidate not in found:
                 found.append(candidate)
+
+    # WSL 里跑普查时多一条：助手会把结果写成 **Windows 的**桌面路径
+    # （`C:\Users\…\Desktop\…`），而 Linux 侧看到的是 `/mnt/c/Users/…/Desktop`。
+    # 不把它算进来的话，文书/调研类卡片会统一变成「没有产出」的假失败，
+    # 而且文件真的留在人家桌面上没人收（#161 实测到的）。
+    if os.name == "posix" and os.path.isdir("/mnt/c/Users"):
+        skip = {"public", "default", "default user", "all users"}
+        for user_home in sorted(glob.glob("/mnt/c/Users/*")):
+            if os.path.basename(user_home).lower() in skip:
+                continue
+            for name in ("Desktop", "桌面", "OneDrive/Desktop", "OneDrive/桌面"):
+                candidate = os.path.join(user_home, name)
+                if os.path.isdir(candidate) and candidate not in found:
+                    found.append(candidate)
     return found
 
 
@@ -777,15 +881,20 @@ class Runner:
         self.sheets_bin = helper_argv("cante-sheets")
         self.pdf_bin = helper_argv("cante-pdf")
 
-    def prepare(self, card: dict, manifest: dict) -> dict:
+    def prepare(self, card: dict, manifest: dict, sample: int = 1) -> dict:
         """建好这一卡的独立目录，把输入拷贝进去。
 
         顺序很关键：先把输入拷进 run 目录，再用拷贝后的路径去生成提示词。
         如果提示词里写的是 fixture 的路径，助手就会把结果写在 fixture 旁边——
         既污染了公共 fixture，也让「原件有没有被动过」查不出来。
+
+        `sample` > 1 时用**另一个目录**（`<key>__s2`）：样本之间互不影响，
+        每一轮的产出都留着当证据（不覆盖上一轮）。提示词里的路径会不同（那是采样目录
+        的差别，不是场景的差别），报告里会写清样本数。
         """
         key = f"{card['id']}[{card['scenario']}]" if card.get("scenario") else card["id"]
-        run_dir = os.path.join(self.options.work, "runs", key.replace("[", "_").replace("]", ""))
+        suffix = "" if sample <= 1 else f"__s{sample}"
+        run_dir = os.path.join(self.options.work, "runs", key.replace("[", "_").replace("]", "") + suffix)
         if os.path.exists(run_dir):
             shutil.rmtree(run_dir)
         os.makedirs(run_dir)
@@ -812,6 +921,8 @@ class Runner:
         return {
             "card": card,
             "key": key,
+            "sample": sample,
+            "prompts_key": plan_key({"id": card["id"], "scenario": card.get("scenario"), "sample": sample}),
             "run_dir": run_dir,
             "home": home,
             "files": files,
@@ -831,7 +942,7 @@ class Runner:
         before_real = {desktop: set(walk_files(desktop)) for desktop in desktops}
         started = time.monotonic()
         started_wall = time.time()
-        record = self._drive(prompts[key]["prompt"], run_dir, prep["home"], prep["inputs"])
+        record = self._drive(prompts[prep["prompts_key"]]["prompt"], run_dir, prep["home"], prep["inputs"])
         elapsed = time.monotonic() - started
         # 文书类任务被要求存到「桌面」。macOS 与 Windows 上真实桌面都不认 HOME /
         # USERPROFILE 环境变量（系统照样给真桌面），助手有时会写到真桌面去；把这一
@@ -1344,6 +1455,13 @@ def resolve_cante_bin() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+def plan_key(item: dict) -> str:
+    """plan / prompts 的键：卡片 id（带场景），第 2 个及以后的样本加 `#N` 后缀。"""
+    base = f"{item['id']}[{item['scenario']}]" if item.get("scenario") else item["id"]
+    sample = int(item.get("sample") or 1)
+    return base if sample <= 1 else f"{base}#{sample}"
+
+
 def load_prompts(plan: list[dict], work: str) -> dict:
     plan_path = os.path.join(work, "plan.json")
     with open(plan_path, "w", encoding="utf-8") as handle:
@@ -1370,7 +1488,7 @@ def load_prompts(plan: list[dict], work: str) -> dict:
             f"bun prompts.ts 的输出不是 JSON（{error}）。前 400 字：\n"
             f"{result.stdout[:400]}\n--- stderr ---\n{result.stderr[:400]}"
         )
-    return {f"{item['id']}[{item['scenario']}]" if item.get("scenario") else item["id"]: item for item in entries}
+    return {plan_key(item): item for item in entries}
 
 
 VERDICT_LABEL = {
@@ -1401,6 +1519,8 @@ def render_environment(options, extra_lines: list[str] | None = None) -> list[st
         f"- 结果包（--zip）：{zip_path}",
         f"- 单卡上限（--timeout）：{human_time(getattr(options, 'timeout', DEFAULT_TIMEOUT))}"
         f"；卡住判据（--stall-timeout）：{human_time(getattr(options, 'stall_timeout', DEFAULT_STALL_TIMEOUT))}",
+        f"- 每张卡样本数（--samples）：{max(1, int(getattr(options, 'samples', 1) or 1))}"
+        "（一次样本分不清「回归」与「波动」，所以同一张卡跑多次；不一致的会标出来）",
         "- 「卡住」（那么久一个事件都没有）与「超时到顶」（总时长到上限）是两类不同结论，不要混着看。",
         "- 计时用 time.monotonic()（单调时钟），不受系统对时 / 时区 / Windows 计时器精度影响。",
     ]
@@ -1428,19 +1548,57 @@ def render_report(results: list[dict], options, skipped_reason: str | None) -> s
     stopped = sum(1 for item in results if item["verdict"] == "stopped")
     timed_out = sum(1 for item in results if item["verdict"] == "timeout_output")
     failed = sum(1 for item in results if item["verdict"] == "failed")
+    samples = max(1, int(getattr(options, "samples", 1) or 1))
+    total_runs = sum(int(item.get("sample_count") or 1) for item in results)
+    wobbly = [item for item in results if item.get("unstable")]
     lines.append(
         f"一共跑了 {len(results)} 张卡：通过 {passed}，超时但有产出 {timed_out}，"
         f"停下问问题 {stopped}，失败 {failed}。"
     )
+    lines.append(
+        f"样本：每张卡 {samples} 次，共 {total_runs} 次运行；"
+        f"**两次结论不一样的卡 {len(wobbly)} 张**"
+        + (f"（{'、'.join(item['key'] for item in wobbly)}）" if wobbly else "。")
+    )
+    if wobbly:
+        lines.append("")
+        lines.append("结论不一致说明这些卡的结果在样本之间会变——**不要拿单次结果当回归**。")
     lines.append("")
     lines.append("模型：" + os.environ.get("CANTE_SWEEP_MODEL", DEFAULT_MODEL))
     lines.append("")
-    lines.append("| 卡 | 结论 | 耗时 | 工具调用 | 产出 |")
-    lines.append("| --- | --- | --- | --- | --- |")
+    fixture_status = getattr(options, "fixture_status", None) or {}
+    fixtures = fixture_status.get("fixtures") or {}
+    if fixtures:
+        missing = [key for key, info in fixtures.items() if info.get("status") != "complete"]
+        deps = fixture_status.get("dependencies") or []
+        dep_line = "、".join(
+            f"{item.get('module')}（{item.get('purpose')}）" for item in deps if item.get("status") == "ok"
+        ) or "（生成器没报依赖，可能用的是 --no-fixtures）"
+        lines.append(f"夹具：共 {len(fixtures)} 份，**完整 {len(fixtures) - len(missing)} 份，缺依赖 {len(missing)} 份**。")
+        lines.append(f"夹具生成器用到的依赖：{dep_line}。")
+        lines.append("")
+        lines.append("| 夹具 | 状态 | 文件 |")
+        lines.append("| --- | --- | --- |")
+        for key in sorted(fixtures):
+            info = fixtures[key]
+            mark = "完整" if info.get("status") == "complete" else f"缺依赖（{info.get('status')}）"
+            lines.append(f"| {key} | {mark} | {info.get('path', '')} |")
+        lines.append("")
+    lines.append("| 卡 | 结论 | 样本 | 波动 | 耗时 | 工具调用 | 产出 |")
+    lines.append("| --- | --- | --- | --- | --- | --- | --- |")
     for item in results:
         produced = "、".join(os.path.basename(x) for x in item["created"]) or "（无）"
+        sample_list = item.get("samples") or []
+        count = int(item.get("sample_count") or len(sample_list) or 1)
+        if len(sample_list) > 1:
+            seen = " / ".join(VERDICT_LABEL.get(x.get("verdict"), str(x.get("verdict"))) for x in sample_list)
+            wobble = "**不一致**" if item.get("unstable") else "一致"
+        else:
+            seen = VERDICT_LABEL.get(item["verdict"], item["verdict"])
+            wobble = "单次样本"
         lines.append(
             f"| {item['key']} | {VERDICT_LABEL.get(item['verdict'], item['verdict'])} | "
+            f"{count}（{seen}） | {wobble} | "
             f"{human_time(item['elapsed'])} | {item['tool_starts']} | {produced} |"
         )
     lines.append("")
@@ -1454,6 +1612,18 @@ def render_report(results: list[dict], options, skipped_reason: str | None) -> s
         lines.append(f"- 耗时：{human_time(item['elapsed'])}；工具调用 {item['tool_starts']} 次"
                      f"（失败 {item['tool_failed']}，被拒 {item['tool_denied']}，审批暂停 {item['pauses']} 次）")
         lines.append(f"- 结论：{item['evidence']}")
+        sample_list = item.get("samples") or []
+        if len(sample_list) > 1:
+            lines.append("- 各次样本（同一条提示词、各自一份输入、分开跑）：")
+            for entry in sample_list:
+                verdict_text = VERDICT_LABEL.get(entry.get("verdict"), str(entry.get("verdict")))
+                produced = "、".join(os.path.basename(x) for x in (entry.get("created") or [])) or "（无）"
+                lines.append(
+                    f"    - 第 {entry.get('sample')} 次：{verdict_text}，{human_time(entry.get('elapsed', 0))}，"
+                    f"工具 {entry.get('tool_starts', 0)} 次，产出 {produced}"
+                )
+            if item.get("unstable"):
+                lines.append("    - ⚠️ 两次结论不一样：**这属于波动，不是回归**（要看提示词与输入是否真的有变化）。")
         if item["errors"]:
             lines.append(f"- 错误事件：{'；'.join(item['errors'][:3])}")
         if item["stderr"]:
@@ -1790,6 +1960,12 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument("--report", default=os.path.join(HERE, "report.md"), help="报告写到哪")
     parser.add_argument("--no-fixtures", action="store_true", help="不重新生成 fixture")
+    parser.add_argument(
+        "--samples",
+        type=int,
+        default=env_seconds("SWEEP_SAMPLES", 1),
+        help="每张卡跑几次样本（默认 1；≥ 2 才能区分「回归」与「波动」）",
+    )
     parser.add_argument("--list", action="store_true", help="列出所有卡并退出")
     parser.add_argument("--render-only", action="store_true", help="不跑，只拿 work/results.json 重写报告")
     parser.add_argument(
@@ -1900,12 +2076,27 @@ def main(argv: list[str]) -> int:
     fixtures_root = os.path.join(options.work, "fixtures")
     manifest_path = os.path.join(options.work, "manifest.json")
     if not options.no_fixtures or not os.path.isdir(fixtures_root):
-        manifest = generate.generate(fixtures_root)
+        try:
+            manifest = generate.generate(fixtures_root)
+        except generate.MissingFixtureDependency as error:
+            # #161：夹具缺依赖**不许静默降级**。停下、把缺什么说清楚、出一份说明报告。
+            print(str(error), file=sys.stderr)
+            options.fixture_status = {"fixtures": {}, "dependencies": [], "failed": str(error)}
+            report = render_report([], options, f"夹具缺依赖，本次没真跑：{error}")
+            with open(options.report, "w", encoding="utf-8") as handle:
+                handle.write(report)
+            print(report)
+            return 2
         with open(manifest_path, "w", encoding="utf-8") as handle:
             json.dump(manifest, handle, ensure_ascii=False, indent=2)
     else:
         print("复用已有的 fixture（--no-fixtures）")
         manifest = load_json(manifest_path)
+
+    # 每份夹具是「完整」还是「缺依赖」——写进报告，免得以后又出现
+    # 「夹具随环境偷偷退化、看起来却像产品变好了」（#161 的教训）。
+    status_path = os.path.join(fixtures_root, "fixture-status.json")
+    options.fixture_status = load_json(status_path) if os.path.exists(status_path) else {"fixtures": {}, "dependencies": []}
 
     runner = Runner(options)
     print(f"守护进程：{' '.join(runner.bin)}", flush=True)
@@ -1924,18 +2115,24 @@ def main(argv: list[str]) -> int:
 
     # 先把每张卡的输入拷进各自的目录，再用拷贝后的路径生成提示词——顺序反了，
     # 助手就会把结果写在公共 fixture 旁边。
-    prepared = [runner.prepare(card, manifest) for card in selected]
+    # 采样：每张卡跑 `samples` 次（#161：一次样本分不清「回归」与「波动」）。
+    samples = max(1, int(getattr(options, "samples", 1) or 1))
+    prepared_cards = [
+        [runner.prepare(card, manifest, sample=index) for index in range(1, samples + 1)]
+        for card in selected
+    ]
     plan = []
-    for prep in prepared:
-        card = prep["card"]
-        entry = {"id": card["id"], "instruction": card["instruction"]}
-        if card.get("scenario"):
-            entry["scenario"] = card["scenario"]
-        if prep["folder"]:
-            entry["folder"] = prep["folder"]
-        if prep["files"]:
-            entry["files"] = prep["files"]
-        plan.append(entry)
+    for row in prepared_cards:
+        for prep in row:
+            card = prep["card"]
+            entry = {"id": card["id"], "instruction": card["instruction"], "sample": prep["sample"]}
+            if card.get("scenario"):
+                entry["scenario"] = card["scenario"]
+            if prep["folder"]:
+                entry["folder"] = prep["folder"]
+            if prep["files"]:
+                entry["files"] = prep["files"]
+            plan.append(entry)
 
     prompts = load_prompts(plan, options.work)
 
@@ -1962,38 +2159,65 @@ def main(argv: list[str]) -> int:
                 order.append(item)
         return order
 
-    for prep in prepared:
-        key = prep["key"]
-        card = prep["card"]
-        print(f"==> {key}", flush=True)
-        try:
-            result = runner.run_card(prep, prompts)
-        except Exception as error:  # noqa: BLE001
-            import traceback
+    for row in prepared_cards:
+        card = row[0]["card"]
+        key = row[0]["key"]
+        # 重跑同一张卡时，把上一轮的样本丢掉，别和这一轮混在一起。
+        accumulated.pop(key, None)
+        sample_summaries: list[dict] = []
+        first: dict | None = None
+        for prep in row:
+            label = key if len(row) == 1 else f"{key}（样本 {prep['sample']}/{len(row)}）"
+            print(f"==> {label}", flush=True)
+            try:
+                result = runner.run_card(prep, prompts)
+            except Exception as error:  # noqa: BLE001
+                import traceback
 
-            traceback.print_exc()
-            result = {
-                "key": key,
-                "title": card["id"],
-                "group": "",
-                "elapsed": 0,
-                "tool_starts": 0,
-                "tool_failed": 0,
-                "tool_denied": 0,
-                "pauses": 0,
-                "errors": [str(error)],
-                "stderr": [],
-                "created": [],
-                "changed": [],
-                "moved": [],
-                "lost": [],
-                "verdict": "failed",
-                "evidence": f"普查脚本自己出错：{error}",
-                "last_message": "",
-                "run_dir": "",
-            }
-        print(f"    {VERDICT_LABEL.get(result['verdict'], result['verdict'])}：{result['evidence'][:120]}", flush=True)
-        accumulated[key] = result
+                traceback.print_exc()
+                result = {
+                    "key": key,
+                    "title": card["id"],
+                    "group": "",
+                    "elapsed": 0,
+                    "tool_starts": 0,
+                    "tool_failed": 0,
+                    "tool_denied": 0,
+                    "pauses": 0,
+                    "errors": [str(error)],
+                    "stderr": [],
+                    "created": [],
+                    "changed": [],
+                    "moved": [],
+                    "lost": [],
+                    "verdict": "failed",
+                    "evidence": f"普查脚本自己出错：{error}",
+                    "last_message": "",
+                    "run_dir": "",
+                }
+            print(f"    {VERDICT_LABEL.get(result['verdict'], result['verdict'])}：{result['evidence'][:120]}", flush=True)
+            sample_summaries.append(
+                {
+                    "sample": prep["sample"],
+                    "verdict": result.get("verdict"),
+                    "elapsed": result.get("elapsed", 0),
+                    "tool_starts": result.get("tool_starts", 0),
+                    "evidence": result.get("evidence", ""),
+                    "last_message": result.get("last_message", ""),
+                    "created": list(result.get("created") or []),
+                    "errors": list(result.get("errors") or []),
+                    "run_dir": result.get("run_dir", ""),
+                }
+            )
+            if first is None:
+                first = result
+        assert first is not None
+        # 主结果用第一个样本（报告里旧字段不变），样本明细放在 samples 里。
+        verdicts = [item["verdict"] for item in sample_summaries]
+        first["samples"] = sample_summaries
+        first["sample_count"] = len(sample_summaries)
+        first["unstable"] = len(set(verdicts)) > 1
+        accumulated[key] = first
         with open(results_path, "w", encoding="utf-8") as handle:
             json.dump(accumulated, handle, ensure_ascii=False, indent=2)
 

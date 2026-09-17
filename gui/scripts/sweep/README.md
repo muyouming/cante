@@ -52,6 +52,23 @@ powershell -ExecutionPolicy Bypass -File gui\scripts\task-sweep.ps1 excel.diff
 5. **写报告**：`report.md` 一张卡一行结论（通过 / 停下问问题 / 失败），失败的给出
    可操作证据；`notes.md`（若存在）里的结论会被原样附在证据后面。
 
+## 夹具：缺依赖就**大声失败**（不静默降级）
+
+夹具生成器（`gui/fixtures/sweep/generate.py`）要两个第三方依赖，**缺一个就非零退出**，
+不会生成一份“看起来一样”的假夹具：
+
+| 依赖 | 用来生成 | 装它 |
+| --- | --- | --- |
+| `pypdf` | 加密 PDF（`pdf.merge` 的「加密材料」场景） | `python3 -m pip install pypdf` |
+| `Pillow` | 表格照片（`vision.table` 的截图输入） | `python3 -m pip install pillow` |
+
+为什么这么严：以前 `encrypt_pdf()` 在没装 pypdf 时只是 `return False`，那份「加密材料.pdf」
+就**根本没加密**——同一个场景在不同机器上不是同一份夹具，看起来却像“产品变好了”
+（`gui/SWEEP-0.2.1.md` 就记了这个假象）。现在会让整轮停下并把缺什么写清楚；
+报告里也有一节列出**每份夹具是完整还是缺依赖**，以及实际用了哪几个依赖。
+
+只想查依赖不想生成：`python3 gui/fixtures/sweep/generate.py --check-deps`。
+
 ## 依赖与降级
 
 * `python3`（**3.10+**）与 `bun` 必须有：提示词一律由 `prompts.ts` 调产品自己的
