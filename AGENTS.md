@@ -97,6 +97,16 @@ result = subprocess.run(..., timeout=60)   # python
 
 报告里 **"超时" 与 "确认没有" 必须分开写**——把"没等到结果"写成"没有"，是我们最怕的那种错。
 
+### 5.5 在新 worktree 里跑测试，必须用 `e2e.sh`（它会 `bun install`）
+
+我一天里犯了两次同一个错 ✗：在新 worktree 里直接 `bun test src` → 报一堆红，
+**其实是依赖没装全** ✗（例如 `Cannot find module 'react/jsx-dev-runtime'`）——
+差一点就把一个**其实是绿的**改动判成红的、或者反过来去"修"一个不存在的问题 ✗。
+
+**规矩**：新 worktree 里的第一件事是 `bash gui/scripts/e2e.sh` ✓（它是 7 步，第 2 步就是 `bun install` ✓）。
+要单跑某个测试文件，先跑过一次 `e2e.sh` ✓ 或 `cd gui && bun install` ✓。
+**判"红"之前先问**：这是产品的问题，还是我没装东西 ✗？
+
 ## 6. Windows 的特殊事实（很重要）
 
 - 上游 `cante`/`ante` **只有 macOS 与 Linux 构建**（官方 README：Windows 建议用 WSL）。所以**Windows 原生跑不了真实任务**：应用会去找 `cante`（`CANTE_BIN` 或 PATH），找不到就没有会话。
