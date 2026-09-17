@@ -32,6 +32,9 @@ import QuestionSheet from "./QuestionSheet.tsx";
 import { markFocusLayer } from "./FocusLayer.tsx";
 import ResultCard from "./ResultCard.tsx";
 import ErrorView from "./ErrorView.tsx";
+// #140 — store 的「选文件窗口打不开」在这里说；「出错」那条交给 ErrorView。
+import Notice from "./Notice.tsx";
+import { PICK_KINDS } from "./copy-notice.ts";
 
 /**
  * The store members this screen needs, on top of the frozen `Store`.
@@ -549,6 +552,9 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
               </Show>
             </div>
 
+            {/* #140 — 选文件的窗口没打开时，就在她点按钮的这一步说清楚还能怎么选。 */}
+            <Notice text={store.notice()} kinds={PICK_KINDS} class="mt-4" />
+
             <Show when={selection().length > 0}>
               <ul class="mt-4 divide-y divide-slate-800 rounded-lg border border-slate-800">
                 <For each={selection()}>
@@ -830,7 +836,7 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
         <Show when={step() === "error" ? shownRun() : null}>
           {(run) => (
             <section class="mx-auto max-w-2xl">
-              <ErrorView error={run().error ?? UNKNOWN_ERROR} />
+              <ErrorView error={run().error ?? UNKNOWN_ERROR} notice={store.notice()} />
               <div class="mt-6 flex items-center gap-3">
                 <button type="button" class={button} onClick={() => void plan()}>
                   再试一次

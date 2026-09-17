@@ -32,6 +32,9 @@ import type { TaskRun } from "./tasks/index.ts";
 import { verifyResultFiles, type Verification } from "./verify.ts";
 import type { Store } from "../store.ts";
 import { errorText, invoke } from "../tauri.ts";
+// #140 — store 的「撤销」结果在这里说：成功 / 只放回去一部分 / 一个都没放回去。
+import Notice from "./Notice.tsx";
+import { UNDO_KINDS, noticeView } from "./copy-notice.ts";
 
 export interface ResultCardProps {
   store: Store;
@@ -101,6 +104,12 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
   const lastText = () => lastAgentText(props.store.rows()) ?? "";
   const producedFiles = () => run()?.result?.files.length ?? 0;
   const asking = () => show() && endedWithQuestion(lastText(), producedFiles());
+  // #140 — 刚撤销完的那句话由上面的 Notice 来说；这条状态标签只在她没有那句话时
+  // 挂着（例如程序重开、从记录里读回「已撤销」，那时没有提示可显示）。
+  const undoNoticeShown = (): boolean => {
+    const view = noticeView(props.store.notice());
+    return view !== null && UNDO_KINDS.includes(view.kind);
+  };
 
   // 信任层：运行结束后，拿它声称产出的文件再问本机一次（verify.ts）。结论分三种：
   // 都在能打开 / 它说有却找不到 / 没能核对。核对没做成时绝不假装核对过。
@@ -640,6 +649,9 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
           </section>
         </Show>
 
+        {/* #140 — 撤销的结果就在这里说：三种结果三句话，撤销失败时绝不说「已撤回」。 */}
+        <Notice text={props.store.notice()} kinds={UNDO_KINDS} />
+
         <footer class="flex flex-wrap items-center justify-end gap-3">
           <Show when={changed() && run()?.undone !== true}>
             <button
@@ -653,7 +665,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
               一键撤销（还原成动手前）
             </button>
           </Show>
-          <Show when={run()?.undone === true}>
+          <Show when={run()?.undone === true && !undoNoticeShown()}>
             <span class="rounded-xl border border-emerald-700 bg-emerald-950/40 px-4 py-2 text-[16px] text-emerald-200">
               已经撤销，文件都放回去了。
             </span>

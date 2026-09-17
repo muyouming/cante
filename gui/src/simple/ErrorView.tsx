@@ -22,10 +22,19 @@ import type { JSX } from "solid-js";
 import { COMMON, ERROR_VIEW, explainError } from "./copy.ts";
 import { actionsFor, causeOf } from "./recovery.ts";
 import type { RecoveryAction, RecoveryContext } from "./recovery.ts";
+// #140 — store 的「出错」那条原话在这里有个真出口：能认出具体原因（正被占用、
+// 没权限……）就翻成中文说在出错页上；认不出来的由本页自己的 what/how 说。
+import Notice from "./Notice.tsx";
+import { ERROR_KINDS } from "./copy-notice.ts";
 
 export interface ErrorViewProps {
   /** Anything thrown below: a string, an Error, or a `TaskRun.error`. */
   error: unknown;
+  /**
+   * #140 — store 的 notice 原话（出错时写的那句）。能认出具体原因时，用它在这里
+   * 补一条平实中文；认不出来就不显示，免得和本页自己的说明重复。
+   */
+  notice?: string | null;
   onRetry?(): void;
   onAlternative?(): void;
   /** Called after the detail was copied (for analytics/history, optional). */
@@ -157,6 +166,10 @@ export default function ErrorView(props: ErrorViewProps): JSX.Element {
             {COMMON.copyFailed}
           </p>
         </Show>
+
+        {/* #140 — store 的那句原始错误能认出来时，在这里补一句平实中文；认不出来
+            或和本页说的同一句就不再重复。 */}
+        <Notice text={props.notice} kinds={ERROR_KINDS} alreadySaid={[human().what]} class="mt-5" />
 
         <Show when={human().detail}>
           <details class="mt-5 rounded-xl border border-slate-800 bg-[#0e141b] px-4 py-3">
