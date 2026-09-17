@@ -94,8 +94,15 @@ export default function ErrorView(props: ErrorViewProps): JSX.Element {
     actionsFor({ ...human(), cause: causeOf(props.error) }, props.context);
 
   async function onCopy(): Promise<void> {
+    // #175 走查：原来复制出去的只有程序那一行原文（`provider error: HTTP 429 Too Many
+    // Requests`，42 字节 ✗）—— 她要转给技术同事，而同事拿到这条会问"这是啥" ✗。
+    // 这几行都在手边，补上：哪个程序、哪件事、什么时候，然后才是原文。
+    const when = new Date().toLocaleString("zh-CN", { hour12: false });
     const detail = human().detail || `${human().what}\n${human().how}`;
-    const ok = await copyText(detail);
+    const lines: string[] = [ERROR_VIEW.detailHeader];
+    if (props.context?.title) lines.push(`${ERROR_VIEW.detailTask}${props.context.title}`);
+    lines.push(`${ERROR_VIEW.detailWhen}${when}`, "", detail);
+    const ok = await copyText(lines.join("\n"));
     setCopied(ok);
     setCopyFailed(!ok);
     if (ok) props.onCopied?.();

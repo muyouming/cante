@@ -836,7 +836,14 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
         <Show when={step() === "error" ? shownRun() : null}>
           {(run) => (
             <section class="mx-auto max-w-2xl">
-              <ErrorView error={run().error ?? UNKNOWN_ERROR} notice={store.notice()} />
+              <ErrorView
+                  error={run().error ?? UNKNOWN_ERROR}
+                  notice={store.notice()}
+                  /* #175 走查：这一行原来没传 context，于是 recovery 永远走 default 分支
+                     —— 写请假条（一个文件都没用）失败了也让她"重新选一次文件" ✗。
+                     传上去之后，文书/微信族会变成"换一种说法"。 */
+                  context={{ needs: props.task.needs, title: props.task.title }}
+                />
               <div class="mt-6 flex items-center gap-3">
                 <button type="button" class={button} onClick={() => void plan()}>
                   再试一次

@@ -258,6 +258,22 @@ export default function Wizard(props: WizardProps): JSX.Element {
                       {problem()}
                       <Show when={bridgeMissing()}> {WIZARD.notReadyBody}</Show>
                     </p>
+                    {/* #175 走查：这一支原来只有两行字，而上面那句写着「点「复制详情」…」
+                        —— 屏幕上却没有这个按钮。这一支正是 Windows 上「文件在、起不来」
+                        （杀软拦、缺运行库）会走到的形态，所以这里补上同一个动作，
+                        而不是把那句承诺改弱。 */}
+                    <button
+                      type="button"
+                      onClick={() => void onCopyDaemon()}
+                      class="mt-4 min-h-[48px] w-full rounded-xl border border-slate-700 px-6 text-[17px] text-slate-200 hover:border-slate-500"
+                    >
+                      {daemonCopied() ? COMMON.copied : WIZARD.copyDetailLabel}
+                    </button>
+                    <Show when={daemonCopyFailed()}>
+                      <p class="mt-2 text-[16px] text-amber-400" role="alert">
+                        {WIZARD.copyDetailFailed}
+                      </p>
+                    </Show>
                   </>
                 }
               >

@@ -92,3 +92,24 @@ describe("a batch of calls", () => {
     expect(describeApproval([])).toEqual([]);
   });
 });
+
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const read = (name: string): string => readFileSync(join(HERE, name), "utf8");
+
+describe("#175 审批卡里不许夹她看不懂的英文", () => {
+  test("助手那句原话只在「详情」里，正文只有中文事实", () => {
+    const src = read("ApprovalSheet.tsx");
+    const raw = src.indexOf("{message()}");
+    const deny = src.indexOf("APPROVAL.deny");
+    expect(raw, "审批卡里找不到那句原话的渲染").toBeGreaterThan(-1);
+    expect(
+      raw > deny,
+      "那句原话渲染在按钮之前 —— 它会出现在「要不要允许它继续」的正中间（#175 抓到的 Allow? ✗）。",
+    ).toBe(true);
+    expect(src).toContain("APPROVAL.rawLabel");
+  });
+});

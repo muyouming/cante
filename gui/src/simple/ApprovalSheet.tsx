@@ -62,10 +62,6 @@ export default function ApprovalSheet(props: ApprovalSheetProps): JSX.Element {
         <h2 class="text-[22px] font-bold text-amber-100">{APPROVAL.title}</h2>
         <p class="mt-2 text-[17px] leading-relaxed text-amber-200">{APPROVAL.lead(tools().length)}</p>
 
-        <Show when={message()}>
-          <p class="mt-2 text-[16px] leading-relaxed text-amber-200/80">{message()}</p>
-        </Show>
-
         <Show
           when={described().length > 0}
           fallback={<p class="mt-4 text-[16px] text-amber-200">{APPROVAL.nothingToShow}</p>}
@@ -136,6 +132,15 @@ export default function ApprovalSheet(props: ApprovalSheetProps): JSX.Element {
                 )}
               </For>
             </ul>
+            {/* #175 走查：原话原来渲染在正文里，会在"要不要允许它继续"这一屏中间
+                夹一句英文。放到这里——她点头/不点头时，屏幕上没有一个她看不懂的句子。 */}
+            <Show when={message()}>
+              <p class="mt-2 text-[16px] leading-relaxed text-amber-200/80">
+                <span class="font-semibold">{APPROVAL.rawLabel}</span>
+                <br />
+                <span class="font-mono break-all">{message()}</span>
+              </p>
+            </Show>
           </Show>
         </Show>
       </section>

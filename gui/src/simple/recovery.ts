@@ -55,6 +55,8 @@ export interface RecoveryError {
 /** 这件事本来需要什么。缺省按「需要文件」处理，也就是原来的「换个方法」。 */
 export interface RecoveryContext {
   needs?: "files" | "folder" | "none" | "text";
+  /** 这件事叫什么（#175：复制详情时要带上，技术同事才知道是哪件活出的错）。 */
+  title?: string;
 }
 
 /** 文案模块的公共形状，避免在两个文件里各写一遍。 */
