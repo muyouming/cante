@@ -122,9 +122,15 @@ const SPACE = /no space left|disk full|\bENOSPC\b|not enough space|磁盘空间|
 const IMAGE =
   /图片|照片|截图|相片|image|\.(png|jpe?g|bmp|webp|gif|tiff?|heic|heif|avif)\b|\bocr\b|识别不出|认不出|看不清|读不出.{0,10}(字|文字)|不能读.{0,6}图片/i;
 
-/** 连不上网 / 服务方不可用。 */
+/**
+ * 连不上网 / 服务方不可用。
+ *
+ * `connection error` 这一串是断网时真正会到这里的原文：动手的组件报的是
+ * headline=Connection error.（没有 details），旧写法只认 `connection refused`，
+ * 于是她拿到的是「重新选一次文件」——网络断了和她的文件毫无关系。（真机验过）
+ */
 const NETWORK =
-  /\b(ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNABORTED)\b|connection refused|network (is )?unreachable|fetch failed|socket hang ?up|getaddrinfo|\boffline\b|连接被拒绝|网络(断了|不通|异常)|连不上|服务方.{0,10}(不可用|连不上|没响应)|暂不可用|temporarily unavailable|\b50[234]\b|rate limit|quota/i;
+  /\b(ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNABORTED)\b|connection (refused|error|failed|reset)|cannot connect|can.?t connect|failed to connect|unable to connect|connect error|network (is )?unreachable|network error|no internet|fetch failed|socket hang ?up|getaddrinfo|\boffline\b|连接被拒绝|网络(断了|不通|异常)|连不上|服务方.{0,10}(不可用|连不上|没响应)|暂不可用|temporarily unavailable|\b50[234]\b|rate limit|quota/i;
 
 /** 账号 / 密钥没配好。 */
 const AUTH =
