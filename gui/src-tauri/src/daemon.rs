@@ -573,7 +573,7 @@ pub fn split_binary(spec: &str) -> (String, Vec<String>) {
 /// `program` plus the exact arguments to spawn the daemon with.
 ///
 /// A spec that already names the subcommand keeps the one the user wrote instead
-/// of getting a second one: `wsl.exe -e /home/win11/cante-bin/ante serve` runs
+/// of getting a second one: `wsl.exe -e /home/<user>/cante-bin/ante serve` runs
 /// `ante serve`, not `ante serve serve`. A spec whose command line lives in a
 /// shell payload (`bash -lc '<the whole command>'`) is passed through
 /// untouched — the payload *is* the command line, and an extra `serve` would
@@ -591,8 +591,8 @@ pub fn serve_argv(spec: &str) -> (String, Vec<String>) {
 ///
 /// Those are not accepted after `serve` (`ante serve --version` is not a
 /// thing), so a `serve` the spec names is dropped and `extra` takes its place:
-/// `wsl.exe -e /home/win11/cante-bin/ante serve` + `--version` runs
-/// `wsl.exe -e /home/win11/cante-bin/ante --version`. A spec without `serve`
+/// `wsl.exe -e /home/<user>/cante-bin/ante serve` + `--version` runs
+/// `wsl.exe -e /home/<user>/cante-bin/ante --version`. A spec without `serve`
 /// (the fixture's `bun <script>`) is unchanged.
 ///
 /// This is what makes the WSL bridge shippable at all: `health` needs a version

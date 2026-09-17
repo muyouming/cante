@@ -22,6 +22,10 @@ import { QUEUE } from "./copy-queue.ts";
 import { describeQueue, nextWaiting, queueSummary } from "./queue.ts";
 import { LIBRARY } from "./copy-library.ts";
 import { describe as describeSchedule } from "./schedule.ts";
+// r17 — 结果文件散在原文件旁边，「上次那张表在哪」需要在首页有个答案。
+import { RESULTS } from "./copy-results.ts";
+import { resultCount } from "./results.ts";
+import ResultsPanel from "./ResultsPanel.tsx";
 import TaskCard from "./TaskCard.tsx";
 import TaskLibrary from "./TaskLibrary.tsx";
 import type { Store } from "../store.ts";
@@ -43,6 +47,8 @@ export default function Home(props: HomeProps): JSX.Element {
   const [adminOpen, setAdminOpen] = createSignal(false);
   // #74 — the ability centre is a local overlay; the shell does not need to know.
   const [libraryOpen, setLibraryOpen] = createSignal(false);
+  // r17 — 同上：这是首页自己开的一层「我做的结果」。
+  const [resultsOpen, setResultsOpen] = createSignal(false);
   // The shell's store, required: a fallback here would be a second store, and a
   // store opens its own connection to the daemon.
   const store = (): Store => props.store;
@@ -207,6 +213,22 @@ export default function Home(props: HomeProps): JSX.Element {
             </section>
           </Show>
 
+          {/* r17 — 结果文件按规矩留在原文件旁边，所以她需要一个地方把做过的东西
+              找回来：文件名、来自哪件事、什么时候做的、现在还在不在。 */}
+          <div class="mt-6 flex flex-col gap-3 rounded-2xl border border-emerald-800 bg-emerald-950/20 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 class="text-[20px] font-semibold text-slate-100">{RESULTS.entryTitle}</h2>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-400">{RESULTS.entryBody}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setResultsOpen(true)}
+              class="min-h-[52px] shrink-0 rounded-xl bg-emerald-600 px-6 text-[18px] font-semibold text-white hover:bg-emerald-500"
+            >
+              {RESULTS.entryButton(resultCount(store().runs()))}
+            </button>
+          </div>
+
           {/* #74 — 除了下面几张常用卡片，还能按「想做的事」去整个任务库搜。 */}
           <div class="mt-6 flex flex-col gap-3 rounded-2xl border border-sky-800 bg-sky-950/30 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
@@ -320,6 +342,11 @@ export default function Home(props: HomeProps): JSX.Element {
           </Show>
         </form>
       </div>
+
+      {/* r17 — 全屏的「我做的结果」。打开文件/文件夹都走 store，面板自己不碰桥接。 */}
+      <Show when={resultsOpen()}>
+        <ResultsPanel store={store()} onClose={() => setResultsOpen(false)} />
+      </Show>
 
       {/* #74 — 全屏的任务库。挑中一张卡片就关掉它，交给原来的任务流程。 */}
       <Show when={libraryOpen()}>

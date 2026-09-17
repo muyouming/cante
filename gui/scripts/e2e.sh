@@ -14,7 +14,8 @@ source "$here/toolchain.sh"
 
 cd "$gui_root"
 
-total=6
+# 步骤总数（加/删步骤时改这里；它只影响最后那行统计的显示）
+total=7
 current=0
 
 step() {
@@ -28,6 +29,9 @@ step() {
   fi
 }
 
+# 秘密扫描放最前面：几秒钟就出结果，越早拦住越省事（CI 里也是第一步）。
+# 之所以本地也要跑：本地判据必须与 CI 一致——"本地绿、CI 红"我们已经踩过。
+step "secret scan" bash scripts/secret-scan.sh
 step "bun install" bun install
 step "bun test src" bun test src
 step "bunx tsc --noEmit" bunx tsc --noEmit
