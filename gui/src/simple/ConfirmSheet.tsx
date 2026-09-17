@@ -24,6 +24,7 @@ import {
   visionFallbackNote,
 } from "./capabilities.ts";
 import { FORMAT_COPY, hasExcelFile, hasImageFile, hasPdfFile } from "./copy-capability.ts";
+import { useFocusLayer } from "./FocusLayer.tsx";
 import { inspectSelection, nothingReadable as nothingReadableVerdict } from "./format-check.ts";
 import { evidenceFor, failureFor } from "./evidence.ts";
 import { fileName, folderName, hasActiveRisk, planRisks } from "./run.ts";
@@ -80,22 +81,18 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
     return now.kind === "ok" ? [] : now.blocked;
   };
 
-  function focusCancel(element: HTMLButtonElement): void {
-    cancelButton = element;
-    queueMicrotask(() => {
-      // Only steal focus if nothing else claimed it (e.g. a dialog opened).
-      if (document.activeElement === document.body) element.focus();
-    });
-  }
+  // MUST-ANSWER：这张纸不响应 Esc（也不响应点背板）。原因写在 FocusLayer.tsx 的
+  // 文件头：这是破坏性动作之前唯一的门，「取消」就在屏幕上、而且打开时就落在它上面
+  // ——顺手按 Esc 让整页消失，她就没法确定那件事到底开始了没有。
+  const layer = useFocusLayer({
+    open: () => run()?.state === "preview",
+    // 打开时焦点在「取消」上：产品律要的默认答案是安全的那一个。
+    initialFocus: () => cancelButton,
+  });
 
   return (
     <Show when={run()?.state === "preview"}>
-      <div
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-        onKeyDown={(event) => {
-          if (event.key === "Escape") props.store.cancelRun();
-        }}
-      >
+      <div ref={layer} class="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
         <section
           role="dialog"
           aria-modal="true"
@@ -317,7 +314,7 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
             </Show>
             <button
               type="button"
-              ref={focusCancel}
+              ref={(element: HTMLButtonElement) => (cancelButton = element)}
               onClick={() => props.store.cancelRun()}
               class="min-h-[52px] rounded-xl border border-slate-600 px-6 text-base font-semibold text-slate-200 hover:bg-slate-800"
             >

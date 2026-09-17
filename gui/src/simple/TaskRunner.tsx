@@ -27,6 +27,7 @@ import { formatElapsed, type RunProgressView } from "./progress.ts";
 import type { TaskDef, TaskError, TaskRun } from "./tasks/index.ts";
 import ApprovalSheet from "./ApprovalSheet.tsx";
 import ConfirmSheet from "./ConfirmSheet.tsx";
+import { markFocusLayer } from "./FocusLayer.tsx";
 import ResultCard from "./ResultCard.tsx";
 import ErrorView from "./ErrorView.tsx";
 
@@ -476,6 +477,37 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
         </For>
       </ol>
 
+      {/* r13 — 排队里的事：确认页开着的时候，这一条浮在它上面。
+
+          为什么浮在上面：确认页（ConfirmSheet）是整屏的一张纸，盖住整个窗口，
+          藏在它下面的东西她根本看不见。为什么钉在右上角：那张纸的按钮在右下角，
+          底部一条横条会正好压住「开始」。右上角这块地方在纸的标题右边、头几行
+          的右边，本来就是空的，压不到任何要她读的字和要她按的按钮。
+
+          两个按钮都不动手——真的动手仍然是她在那张纸上点「开始」。后面没有排
+          别的活时这一条不出现：那时没有"下一件"可跳，按钮就是个死按钮。
+
+          r20（键盘）：它和确认页是同时开着的两层，中间没有别的东西可去，所以两
+          层合起来算一个 Tab 循环（markFocusLayer，见 FocusLayer.tsx）。它排在确认
+          页前面，Tab 顺序就和眼睛看到的一样：先上面那一条，再那张纸。 */}
+      <Show when={step() === "confirm" && nextWaiting(store.queue()) !== null}>
+        <section
+          ref={markFocusLayer}
+          class="fixed top-4 right-4 z-[60] w-[21rem] max-w-[calc(100vw-2rem)] rounded-2xl border-2 border-sky-600 bg-slate-900/95 px-5 py-4 shadow-2xl"
+        >
+          <h2 class="text-[20px] font-semibold text-sky-100">{QUEUE.stripTitle}</h2>
+          <p class="mt-1 text-[16px] leading-relaxed text-slate-200">{queueLine()}</p>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" class={button} onClick={() => keepThisOne()}>
+              {QUEUE.doThisOne}
+            </button>
+            <button type="button" class={quietButton} onClick={() => skipThisOne()}>
+              {QUEUE.skipThisOne}
+            </button>
+          </div>
+        </section>
+      </Show>
+
       <div class="min-h-0 flex-1 overflow-y-auto px-5 py-5">
         <Show when={localError()}>
           <div class="mb-4 rounded-lg border border-amber-700/60 bg-amber-950/40 px-4 py-3 text-[16px] text-amber-100">
@@ -808,30 +840,6 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
           )}
         </Show>
       </div>
-
-      {/* r13 — 排队里的事：确认页开着的时候，这一条浮在它上面。
-
-          为什么浮在上面：确认页（ConfirmSheet）是整屏的一张纸，盖住整个窗口，
-          藏在它下面的东西她根本看不见。为什么钉在右上角：那张纸的按钮在右下角，
-          底部一条横条会正好压住「开始」。右上角这块地方在纸的标题右边、头几行
-          的右边，本来就是空的，压不到任何要她读的字和要她按的按钮。
-
-          两个按钮都不动手——真的动手仍然是她在那张纸上点「开始」。后面没有排
-          别的活时这一条不出现：那时没有"下一件"可跳，按钮就是个死按钮。 */}
-      <Show when={step() === "confirm" && nextWaiting(store.queue()) !== null}>
-        <section class="fixed top-4 right-4 z-[60] w-[21rem] max-w-[calc(100vw-2rem)] rounded-2xl border-2 border-sky-600 bg-slate-900/95 px-5 py-4 shadow-2xl">
-          <h2 class="text-[20px] font-semibold text-sky-100">{QUEUE.stripTitle}</h2>
-          <p class="mt-1 text-[16px] leading-relaxed text-slate-200">{queueLine()}</p>
-          <div class="mt-3 flex flex-wrap items-center gap-2">
-            <button type="button" class={button} onClick={() => keepThisOne()}>
-              {QUEUE.doThisOne}
-            </button>
-            <button type="button" class={quietButton} onClick={() => skipThisOne()}>
-              {QUEUE.skipThisOne}
-            </button>
-          </div>
-        </section>
-      </Show>
     </div>
   );
 }

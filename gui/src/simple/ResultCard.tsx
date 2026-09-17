@@ -424,7 +424,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
             <textarea
               id="run-reply"
               rows={3}
-              class="mt-2 min-h-[96px] w-full resize-y rounded-xl border border-slate-600 bg-slate-900/70 px-3 py-2 text-[16px] leading-relaxed text-slate-100 placeholder:text-slate-500 focus:border-sky-500 focus:outline-none"
+              class="mt-2 min-h-[96px] w-full resize-y rounded-xl border border-slate-600 bg-slate-900/70 px-3 py-2 text-[16px] leading-relaxed text-slate-100 placeholder:text-slate-500 focus:border-sky-500"
               placeholder={FOLLOWUP.placeholder}
               value={reply()}
               disabled={sending()}

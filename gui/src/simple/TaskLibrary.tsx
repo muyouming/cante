@@ -8,7 +8,7 @@
 //
 // 这个文件只管展示和搜索。真正的过滤/分组/边界判断都在 catalog.ts（纯逻辑，
 // 有单测），所有中文文案在 copy-library.ts。
-import { For, Show, createMemo, createSignal, onMount } from "solid-js";
+import { For, Show, createMemo, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
@@ -16,6 +16,7 @@ import { visibleTasks } from "./admin-config.ts";
 import { visionAvailable } from "./capabilities.ts";
 import { availabilityHint, groupTasks, searchTasks } from "./catalog.ts";
 import { LIBRARY } from "./copy-library.ts";
+import { useFocusLayer } from "./FocusLayer.tsx";
 import type { TaskDef } from "./tasks/index.ts";
 
 export interface TaskLibraryProps {
@@ -100,9 +101,12 @@ export default function TaskLibrary(props: TaskLibraryProps): JSX.Element {
   const [query, setQuery] = createSignal("");
   let searchInput: HTMLInputElement | undefined;
 
-  // 打开就落在搜索框上：这个页面的全部意义就是「用一句话找」。
-  onMount(() => {
-    queueMicrotask(() => searchInput?.focus());
+  // 打开就落在搜索框上：这个页面的全部意义就是「用一句话找」。焦点进得来、Tab 在
+  // 这一层里循环、Esc 关掉——三件事都在 FocusLayer 里做（别的浮层走同一条路）。
+  const layer = useFocusLayer({
+    open: () => true,
+    initialFocus: () => searchInput,
+    onEscape: () => props.onClose(),
   });
 
   const searching = () => query().trim().length > 0;
@@ -112,13 +116,11 @@ export default function TaskLibrary(props: TaskLibraryProps): JSX.Element {
 
   return (
     <div
+      ref={layer}
       class="fixed inset-0 z-50 flex flex-col bg-[#0b0f14]"
       role="dialog"
       aria-modal="true"
       aria-label={LIBRARY.title}
-      onKeyDown={(event) => {
-        if (event.key === "Escape") props.onClose();
-      }}
     >
       <header class="flex shrink-0 items-start justify-between gap-3 border-b border-slate-800 px-5 pt-5 pb-4 sm:px-8">
         <div>
