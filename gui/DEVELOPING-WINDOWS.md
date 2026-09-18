@@ -512,3 +512,26 @@ powershell -NoProfile -ExecutionPolicy Bypass -File gui\scripts\check-windows.ps
   要用后台跑，就用计划任务（每周普查就是这么做的 ✓）。
 - **磁盘要留余量**：`target\` + 安装包能吃掉十几 GB；C: 只剩 40 多 GB 时该清一清
   （`cargo clean` 或删旧的 `bundle\`）。
+
+## 在新机器上跑那条"驱动应用"的验收（2026-09-19 实测补三坑）
+
+`gui/scripts/windows/accept-drive.mjs` 是**最可靠的** Windows 验收方式 ✓（真开窗口、真点卡片、
+真走完一轮 ✓）。在新装的机器上，除了装 `tauri-driver` 与匹配版本的 `msedgedriver`，还要注意三件
+**都会让人误判成"产品坏了"** ✗ 的事：
+
+1. **必须用不提权的会话跑** ✗✗。仓库 README 早写过这条 ✓：WebView2 runtime 150+ **在提权进程里
+   会忽略 `WEBVIEW2_*` 环境变量** ✓，而 `msedgedriver` 正是靠它传调试端口 ✓ → 提权跑必然得到
+   `session not created: DevToolsActivePort file doesn't exist` ✓。
+   本机实测：提权（`RunLevel Highest`）→ **报错** ✗；改成 `RunLevel Limited` → **一次通过** ✓✓。
+2. **它需要一整套环境变量**（缺一个就报**误导性**的错误 ✗，比如"应用 不存在：（空）"）：
+   `ACCEPT_APP`（`cante-gui.exe` 的**绝对路径**）、`ACCEPT_MSEDGEDRIVER`、`ACCEPT_TAURI_DRIVER`、
+   `ACCEPT_WORKDIR`、`ACCEPT_INPUT`（输入表）、`ACCEPT_SCRIPT_DIR`、`ACCEPT_DIALOG_HELPER`
+   （`accept-file-dialog.ps1` —— 它负责填**原生**文件对话框 ✓）。
+   **`ACCEPT_ZERO_ENV=1` 与 `ACCEPT_CANTE_BIN`/`ACCEPT_PI_BIN` 不能同时给** —— 脚本会自己拦下 ✓
+   （零环境变量模式的意思是"应用自己找桥与执行组件" ✓，那才是 #150 要验的东西 ✓）。
+3. **跑之前先杀掉残留的 `cante-gui`** ✗：已经有一个实例在跑时，新实例直接退出，调试端口永不出现 ✓
+   （症状和第 1 条一模一样 ✗，但原因不同 ✓）。
+
+另外两条新机器上值得先做的事 ✓：`<安装目录>` 用**卸载注册表项里的 `InstallLocation`** 去查 ✓
+（别在 `%APPDATA%` / `%LOCALAPPDATA%` 之间猜 ✗ —— 我为此浪费了好几轮 ✓）；输入表可以用**应用自带的
+`cante-sheets write <xlsx> <csv>`** 造 ✓（顺带把工具也验了 ✓，它不覆盖已存在文件 ✓）。
