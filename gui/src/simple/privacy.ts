@@ -11,10 +11,14 @@
 //   - r5-trust's ResultCard reads `runIsOnline()` / `onlineLabel()` when it
 //     stamps a finished run — the store writes `run.online` from the same
 //     `PrivacyState`, so the panel and the card can never disagree.
-//   - r20's「这次发出去了什么」renders `sentContentView()` from the same
-//     `store.composedInstruction(run)` the store actually sends, so what she
-//     reads is exactly what went out — never a second, drifting copy.
+//   - r20's「这次发出去了什么」renders `sentContentView()` from `sentTextFor(run,
+//     store.composedInstruction(run))` — the same text the store actually sends
+//     (including the dry-run / overwrite suffix), so what she reads is exactly
+//     what went out — never a second, drifting copy.
 import { SENT } from "./copy-privacy-audit.ts";
+// 只取两个后缀常量（覆盖同意 / 试跑）与那个 run 类型；run.ts 是叶子模块，没有反向依赖，
+// 所以这一条不会成环（run.ts 里那条「保持独立于 privacy.ts」的注释仍然成立）。
+import { OVERWRITE_CONSENT, dryRunInstruction } from "./run.ts";
 
 export interface PrivacyState {
   /** The machine is allowed to reach the network for the next task. */
@@ -106,10 +110,37 @@ export function webSearchHint(localOnly: boolean): string {
 
 /** 最近一次任务，缩成这一节需要的最小信息。 */
 export interface SentRunFacts {
-  /** 那次真正发出去的文字，逐字来自 composedInstruction；没有任务时是 null。 */
+  /** 那次真正发出去的文字，逐字来自 composedInstruction（必要时加上后缀）；没有任务时是 null。 */
   text: string | null;
   /** 那次允不允许联网（run.online）。 */
   online: boolean;
+}
+
+/**
+ * 「这次真正发出去的那段文字」——面板要展示的就是它，一个字都不能少。
+ *
+ * 为什么不能直接用 `composedInstruction` 的结果：store 有两条路会在它后面**再接一段**
+ * （见 `store.confirmRun` / `store.dryRun`）——
+ *
+ *   * 覆盖同意（#41）：`composed + OVERWRITE_CONSENT`
+ *   * 试跑（#42）：`dryRunInstruction(composed)`
+ *
+ * 面板若只展示 `composedInstruction`，这两条路上就会**少报**真正发出去的字节 ——
+ * 而这一节的全部意义就是「发出去的就是下面这段文字」。所以这里把 store 的规矩原样重述
+ * 一遍（后缀字面量从 `run.ts` 取，不另写一份），做成纯函数。
+ *
+ * 它和 store 是**两份独立实现**，靠 `privacy-bytes.test.ts` 拿真 store 发出的字节钉住：
+ * 两边谁改了规矩、忘了改另一处，那个文件立刻红。
+ */
+export function sentTextFor(
+  run: { dryRun?: boolean; overwrite?: boolean },
+  composed: string,
+): string {
+  // 试跑与覆盖同意互斥（确认页上是两个不同的按钮），不会叠加；真出现两者都有的旧记录，
+  // 按试跑优先 —— 试跑那条路永远不会顺手覆盖文件。
+  if (run.dryRun) return dryRunInstruction(composed);
+  if (run.overwrite) return composed + OVERWRITE_CONSENT;
+  return composed;
 }
 
 /** 折叠 / 展开要用的三态，以及每种状态该说的话。 */

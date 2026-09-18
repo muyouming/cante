@@ -20,11 +20,15 @@ import {
   readLocalOnly,
   runIsOnline,
   sentContentView,
+  sentTextFor,
   sentTextParts,
   webSearchHint,
   type PrivacyState,
 } from "./privacy.ts";
 import { SENT, WHEN } from "./copy-privacy-audit.ts";
+import { dryRunInstruction } from "./run.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createStore } from "../store.ts";
 
 /** Words this audience does not know; none may appear in user-facing copy. */
@@ -320,5 +324,53 @@ describe("这次发出去了什么", () => {
     expect(latestSentRun(runs)?.id).toBe("old");
     expect(latestSentRun([{ id: "draft", state: "draft", createdAt: 5 }])).toBeNull();
     expect(latestSentRun([])).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 「发出去的那段文字」的三种形状。
+//
+// store 有两条路会往 composedInstruction 后面再接一段（覆盖同意 / 试跑）。面板要展示的
+// 是**加上后缀之后**的那一份，否则就会少报。这里钉住 sentTextFor 的形状；「它和 store 真
+// 发出去的一致」由 privacy-bytes.test.ts 拿真 store 发出的字节对。
+// ---------------------------------------------------------------------------
+
+describe("发出去的那段文字：普通 / 试跑 / 覆盖同意", () => {
+  const COMPOSED = "【要做的事】把两张表合成一张\n\n【用户的原话】\n合成";
+
+  test("普通确认：原样，不加任何东西", () => {
+    expect(sentTextFor({}, COMPOSED)).toBe(COMPOSED);
+  });
+
+  test("覆盖同意：把同意那一段接在后面，原件一字不动", () => {
+    const text = sentTextFor({ overwrite: true }, COMPOSED);
+    expect(text.startsWith(COMPOSED)).toBe(true);
+    expect(text).toContain("用户已明确同意");
+    expect(text).toContain("原件备份");
+  });
+
+  test("试跑：接的是「只试跑」那一段，且和 store 的 dryRunInstruction 同一份字面量", () => {
+    const text = sentTextFor({ dryRun: true }, COMPOSED);
+    expect(text).toBe(dryRunInstruction(COMPOSED));
+    expect(text).toContain("这次只试跑");
+  });
+
+  test("面板那段永远以 composedInstruction 的结果开头（base 不另拼一份）", () => {
+    for (const run of [{}, { overwrite: true }, { dryRun: true }]) {
+      const text = sentTextFor(run, COMPOSED);
+      expect(text.startsWith(COMPOSED)).toBe(true);
+      // 少报的旧写法就是直接返回 composed；三种形状里有两种必须更长。
+      if (run.overwrite || run.dryRun) expect(text.length).toBeGreaterThan(COMPOSED.length);
+    }
+  });
+
+  test("面板组件真的用了 sentTextFor，不是又回到只展示 composedInstruction", () => {
+    // 真机上验过面板 DOM == app→bridge 管道里的 UserInput == bridge→pi 的 prompt（三份
+    // sha256 相同）。但那条证据只覆盖「组件确实接上了」这一刻；组件若被改回只展示
+    // composedInstruction，那两条带后缀的路会重新开始少报。所以这里扫源码把接线钉住。
+    const panel = readFileSync(join(import.meta.dir, "PrivacyPanel.tsx"), "utf8");
+    expect(panel).toContain("sentTextFor");
+    // sentContentView 收到的是 sentTextFor(...) 的结果，而不是 composedInstruction 的裸结果。
+    expect(panel).toMatch(/sentTextFor\(\s*current\s*,/);
   });
 });

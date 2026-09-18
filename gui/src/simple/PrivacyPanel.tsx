@@ -21,6 +21,7 @@ import {
   localOnlyHint,
   privacyAnswers,
   sentContentView,
+  sentTextFor,
   webSearchHint,
   type PrivacyState,
   type SentContentView,
@@ -92,20 +93,24 @@ export interface SentContentSectionProps {
 /**
  * 「这次发出去了什么」。默认折叠：先给一句摘要，点开才是原文，免得一屏大字吓到她。
  *
- * 这里显示的文字**逐字**取自 `store.composedInstruction(run)`，也就是真正发出去的
- * 那一段；**不读任何本地文件内容**——展示的是「发出去的文字」，不是「文件里有什么」。
- * ResultCard 也 import 这个组件，因为她刚做完一件事时最想问的就是「刚才发了什么」。
+ * 这里显示的文字**逐字**取自 `store.composedInstruction(run)` 再加上这次真正会发生的那一段后缀
+ * （见 `sentTextFor`：试跑 / 覆盖同意），也就是真正发出去的那一段；**不读任何本地文件内容**
+ * ——展示的是「发出去的文字」，不是「文件里有什么」。ResultCard 也 import 这个组件，因为她
+ * 刚做完一件事时最想问的就是「刚才发了什么」。
  */
 export function SentContentSection(props: SentContentSectionProps): JSX.Element {
   const [open, setOpen] = createSignal(false);
   const run = (): TaskRun | null => (props.run === undefined ? latestRun(props.store) : props.run);
   const view = (): SentContentView => {
     const current = run();
-    return sentContentView(
-      current
-        ? { text: props.store.composedInstruction?.(current) ?? null, online: current.online }
-        : null,
-    );
+    if (!current) return sentContentView(null);
+    // `?? null` 保持在原处：store 还没接上 `composedInstruction` 时，这一段必须如实说
+    // 「还没有做过任务」，而不是拿一段空文字冒充「发出去的就是这个」。
+    const composed = props.store.composedInstruction?.(current) ?? null;
+    return sentContentView({
+      text: composed === null ? null : sentTextFor(current, composed),
+      online: current.online,
+    });
   };
   return (
     <section
