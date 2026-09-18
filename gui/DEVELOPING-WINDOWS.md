@@ -23,7 +23,7 @@ Tauri 官方支持在 **Windows（Edge WebDriver / `msedgedriver`）** 与 Linux
 （与 `dom-smoke.sh` 同一组断言）。
 
 - 优点：每次 PR 自动跑，不依赖谁的机器；抓到的是"Windows 上起不来 / 渲染不出来"这类硬故障。
-- 局限：**原生文件对话框无法自动化**，所以只能走到"确认页"；不能替代人眼对字体/手感/安装体验的判断。
+- **原生文件对话框已经能自动化** ✓：`gui/scripts/windows/accept-file-dialog.ps1`（2026-09-17，PR #155）用 UI Automation 真填路径、真点「打开」✓ —— `accept-install.ps1` 因此能**端到端**走到产出核对 ✓。（这里仍然不能替代人眼对字体/手感/安装体验的判断 ✓。）
 - 实现与状态：`gui/README.md` 末尾那节（以及 `.github/workflows/gui.yml` 里的 Windows job）。
 
 ## 办法二：在本机开一台 Windows 虚拟机（要看/要摸的时候）
@@ -222,7 +222,7 @@ powershell -ExecutionPolicy Bypass -File gui\scripts\task-sweep.ps1 --work "$env
 产出格式对不对、原件有没有被改坏。下面这些**自动化覆盖不到，必须人按上面
 「每次要在 Windows 上过一遍的清单」那 8 条手验**：
 
-1. **原生文件对话框**（清单第 4 条）——RDP 里也是真窗口，只能人点；中文/空格路径、
+1. **原生文件对话框**（清单第 4 条）——由 `accept-file-dialog.ps1` 自动填 ✓（它测到对话框控件是 `AutomationId 1148`（输入框）与 `1`（打开）✓，且**不接受 ValuePattern** ✗，所以走 `WM_SETTEXT`+`BM_CLICK` ✓）；中文/空格路径、
    结果落在原文件旁边也得人看。
 2. **未签名提示 / 杀软**（第 2 条）——跟安装包签名和机器策略有关，脚本给不出
    「王姐会看到什么」这种第一印象。
@@ -515,7 +515,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File gui\scripts\check-windows.ps
 
 ## 在新机器上跑那条"驱动应用"的验收（2026-09-19 实测补三坑）
 
-`gui/scripts/windows/accept-drive.mjs` 是**最可靠的** Windows 验收方式 ✓（真开窗口、真点卡片、
+`gui/scripts/windows/accept-install.ps1` 是**完整**的 Windows 验收入口 ✓（装 → 读首屏 → 驱动跑一轮 → **核对产出与原件** → 卸载 ✓）。下面的 `accept-drive.mjs` 是它的**驱动组件** ✓（真开窗口、真点卡片、
 真走完一轮 ✓）。在新装的机器上，除了装 `tauri-driver` 与匹配版本的 `msedgedriver`，还要注意三件
 **都会让人误判成"产品坏了"** ✗ 的事：
 

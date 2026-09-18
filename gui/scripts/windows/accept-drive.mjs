@@ -165,12 +165,15 @@ async function capture(driver, tag) {
 
 /** 跑起来之后替她点：审批 → 允许这次；结构化提问 → 按它的建议来；追问 → 你看着办。 */
 async function driveToResult(driver) {
-  const counters = { approvals: 0, questions: 0, followups: 0 };
+  // 结果卡的 done 标题（唯一来源：gui/src/simple/ResultCard.tsx 的 STATE_TITLE.done ✓）。
+// 用常量而不是散落的字面量：改产品文案时这里会一起被看见 ✓。
+const DONE_TEXT = "做好了";
+const counters = { approvals: 0, questions: 0, followups: 0 };
   const deadline = Date.now() + RUN_TIMEOUT_MS;
   let lastText = "";
   while (Date.now() < deadline) {
     lastText = await bodyText(driver).catch(() => lastText);
-    if (lastText.includes("做好了")) return { counters, resultText: lastText };
+    if (lastText.includes(DONE_TEXT)) return { counters, resultText: lastText };
 
     if (lastText.includes("要不要允许它继续？")) {
       const before = counters.approvals;
@@ -192,8 +195,13 @@ async function driveToResult(driver) {
       await sleep(800);
       continue;
     }
-    if (/没能做成|出错了|失败了|连不上/.test(lastText) && !lastText.includes("做好了")) {
-      fail(`跑的过程中出现了错误页：\n${lastText.slice(0, 1200)}`);
+    // 失败检测要匹配**产品里真的会出现的字** ✓：2026-09-19 评审抓到这一行原来是死代码 ✗ ——
+    // 它找的是「没能做成 / 出错了 / 失败了 / 连不上」，而产品文案里一个都没有 ✓
+    // （真正会出现的是结果卡的「这件事没有做完」、错误页标题「这次没能做完」、以及 #173 的
+    // 停滞/断线那两句 ✓）。用真实文案，别让"我在守失败"变成一句空话 ✗。
+    const FAILED_MARKERS = /这件事没有做完|这次没能做完|已经停下|没能撤销|连不上帮你处理的服务方|服务方停了/;
+    if (FAILED_MARKERS.test(lastText) && !lastText.includes(DONE_TEXT)) {
+      fail(`跑的过程中出现了失败/停滞页：\n${lastText.slice(0, 1200)}`);
     }
     await sleep(1000);
   }

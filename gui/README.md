@@ -205,8 +205,11 @@ wizard steps (欢迎 / 检查电脑 / 开始使用) and the no-touch promise
 `CANTE_ADMIN_CONFIG` (the documented enterprise path in
 `src-tauri/src/admin_config.rs`), it presses a real task card, types one
 sentence, presses 生成计划 and asserts the confirmation sheet («它打算这样做»).
-It stops there on purpose: the next step in the product opens a **native** file
-dialog, which WebDriver cannot drive, and faking it would test a different app.
+That step is automated now: the next screen opens a **native** file dialog, and
+`accept-file-dialog.ps1` (PR #155, 2026-09-17) drives it for real — UI Automation
+fills the path (`WM_SETTEXT`) and clicks 打开 (`BM_CLICK`), because the dialog's
+控件 does not accept `ValuePattern`. `accept-install.ps1` therefore walks all the
+way to checking the produced file against the original.
 
 Where the results are: the rendered text of every screen is printed into the CI
 log, and `e2e-windows/artifacts/` gets `<screen>.txt`, `<screen>.html` and

@@ -18,7 +18,7 @@
 | `--version` / `catalog` 在 Windows 上也成立吗？ | **解析层面成立**（真机未验） | `binary_spec.rs` 新增 4 条 Windows `.exe` 形态用例；两个输出都是普通 UTF-8 行，不依赖平台 |
 | `CANTE_BIN` 指向 `C:\…\cante-bridge.exe` 时，`daemon.rs` 会把它拼对？ | **会** | `serve_argv` 只追加一个 `serve`；`.exe` 不被当特殊 token。20 条解析测试全绿（§2） |
 | 桥会自动进安装包吗？ | **会，而且是真机确认过的** | 第三次真机验收：NSIS 与安装目录里都有 `cante-bridge.exe`（603,648 字节），躺在主程序旁边 |
-| 装进包就等于能被用上吗？ | **不** | 守护进程只认 `CANTE_BIN` / PATH 上的 `cante`（`WINDOWS-ACCEPTANCE-3.md` §6）；要用桥必须设 `CANTE_BIN` |
+| 装进包就等于能被用上吗？ | **是（2026-09-17 起 ✓）** | `program.rs` 会**自己找应用旁边的桥与执行组件** ✓（#163/#171）；`CANTE_BIN`/`PI_BIN` 仍然优先，但**不再是必要条件** ✓ —— 零环境变量模式已在真机验过（#150 第二步 ✓） |
 | 那台机器上的 `pi` 一定是能起的吗？ | **不一定（最大的未知数）** | `PI_BIN` 是单个程序名，`Command::new` 走 `CreateProcess`，**起不了 npm 的 `pi.cmd`**（§3 第一段；与 `bun` 那个坑同源） |
 | 桥能跑真实任务吗？ | **本机 macOS 上跑通过**（真 `pi` + 假端点）；**Windows 上交给那台机器** | `BRIDGE-spike.md` / `BRIDGE-gate.md`；Windows 命令清单在 §5 |
 
