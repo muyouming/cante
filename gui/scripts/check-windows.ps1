@@ -1,4 +1,4 @@
-# 那台 Windows 测试机上的"快检"：只跑 CI 做不到或不方便做的事。
+﻿# 那台 Windows 测试机上的"快检"：只跑 CI 做不到或不方便做的事。
 #
 # 为什么需要它：`gui/scripts/e2e.sh` 是**完整门禁**（bun install + vite build + 全量
 # cargo test），CI 已经在 windows-latest 上跑同一份了。在那台机器上再跑一遍，实测要
@@ -16,8 +16,11 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
-# 官方 bun.exe 必须在 PATH 最前：npm 装的 bun 只有 .ps1/.cmd，Rust 里 Command::new("bun") 找不到它。
-$env:PATH = "C:\Users\$env:USERNAME\tools\bun;$env:USERPROFILE\.cargo\bin;" + $env:PATH
+# 官方 bun.exe 必须优先：npm 装的 bun 只有 .ps1/.cmd，Rust 里 Command::new("bun") 找不到它 ✓。
+# 但路径因机器而异（老机器放 tools\bun，新机器由 winget 装）→ 只在它真的存在时才插到最前 ✓。
+$bunDir = "C:\Users\$env:USERNAME\tools\bun"
+if (Test-Path $bunDir) { $env:PATH = "$bunDir;$env:USERPROFILE\.cargo\bin;" + $env:PATH }
+else { $env:PATH = "$env:USERPROFILE\.cargo\bin;" + $env:PATH }
 $repo = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $failed = @()
 
@@ -33,6 +36,13 @@ function Step($name, $block) {
 }
 
 if (-not $SkipFrontend) {
+  # 新克隆的机器上没有 node_modules —— 不先装上，下面两步会报一串
+  # "Cannot find package 'solid-js'" / "Cannot find type definition file for 'bun'" ✗，
+  # 看不出是谁的问题（2026-09-18 在一台新装的 Windows 上就是这么撞的 ✓）。
+  if (-not (Test-Path "$repo\gui\node_modules") -and -not $SkipFrontend) {
+    Step "装依赖（bun install，只在缺的时候跑）" { Push-Location "$repo\gui"; bun install; Pop-Location }
+  }
+
   Step "前端测试（bun test src）" { Push-Location "$repo\gui"; bun test src; Pop-Location }
   Step "类型检查（bunx tsc --noEmit）" { Push-Location "$repo\gui"; bunx tsc --noEmit; Pop-Location }
 }
