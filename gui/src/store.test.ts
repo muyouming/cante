@@ -12,8 +12,9 @@ import { createRoot } from "solid-js";
 
 import { eventName, type EventMsg } from "./protocol.ts";
 import { describeApproval } from "./simple/approval.ts";
-// #173 — 出错页真正渲染的是 explainError(run.error)，不是 run.error 本身。
-import { explainError } from "./simple/copy.ts";
+// #173 — 出错页真正渲染的是 explainError(run.error)，不是 run.error 本身；
+// 「已经做到这里」那块（进度 + 文件）走 stallFacts。
+import { explainError, stallFacts } from "./simple/copy.ts";
 import { FOLLOW_RECOMMENDATION_NOTE } from "./simple/copy-question.ts";
 import {
   DISMISSED_REPLY,
@@ -961,7 +962,7 @@ describe("失败记录：可核对的原因不能被洗掉（r17）", () => {
       "event",
       event(
         "Error",
-        "连不上帮你处理的服务方，可能网络断了。已经做到第 3 步，原来的文件都还在。网络好了，点「再试一次」。",
+        "连不上帮你处理的服务方，可能网络断了。已经做到第 3 步，做完了 2 个操作，原来的文件都还在。网络好了，点「再试一次」，会把刚才那件事重做一遍。",
       ),
     );
     await Bun.sleep(25);
@@ -977,11 +978,15 @@ describe("失败记录：可核对的原因不能被洗掉（r17）", () => {
     expect(error?.what).toBe("这件事没有做完。");
     expect(error?.cause).toContain("连不上帮你处理的服务方");
     expect(error?.detail).toBe(error?.cause);
-    // 出错页真正给她看的两句：停滞专用，带上做到第几步，并再说一次文件没事。
+    // 出错页真正给她看的：停滞专用的一句 + 她真能做的那一步（从头重做）。
     const human = explainError(error);
     expect(human.what).toBe("连不上帮你处理的服务方，可能网络断了。");
-    expect(human.how).toContain("已经做到第 3 步");
-    expect(human.how).toContain("原来的文件都还在");
+    expect(human.how).toContain("重做一遍");
+    // 「做到哪儿了」单独一块：桥数出来的两个数字都在，文件那句当规矩说。
+    const facts = stallFacts(error);
+    expect(facts?.progress).toContain("做到第 3 步");
+    expect(facts?.progress).toContain("做完了 2 个操作");
+    expect(facts?.files).toContain("原来的文件");
     // 停滞时不给结果卡：那个 run 没有做完，不装成做完了。
     expect(store.currentRun()?.result).toBeNull();
     dispose();

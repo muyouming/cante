@@ -163,12 +163,15 @@ describe("actionsFor：可核对的原因（cause）也参与判断", () => {
     // 而不是让她重新选文件。文案里的数字必须原样留着。
     const stalled = actionsFor(
       runFailure(
-        "连不上帮你处理的服务方，可能网络断了。已经做到第 3 步，原来的文件都还在。网络好了，点「再试一次」。",
+        "连不上帮你处理的服务方，可能网络断了。已经做到第 3 步，做完了 2 个操作，原来的文件都还在。网络好了，点「再试一次」，会把刚才那件事重做一遍。",
       ),
     );
     expect(kinds(stalled)).toEqual(["retry", "copy-detail"]);
     expect(stalled[0]?.label).toBe("再试一次");
     expect(stalled[0]?.why).toContain("网络");
+    // 出路是不是「从头重做」要当面说清，不能让她以为是接着跑（真试过：现在不是）。
+    expect(stalled[0]?.why).toContain("重做");
+    expect(stalled[0]?.why).not.toContain("接着");
     expect(kinds(stalled)).not.toContain("pick-files");
 
     // 没带步数时也走同一条路，不退回通用出口。
@@ -303,6 +306,32 @@ describe("#175 出错的出路必须和刚才那件事对得上", () => {
       runner.includes("context={{ needs: props.task.needs"),
       "TaskRunner 渲染 ErrorView 时没传 context：文书/微信族（一个文件都没用）失败后，\n" +
         "出路会变成「重新选一次文件」——那一步根本不存在（#175 走查亲手复现）。",
+    ).toBe(true);
+  });
+});
+
+describe("#173 加强：停滞那一屏说清做到哪儿，而且「再试一次」是从头重做", () => {
+  const view = read("ErrorView.tsx");
+  const runner = read("TaskRunner.tsx");
+
+  test("ErrorView 把「已经做到这里」那块真画出来（进度 + 文件规矩，不是一句笼统话）", () => {
+    // 组件只是排版：事实从 copy 模块的 stallFacts 取，不在这里另写一份判断。
+    expect(view).toContain("stallFacts");
+    expect(view).toContain("STALL.title");
+    expect(view).toMatch(/<For each=\{block\(\)\.progress\}/);
+    expect(view).toContain("block().files");
+  });
+
+  test("出错页那个「再试一次」走的是从头重跑那条路，不是续跑", () => {
+    // 出错区里那个按钮就是 plan()；plan() 又走 store.startRun()（新 run、回到确认页）。
+    const errorSection = runner.slice(runner.indexOf('step() === "error"'));
+    expect(
+      /onClick=\{\(\) => void plan\(\)\}/.test(errorSection),
+      "出错页的「再试一次」不再走 plan()：它到底是重跑还是续跑就说不好了（#173 加强要求把这条钉住）。",
+    ).toBe(true);
+    expect(
+      /async function plan\(\)[\s\S]{0,400}store\.startRun\(/.test(runner),
+      "plan() 不再调 store.startRun()：续跑/重跑的分界就断了。",
     ).toBe(true);
   });
 });

@@ -140,6 +140,14 @@ itself (issue #173); the upstream daemon does not have to grow a timeout for it.
 | Event | `Evt::Error` (`{ "Error": "…" }`) with the plain-Chinese sentence. No `TurnEnd` is emitted: the turn is neither a success nor a failure — it is unfinished. |
 | After | The turn is abandoned. Late events from it are dropped (a late `agent_settled` must not close a run the window has moved on from), the next prompt starts a clean turn, and the assistant's running work is **not** aborted — killing a tool mid-write could damage a file. |
 | Wording | The message starts with `连不上帮你处理的服务方`; `src/simple/copy.ts` matches that marker for the stall-specific 发生了什么 / 你可以怎么做, and `recovery.ts` routes it to 「再试一次」. Change the marker in one place only if you change the other. |
+| Facts in the message | The adapter quotes only what it counted from events it forwarded: `已经做到第 N 步` = `turn_start` count, `做完了 N 个操作` = non-denied `tool_execution_end` count (a call still in flight is **not** counted). Either number may be absent when it is zero; neither is ever invented. `原来的文件都还在` is the product's own rule (results are always saved as new files), **not** a measurement — the adapter never reads files. |
+| Retry semantics quoted | The message ends `会把刚才那件事重做一遍`. That is literal: 「再试一次」 starts a **fresh run** from the confirmation sheet (`TaskRunner.tsx` `plan()` → `store.startRun()`), it does **not** resume the abandoned turn (the adapter never re-attaches a half-run tool). If that ever becomes a resume, this clause and `ERRORS.stallHow` must change with it. |
+
+`src/simple/copy.ts` splits the facts out of the sentence: `stallFacts()` parses
+`已做到第 N 步` / `做完了 N 个操作` back out of the raw text and `ErrorView.tsx`
+renders them as a separate 「已经做到这里」 block, so the progress and the file
+rule are not buried in the “你可以怎么做” sentence. Both numbers come from the
+same two counts above; no number means that line is simply not drawn.
 
 **The silence budget is 600 s (10 minutes)**, overridable with
 `CANTE_BRIDGE_STALL_SECS` (seconds; `0` disables). It is deliberately large:

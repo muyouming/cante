@@ -3,7 +3,7 @@
 // text kept for 复制详情. These tests pin both the mapping and the pass-through.
 import { describe, expect, test } from "bun:test";
 
-import { ERRORS, WIZARD_HEALTH, explainError, isRetryable } from "./copy.ts";
+import { ERRORS, STALL, WIZARD_HEALTH, explainError, isRetryable, stallFacts } from "./copy.ts";
 
 describe("explainError", () => {
   test("a missing file becomes an actionable Chinese pair", () => {
@@ -38,16 +38,18 @@ describe("explainError", () => {
     expect(ERRORS.networkHow).not.toContain("「重试」");
   });
 
-  test("跑到一半没消息了：换成停滞专用的两句，并带上做到第几步", () => {
+  test("跑到一半没消息了：换成停滞专用的两句，并带上做到第几步、做完几个操作", () => {
     // #173 —— bridge.rs 在服务方长时间没消息时自己报这一句。跑失败的
     // TaskRun.error 自带 what＝兜底那句「这件事没有做完。」，所以停滞必须在那
     // 之前认出来；否则她看到的仍是一句什么都没说的通用话。
     const raw =
-      "连不上帮你处理的服务方，可能网络断了。已经做到第 3 步，原来的文件都还在。网络好了，点「再试一次」。";
+      "连不上帮你处理的服务方，可能网络断了。已经做到第 3 步，做完了 2 个操作，原来的文件都还在。网络好了，点「再试一次」，会把刚才那件事重做一遍。";
     const human = explainError(raw);
     expect(human.what).toBe(ERRORS.stallWhat);
-    expect(human.how).toBe("已经做到第 3 步，原来的文件都还在。网络好了，点「再试一次」。");
-    expect(human.how).toContain("原来的文件都还在");
+    // how 只说发生什么 + 她真能做的那一步；「做到哪儿了」在单独一块里说。
+    expect(human.how).toBe(ERRORS.stallHow);
+    expect(human.how).toContain("重做一遍");
+    expect(human.how).not.toContain("接着");
     expect(human.detail).toBe(raw);
 
     // 从 store 给的真实形状来也一样：what/how 是兜底两句，锚点在 detail 里。
@@ -57,17 +59,33 @@ describe("explainError", () => {
       detail: raw,
     });
     expect(fromRun.what).toBe(ERRORS.stallWhat);
-    expect(fromRun.how).toContain("第 3 步");
+    expect(fromRun.how).toBe(ERRORS.stallHow);
 
-    // 认不出步数时就不说数字——不编。
-    const noCount = explainError({
-      what: "这件事没有做完。",
-      how: "原来的文件都还在。",
-      detail: "连不上帮你处理的服务方，可能网络断了。",
-    });
-    expect(noCount.what).toBe(ERRORS.stallWhat);
-    expect(noCount.how).toBe(ERRORS.stallHow);
-    expect(noCount.how).not.toMatch(/\d/);
+    // 「已经做到这里」那块：两个数字都得在，而且都来自桥报过的原文。
+    const facts = stallFacts(raw);
+    expect(facts?.progress).toEqual([STALL.stepsLine(3), STALL.opsLine(2)]);
+    // 文件那句是**规矩**（只读、另存新文件），不是一句「已核对过」的测量。
+    expect(facts?.files).toContain("只读");
+    expect(facts?.files).toContain("另存");
+    expect(facts?.files).not.toContain("核对");
+
+    // 从 store 的 `{detail}` 形状也能拿到同一份事实（出错页真正吃的那份）。
+    expect(stallFacts(fromRun)?.progress).toEqual([STALL.stepsLine(3), STALL.opsLine(2)]);
+
+    // 只有回话、还没跑工具时，只说步数，不编一个「0 个操作」。
+    const stepsOnly = stallFacts(
+      "连不上帮你处理的服务方，可能网络断了。已经做到第 3 步，原来的文件都还在。网络好了，点「再试一次」，会把刚才那件事重做一遍。",
+    );
+    expect(stepsOnly?.progress).toEqual([STALL.stepsLine(3)]);
+
+    // 一个数字都没有也照样能给她「做到这里」那块（至少文件那句在）——不编数字。
+    const noCount = stallFacts("连不上帮你处理的服务方，可能网络断了。");
+    expect(noCount?.progress).toEqual([]);
+    expect(noCount?.files).toContain("原来的文件");
+
+    // 不是停滞时，那一块就不出现。
+    expect(stallFacts("something very strange happened")).toBeNull();
+    expect(explainError("something very strange happened").what).toBe(ERRORS.genericWhat);
   });
 
   test("the desktop-bridge message is explained for a browser preview", () => {

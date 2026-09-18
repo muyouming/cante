@@ -931,8 +931,13 @@ fn bridge_reports_a_turn_that_goes_quiet() {
         message.starts_with("连不上帮你处理的服务方"),
         "the report must carry the marker the window matches on: {message:?}"
     );
+    // #173 加强 —— 两个真事实都要在：回话的次数，和真正执行完的操作数。
     assert!(message.contains("已经做到第"), "she is told how far it got: {message:?}");
+    assert!(message.contains("做完了 2 个操作"), "finished operations are named: {message:?}");
     assert!(message.contains("原来的文件都还在"), "file safety is restated: {message:?}");
+    // 「再试一次」的语义要说实话：从头重做，不是接着跑。
+    assert!(message.contains("会把刚才那件事重做一遍"), "the retry is a fresh run: {message:?}");
+    assert!(!message.contains("接着"), "a stall must not promise to carry on: {message:?}");
     assert_eq!(error["parent"], json!("op_input"), "the report belongs to the prompt");
 
     // Two calls really ran before the silence: this is a live turn, not a
