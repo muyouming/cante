@@ -535,3 +535,70 @@ powershell -NoProfile -ExecutionPolicy Bypass -File gui\scripts\check-windows.ps
 另外两条新机器上值得先做的事 ✓：`<安装目录>` 用**卸载注册表项里的 `InstallLocation`** 去查 ✓
 （别在 `%APPDATA%` / `%LOCALAPPDATA%` 之间猜 ✗ —— 我为此浪费了好几轮 ✓）；输入表可以用**应用自带的
 `cante-sheets write <xlsx> <csv>`** 造 ✓（顺带把工具也验了 ✓，它不覆盖已存在文件 ✓）。
+
+## 首屏验收：她第一次打开看到的是不是向导第 1 步（2026-09-19 实测）
+
+`gui/scripts/windows/accept-first-screen.ps1` 是 #150 的最后一块。前面几步已经验过：**装得上** ✓、
+**装好就能干活** ✓（`accept-install.ps1 -ZeroEnv`，零环境变量驱动应用跑完一轮 ✓）——但从没单独验过
+**「她第一次打开看到的第一屏」** ✓。这条验收**不跑任务**（一跑就写状态，首启就没了），只做三件事：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File gui\scripts\windows\accept-first-screen.ps1
+```
+
+1. **把应用状态清干净**，保证看到的是「第一次打开」：向导的「已完成」标记是 WebView2 里的
+   `localStorage`（在 `%LOCALAPPDATA%\dev.cante.gui`），运行记录在 `%APPDATA%\dev.cante.gui`；
+   两个都删掉才会出现向导（不清就是首页 ✗）。
+2. **启动装好的应用**（路径从**卸载注册表项的 `InstallLocation`** 查 ✓，不猜目录 ✓）。
+3. **用 UI Automation 把窗口里真实渲染出来的文字读回来**，逐条对照 `gui/src/simple/copy.ts` 的
+   `WIZARD.*` / `COMMON.*`，对不上就红 ✓。
+
+### 为什么复用 `dump-window-text.ps1`，不自己发明 UIA / 截图
+
+「已经验证」的前提是**「我看的，是它真的产出的那个东西」**（AGENTS.md §3.6）。截图只能证明
+「画了东西」，证明不了「画的是哪句话」；WebView2 把渲染出来的 DOM 暴露成 UIA 树，把它读回来才是
+**能逐字核对**的证据 ✓。`dump-window-text.ps1` 正是干这个的（`accept-install.ps1` 第 3 步一直用它 ✓），
+所以新脚本**只做编排 + 断言**，读窗口一律交给它 —— 不新增第二套读窗口的写法 ✓。
+
+### 必踩的坑：**会话不对，窗口读出来是空的**（本机实测）
+
+`dump-window-text.ps1` 靠 `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--force-renderer-accessibility`
+让 WebView2 打开无障碍树 ✓。而 WebView2 **在提权进程里会忽略 `WEBVIEW2_*` 环境变量** ✓，并且
+session 0 没有交互桌面。
+
+| 会话 | 结果 |
+| --- | --- |
+| SSH 直连（实测 `elevated=True session=0`） | 主窗口句柄读不到 / `进程已退出，ExitCode = 1` ✗ —— **像"界面没渲染"，其实是会话不对** ✗ |
+| 当前用户 + `Interactive` + `RunLevel Limited` 计划任务（实测 `elevated=False session=1`） | 一次读出真实文案 ✓✓ |
+
+所以脚本**自己判断会话**：不提权的交互会话就地跑 ✓；提权 / session 0 **自动**把「启动应用 + 读窗口」
+那一步交给一个 `RunLevel Limited` 的计划任务去跑（和 `weekly-sweep.ps1` 同一套），再把输出**原样**
+带回来 ✓。你不需要手动提权或降权，直接跑就行 ✓。
+
+### 三条会误判的边界（都实测过）
+
+1. **机器上有别的残留任务／人在跑同一个应用**：本机第一次跑就撞上残留实例，读到「进程已退出」✗。
+   脚本会先杀掉残留实例 ✓，并且**读到可疑结果时重跑一次复核**再下结论 ✓（AGENTS.md §3.6）——
+   复核那一次通过就如实写明「第 1 次没读出来，复核才通过」✓。
+2. **企业预置会把向导跳过** ✓（`adminConfigured()`）。有 `~\.cante\admin.json` 时第一屏是首页，
+   断言必然对不上 ✗。脚本**如实报错、不替她删用户配置** ✓，让你自己把文件移开再验。
+3. **`-KeepState`** 不清状态，用来对照「现在这一屏」（例如想看上一次的界面长什么样 ✓）。
+
+### 清掉了什么状态 / 会不会影响下一次验收
+
+| 清的东西 | 里面是什么 | 影响 |
+| --- | --- | --- |
+| `%LOCALAPPDATA%\dev.cante.gui` | WebView2 用户数据（`localStorage` 里的 `cante:wizard:done` 等） | 删掉后下次打开**重新走向导** —— 这正是首屏验收要的状态 ✓ |
+| `%APPDATA%\dev.cante.gui` | `file-safety\runs.json` + 每次运行的 before 备份 | 删掉后**历史记录清空**、不再显示「在这台电脑上做过几次」✓；**她真正的文件不受影响** ✓（这些只是备份副本） |
+
+**这两处都是这台验收机的状态，不是用户数据**；删掉只会让下一次验收从零开始（本来就该这样 ✓）。
+脚本**不删任何用户文件、不删 `~\.cante\admin.json`** ✓。
+
+### 产物
+
+- `%TEMP%\cante-first-screen\report.txt` —— 人看的报告（含窗口文字**原文** + 逐条对照表）；
+- `%TEMP%\cante-first-screen\dump-raw.txt` —— `dump-window-text.ps1` 的原始 stdout/stderr；
+- `%TEMP%\cante-first-screen\result.json` —— 结构化结果（给脚本/CI 用）。
+
+退出码：`0` = 第一屏就是向导第 1 步、10 条文案全对；`2` = 环境问题（应用起不来 / 读不到窗口 /
+有企业预置）；`3` = 窗口读到了，但文案对不上（**那才是产品的问题** ✓）。
