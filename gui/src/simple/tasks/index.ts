@@ -15,6 +15,8 @@
 import { EXCEL_TASKS } from "./excel.ts";
 import { FILE_TASKS } from "./files.ts";
 import { DOCUMENT_TASKS } from "./document.ts";
+// #192 B — 文书族的一张变体：把流水账归并成个人工作总结 / 述职。
+import { WORK_SUMMARY_TASKS } from "./worksummary.ts";
 import { WECHAT_ALL_TASKS } from "./wechat.ts";
 // #74 — the four curated cards the ability centre adds on top of the above.
 import { SHEET_TASKS } from "./sheet.ts";
@@ -87,6 +89,7 @@ export const TASKS: TaskDef[] = [
   ...FILE_TASKS,
   ...BY_MONTH_TASKS,
   ...DOCUMENT_TASKS,
+  ...WORK_SUMMARY_TASKS,
   ...SUMMARY_TASKS,
   ...CHECK_TASKS,
   ...INVOICE_TASKS,

@@ -35,6 +35,7 @@ import { SHEET_TASKS } from "./sheet.ts";
 import { FILE_TASKS } from "./files.ts";
 import { BY_MONTH_TASKS } from "./bymonth.ts";
 import { DOCUMENT_TASKS } from "./document.ts";
+import { WORK_SUMMARY_TASKS } from "./worksummary.ts";
 import { SUMMARY_TASKS } from "./summary.ts";
 import { CHECK_TASKS } from "./check.ts";
 import { INVOICE_TASKS } from "./invoice.ts";
@@ -256,6 +257,7 @@ const MODULES: readonly { file: string; tasks: readonly TaskDef[] }[] = [
   { file: "files.ts", tasks: FILE_TASKS },
   { file: "bymonth.ts", tasks: BY_MONTH_TASKS },
   { file: "document.ts", tasks: DOCUMENT_TASKS },
+  { file: "worksummary.ts", tasks: WORK_SUMMARY_TASKS },
   { file: "summary.ts", tasks: SUMMARY_TASKS },
   { file: "check.ts", tasks: CHECK_TASKS },
   { file: "invoice.ts", tasks: INVOICE_TASKS },
