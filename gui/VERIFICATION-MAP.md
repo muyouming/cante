@@ -30,6 +30,7 @@ Guest Agent 还要装 virtio-serial ✓）。
 | **装完就能干活（端到端，零环境变量）** | `gui\scripts\windows\run-accept-drive.ps1`（一行命令 ✓，也可用 `accept-install.ps1 -ZeroEnv` ✓） | phase 行耗时 ✓、结果页出现「做好了」✓、**产出文件读回核对** ✓、**原件 sha256 前后一致** ✓ | 慢模型下的耗时 ✗（本地桥+pi 不是 850s 那种 ✓）|
 | **产物闸门（安装目录）** | `gui\scripts\windows\verify-bundle.sh --dir <安装目录>` | 四个可执行文件 + 随包执行组件都在、都能跑 ✓ | 安装包内部（要装完才看得到 ✓）|
 | **周度自动普查** | 计划任务 `CanteWeeklySweep` | `C:\cante-sweep\report-YYYYMMDD.md` ✓ | 需要桌面的场景 ✗ |
+| **每个子 agent 在干什么（一眼看清）** | `gui\scripts\windows\agent-dashboard.ps1` | 每个工作树的**转录文件 12 秒有没有在长** ✓（唯一能回答「现在在不在干活」的判据 ✓）、停了多久 ✓、分支/改动/提交/未推 ✓、最后一句人话与用过的工具 ✓ | **看不清内容对不对** ✗（它只读转录，不做对错判断 ✓）；也看不到**模型侧**为什么慢 ✗ |
 | 纯取证（**不进门禁** ✗） | `capture-window.ps1` / `collect-environment.ps1` / `probe-installed-app.ps1` / `dump-window-text.ps1` | 截图、环境事实、窗口文字 | **它们只产出证据、不做断言** ✓（`dump-window-text.ps1` 被上面的脚本复用 ✓）|
 
 ## 三、CI（另一台机器上的双平台 ✓）
