@@ -1,0 +1,62 @@
+{
+  "960": {
+    "clipped": [],
+    "docOverflow": false,
+    "cardW": 378,
+    "cardH": 122
+  },
+  "920": {
+    "clipped": [],
+    "docOverflow": false,
+    "cardW": 378,
+    "cardH": 122
+  },
+  "900": {
+    "clipped": [],
+    "docOverflow": false,
+    "cardW": 378,
+    "cardH": 122
+  },
+  "880": {
+    "clipped": [],
+    "docOverflow": false,
+    "cardW": 378,
+    "cardH": 122
+  },
+  "820": {
+    "clipped": [
+      [
+        "按人合并多张表（考勤、花名册、工资）",
+        332,
+        325
+      ]
+    ],
+    "docOverflow": false,
+    "cardW": 367,
+    "cardH": 122
+  },
+  "800": {
+    "clipped": [],
+    "docOverflow": false,
+    "cardW": 357,
+    "cardH": 122
+  },
+  "787": {
+    "clipped": [
+      [
+        "把几张表合成一张（自动去掉重复行）",
+        313,
+        309
+      ]
+    ],
+    "docOverflow": false,
+    "cardW": 351,
+    "cardH": 122
+  },
+  "760": {
+    "clipped": [],
+    "docOverflow": false,
+    "cardW": 337,
+    "cardH": 149
+  }
+}
