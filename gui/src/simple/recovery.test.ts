@@ -22,6 +22,29 @@ function kinds(actions: readonly RecoveryAction[]): string[] {
 }
 
 describe("actionsFor：常见失败各给一条能走的路", () => {
+    // #197 真机挖出来的 P0：`blocked by corporate proxy` 里**含** `locked by` ✗，
+    // 于是公司代理挡住请求时，她被叫去关一个根本不存在的 Excel 窗口 ✗。
+    // 这条必须钉死：网络/代理的错误**永远不许**被说成文件问题。
+    test("公司代理挡住（403 blocked by corporate proxy）：不许说成文件被占用", () => {
+      const proxy = actionsFor(
+        err('403: {"message":"Forbidden: blocked by corporate proxy"}'),
+      );
+      expect(kinds(proxy)).not.toContain("close-file");
+      expect(JSON.stringify(proxy)).not.toMatch(/Excel|WPS|关掉|占用|打开着/);
+      expect(kinds(proxy)[0]).toBe("retry");
+    });
+
+    test("真是文件被锁：仍然判成「关掉那个窗口」（收紧规则不能把这条弄丢）", () => {
+      for (const text of [
+        "EBUSY: resource busy or locked, open 'C:\\报表.xlsx'",
+        "The file is locked by another process",
+        "另一个程序正在使用此文件",
+      ]) {
+        const busy = actionsFor(err(text));
+        expect(kinds(busy)[0], text).toBe("close-file");
+      }
+    });
+
   test("文件正被 Excel / WPS 打开：先关窗口再重试，不给「重新选文件」", () => {
     const busy = actionsFor(err("EBUSY: resource busy or locked, open 'C:\\报表.xlsx'"));
     expect(busy[0]?.kind).toBe("close-file");
