@@ -206,7 +206,7 @@ const INLINE_COPY_BUDGET: Readonly<Record<string, number>> = {
   "ConfirmSheet.tsx": 19,
   // History.tsx 的 22 处已经全部搬进 copy-history.ts（#57 那一轮），从台账里退场。
   "PrivacyPanel.tsx": 13,
-  "ResultCard.tsx": 18,
+  "ResultCard.tsx": 16,
   "TaskRunner.tsx": 52,
   "WechatImport.tsx": 21,
 };

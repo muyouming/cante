@@ -39,6 +39,9 @@ import { sheetCapability } from "./capabilities.ts";
 import { describe as describeSchedule, describeCadence, type Cadence, type Schedule } from "./schedule.ts";
 import { taskById, type TaskRun } from "./tasks/index.ts";
 import { verifyResultFiles, type Verification } from "./verify.ts";
+// 「她点了停下来」之后那三句：做到一半的产出、原文件、下一步（r26）。
+import { STOPPED } from "./copy-stop.ts";
+import { stoppedView } from "./stop.ts";
 import type { Store } from "../store.ts";
 import { errorText, invoke } from "../tauri.ts";
 // #140 — store 的「撤销」结果在这里说：成功 / 只放回去一部分 / 一个都没放回去。
@@ -107,12 +110,19 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
   // #63 — the assistant's own 【需要你核对】 paragraph for THIS run. Absent unless
   // it actually wrote one, so the card never shows a canned warning.
   const checkNote = () => checkNoteFromRows(props.store.rows());
+  // r26 — 停下来之后要说的三个数，全部来自 run.impact（快照 diff），不猜。
+  const stopped = () => stoppedView({ impact: run()?.impact ?? { created: 0, modified: 0, deleted: 0, messages: 0 } });
   // r7 — sometimes the assistant stops with a question instead of a result. The
   // turn's last words and its result-file count say whether this is one of
   // those endings, and the answer box below is where she gets to reply.
+  //
+  // r26 — 但**她主动点「停下来」**这一种不算：那一轮是她叫停的，不是助手在等她
+  // 回话（助手真要问，那一轮会停在问题上，不会以「停下」结束）。给一个「它有一件
+  // 事想问你」的框会让她以为自己漏看了什么，所以这里按状态排除掉。
   const lastText = () => lastAgentText(props.store.rows()) ?? "";
   const producedFiles = () => run()?.result?.files.length ?? 0;
-  const asking = () => show() && endedWithQuestion(lastText(), producedFiles());
+  const asking = () =>
+    show() && state() !== "cancelled" && endedWithQuestion(lastText(), producedFiles());
   // r25 — 她刚做成一件事，下一步十有八九要做的那件事。只在真做完、而且这次真产出了
   // 文件时才出现（这一步的前提就是「拿刚做好的这份继续」）；它正在问她话时不出现——
   // 那时她要做的是回话，不是再开一件事。目标是目录里真有的卡，真能一键开始。
@@ -386,14 +396,27 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
         </Show>
 
         <Show when={state() === "cancelled"}>
-          <p class="rounded-2xl border border-amber-700 bg-amber-950/40 px-4 py-3 text-[16px] text-amber-100">
-            {changed()
-              ? "你叫停了这件事，但已经产生了一些改动。可以用下面的「一键撤销」还原。"
-              : "你叫停了这件事，没有改动任何文件。"}
-          </p>
+          {/* r26 — 她点了「停下来」，这里把三件事按顺序说完整：做到一半的产出在哪、
+              原来的文件动没动、下一步怎么办。三句的依据都是 run.impact（运行前后
+              各一次快照 diff 出来的事实），不新造状态。 */}
+          <div class="rounded-2xl border border-amber-700 bg-amber-950/40 px-4 py-3">
+            <p class="text-[16px] leading-relaxed text-amber-100">
+              {STOPPED.partial(stopped().produced)}
+            </p>
+            <p class="mt-1 text-[16px] leading-relaxed text-amber-100">
+              {stopped().touched > 0
+                ? STOPPED.originalsTouched(stopped().touched)
+                : STOPPED.originalsSafe}
+            </p>
+            <p class="mt-1 text-[16px] leading-relaxed text-amber-100/90">{STOPPED.nextStep}</p>
+          </div>
         </Show>
 
-        <p class="text-lg text-slate-100">{run()?.result?.summary}</p>
+        {/* r26 — 停下的时候上面那三句已经把「新做出几个、原名件动没动」说完了，
+            再跟一句笼统的 result.summary（「没有改动任何文件」）只会重复一遍。 */}
+        <Show when={state() !== "cancelled"}>
+          <p class="text-lg text-slate-100">{run()?.result?.summary}</p>
+        </Show>
 
         {/* 信任层：把「它说做好了」落到本机事实上。三种情况三种说法，找不到时
             给出出路（再让它做一次 / 打开文件夹 / 复制详情）。 */}
@@ -664,7 +687,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
           </ul>
         </Show>
 
-        <Show when={files().length === 0 && state() !== "failed"}>
+        <Show when={files().length === 0 && state() !== "failed" && state() !== "cancelled"}>
           <p class="rounded-2xl border border-slate-700 bg-slate-800/40 px-4 py-3 text-[16px] text-slate-300">
             这次没有生成新文件。
           </p>
