@@ -1,23 +1,4 @@
 #!/usr/bin/env python3
-"""显示缩放（125%/150%）下的版面测量 —— #197 第一条的取证。
-
-为什么要有这个：我们的字号地板（正文 >=16px、标题 >=20px、按钮 >=44px）是在
-**CSS px** 上量的，而 dom-smoke.sh 只跑两个**窗口尺寸**，从没跑过**缩放**。
-Windows 在 1080p 以上的笔记本上默认就开 125%，所以这是王姐最可能撞上的环境。
-
-它做什么：用无头 Chrome 的 CDP Emulation.setDeviceMetricsOverride 把 CSS 视口
-设成「物理屏幕 / 缩放」的真实结果，逐场景量：字号、按钮可点高度、横向滚动、
-有没有**真的够不着**的控件（把「在可滚动区域下面」与「真的够不着」分开算）、
-以及底部固定输入区吃掉了多少高度。
-
-跑法：
-    cd gui && bun install && bun run build:web
-    python3 gui/scripts/zoom/driver.py            # -> raw.json
-    python3 gui/scripts/zoom/driver_flagonly.py   # 验证开关本身不改变布局
-
-注意：--force-device-scale-factor 在无头 Chrome 里**不改 CSS 视口**（只改截图缩放），
-所以这里用 CDP 指标覆盖，并**分别**对「最大化」与「默认窗口」两种真实情况建模。
-#!/usr/bin/env python3
 """How the existing UI behaves under Windows display scaling (100/125/150%).
 
 WHAT SCALING ACTUALLY DOES (measured, not assumed -- see raw-flagonly.json):
@@ -46,7 +27,7 @@ import asyncio, json, os, shutil, subprocess, sys, tempfile, urllib.request
 import websockets
 
 CH = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-ROOT = "/private/tmp/r27-zoom/gui/dist"
+ROOT = os.environ.get("ZOOM_ROOT", "/private/tmp/r27-zoom/gui/dist")
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROBE = os.path.join(HERE, "probe.js")
 
@@ -97,6 +78,20 @@ async def measure(ws, mid, css_w, css_h, dpr, url):
     await cdp(ws, sess, mid, "Emulation.setDeviceMetricsOverride",
               {"width": css_w, "height": css_h, "deviceScaleFactor": dpr, "mobile": False})
     await cdp(ws, sess, mid, "Page.enable")
+    # 两面都要量 ✓：全新安装（没有历史轮次 -> 例子全展开）与**她做过一轮之后**
+    # （-> 例子默认收起）。store.runs() 只在 init 时读一次 run_log，所以必须在
+    # 页面加载**之前**把这个桥桩上（BridgeUnavailable 时 runs() 是空的 ✗）。
+    if os.environ.get("ZOOM_STUB_RUNS"):
+        n = int(os.environ["ZOOM_STUB_RUNS"])
+        stub = (
+            "window.__TAURI_INTERNALS__ = { invoke: function (cmd, args) {"
+            "  if (cmd === 'run_log') { return Promise.resolve({ runs: Array.from({length: %d},"
+            "    function (_, i) { return { id: 'run_' + i, state: 'done', files: [], result: [] }; }) }); }"
+            "  return Promise.reject(new Error('not stubbed: ' + cmd)); },"
+            "  transformCallback: function (cb) { return cb; } };"
+            "window.__TAURI_INTERNALS__.metadata = { currentWebview: { label: 'main' },"
+            "  currentWindow: { label: 'main' } };" % n)
+        await cdp(ws, sess, mid, "Page.addScriptToEvaluateOnNewDocument", {"source": stub})
     await cdp(ws, sess, mid, "Page.navigate", {"url": url})
     await asyncio.sleep(1.8)
     ev = await cdp(ws, sess, mid, "Runtime.evaluate", {
