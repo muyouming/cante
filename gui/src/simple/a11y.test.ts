@@ -371,6 +371,11 @@ describe("simple-mode accessible names", () => {
   test("the scan sees the simple-mode screens", () => {
     expect(SCANNED.length).toBeGreaterThan(0);
     expect(SCANNED.some((s) => s.rel === "Home.tsx")).toBe(true);
+    // 「我做的结果」面板必须在这份扫描名单里，而且要有明确登记。不是多此一举：
+    // 它上面的「每个按钮都要能被念出名字」那条规则只对**扫到的文件**生效，
+    // 一旦 componentFiles 的范围被收窄（或改名），结果面板的按钮就会**悄悄**
+    // 脱离闸门，而测试仍然全绿。这一行是那条规则的接线检查。
+    expect(SCANNED.some((s) => s.rel === "ResultsPanel.tsx")).toBe(true);
     // A guard that silently stopped reading attributes (a broken parser, say)
     // would "pass" every rule below. This is the smoke alarm for that.
     let ariaAttributes = 0;
@@ -414,6 +419,69 @@ describe("simple-mode accessible names", () => {
           fix: '加一个中文 aria-label，例如 aria-label="关闭"',
         });
       }
+    }
+    expect(report(violations)).toBe("");
+  });
+
+  // -------------------------------------------------------------------------
+  // 结果面板的**结构**：名字（上一批 #230）之外，读屏还要能**跳**。
+  //
+  // 真机 UIA 走查（gui/WINDOWS-ACCEPTANCE-19.md / -20.md）验完了名字、Tab 顺序、
+  // 44px、Esc 四条，报告自己在 §6 留下一处**没验**：面板里 47 份结果只是 47 个
+  // 并列的 <li>，没有标题层级 —— 读屏用户只能一个一个 Tab（≈95 步），跳不到
+  // 「下一份」，也不知道自己现在在第几份。下面两条把这件事变成常驻闸门。
+  //
+  // 文本扫描看不到什么（照文件头的写法如实写）：
+  //   * 它看到的是**模板**（一个 <li> 一把 <h3>），不是渲染出来的 47 份；
+  //     `results-names.test.ts` 用 SSR 渲染真实产出，这里只保证结构存在。
+  //   * 它不能证明读屏**按标题跳转**真的可用、朗读顺序对、念出来的中文顺口；
+  //     那需要真机上的 Narrator / NVDA，由 Windows 侧复验。
+  //   * 它看不见视觉：<h3> 与原来的 <p> 逐字同类（Tailwind 的 preflight 把 h1-h6
+  //     的字号、字重重置成 inherit、外边距归零），所以像素不变；扫描证不了这一点，
+  //     靠的是「类没动」这个事实 + dom-smoke 的真渲染。
+  // -------------------------------------------------------------------------
+  test("结果面板：每一份结果都有自己的标题（读屏能跳到「下一份」）", () => {
+    const panel = SCANNED.find((s) => s.rel === "ResultsPanel.tsx");
+    expect(panel).toBeDefined();
+    const text = panel!.text;
+    // 一份结果就是一个 <li>（模板里只有一个，渲染时由 <For> 复制 N 份）。
+    const rows = [...text.matchAll(/<li(?=[\s>])[\s\S]*?<\/li>/g)];
+    expect(rows.length).toBeGreaterThan(0);
+    const violations: Violation[] = [];
+    for (const row of rows) {
+      const at = row.index ?? 0;
+      // 面板自己的标题是 <h2>，所以每一份从 <h3> 起，层级才对。
+      if (/<h3(?=[\s>])/.test(row[0])) continue;
+      violations.push({
+        file: "ResultsPanel.tsx",
+        line: lineOf(text, at),
+        snippet: lineText(text, at),
+        rule: "结果条目里没有标题元素，读屏用户只能一个一个 Tab，跳不到下一份结果",
+        fix: "把这一份的名字做成真的 <h3>（沿用原字号类即可，视觉不变）",
+      });
+    }
+    expect(report(violations)).toBe("");
+  });
+
+  test("结果面板：清单说清「一共几份」，她才知道自己手上是第几份", () => {
+    const panel = SCANNED.find((s) => s.rel === "ResultsPanel.tsx");
+    expect(panel).toBeDefined();
+    const text = panel!.text;
+    const lists = [...text.matchAll(/<ul(?=[\s>])/g)];
+    expect(lists.length).toBeGreaterThan(0);
+    const violations: Violation[] = [];
+    for (const list of lists) {
+      const at = list.index ?? 0;
+      const end = openingTagEnd(text, at);
+      const attrs = attributes(text.slice(at, end + 1));
+      if (has(attrs, "aria-label") || has(attrs, "aria-labelledby")) continue;
+      violations.push({
+        file: "ResultsPanel.tsx",
+        line: lineOf(text, at),
+        snippet: lineText(text, at),
+        rule: "结果清单没有说明一共有几份，读屏进来时不知道自己面对多少条",
+        fix: '给 <ul> 加 aria-label，用 copy-results.ts 里的 RESULTS.list.ariaLabel(N)',
+      });
     }
     expect(report(violations)).toBe("");
   });

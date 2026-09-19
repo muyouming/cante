@@ -172,13 +172,20 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
                 </p>
               </Show>
 
-              <ul class="mt-4 flex flex-col gap-3">
+              <ul
+                class="mt-4 flex flex-col gap-3"
+                aria-label={RESULTS.list.ariaLabel(shown().length)}
+              >
                 <For each={shown()}>
                   {(entry) => (
                     <li class="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                      <p class="truncate text-[20px] font-semibold text-slate-100" title={entry.name}>
+                      {/* 这一份的名字是**真的标题**（h3）：读屏能按标题跳到「下一份」，
+                          也才知道自己现在在第几份。视觉不变 —— Tailwind 的 preflight
+                          把 h1-h6 的字号和字重重置成 inherit、外边距归零，所以这里的
+                          类与原来的 <p> 逐字一致，像素也一样。 */}
+                      <h3 class="truncate text-[20px] font-semibold text-slate-100" title={entry.name}>
                         {entry.name}
-                      </p>
+                      </h3>
                       <p
                         class="mt-1 truncate text-[16px] leading-relaxed text-slate-400"
                         title={entry.instruction}
