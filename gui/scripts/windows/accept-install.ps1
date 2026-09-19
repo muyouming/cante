@@ -289,6 +289,10 @@ $driveResult = Join-Path $driveArtifacts 'accept-drive-result.json'
 $outputReadPath = Join-Path $WorkDir 'output-read-back.txt'
 
 Record-Step '4. 真的干成一件活（WebDriver + 桥 + pi）' {
+    # 先清场 ✗：第 3 步用过 dump-window-text.ps1 启动过应用，残留实例会让 WebDriver 新会话
+    # 拿不到调试端口（症状与"提权"一模一样 ✗）。这个坑以前要求人记住 ✓，现在由闸门自己做 ✓。
+    Get-Process cante-gui -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Milliseconds 800
     # 4a. 输入文件：用应用自带的 cante-sheets 造，这样连输入都是产品自己的工具产出的。
     if (-not $KeepArtifacts -and (Test-Path $jobDir)) { Remove-Item $jobDir -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $jobDir | Out-Null
