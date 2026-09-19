@@ -36,7 +36,7 @@ export const HISTORY = {
   hits: (count: number): string => `找到 ${count} 件`,
 
   /** 说清「再跑一次」之后会发生什么，免得她以为文件已经被动了。 */
-  rerunHint: "点「按上次的参数再跑一次」，会先给你看一眼要做什么，确认了才动手。",
+  rerunHint: "点「按上次的做法再跑一次」，会先给你看一眼要做什么，确认了才动手。",
 
   // ---- 一件都没做过 ------------------------------------------------------
   empty: {
@@ -70,7 +70,7 @@ export const HISTORY = {
     ariaOpenResult: "打开这次生成的结果文件",
     openFolder: "打开所在文件夹",
     ariaOpenFolder: "打开结果文件所在的文件夹",
-    rerun: "按上次的参数再跑一次",
+    rerun: "按上次的做法再跑一次",
     ariaRerun: "按上次的做法再跑一次这件事",
     undo: "一键撤销",
     ariaUndo: "撤销这件事做的改动",
