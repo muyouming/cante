@@ -104,9 +104,17 @@ const NOT_FOUND =
  * `403 Forbidden: blocked by corporate proxy` 被判成「文件被 Excel 占着」✗，
  * 让她去关一个根本不存在的窗口（真机上实测到过，见 WINDOWS-ACCEPTANCE-13）。
  * 这类网络/代理问题该走下面的 NETWORK ✓。
+ *
+ * 另一个坑（独立评审抓到的 ✗，第三次同类错）：我一度把它写成 `\blocked\b` ——
+ * 正则里 `\b` 是**词边界**，所以那实际匹配的是字面量 `locked` ✗，于是**任何**含
+ * `locked` 的非文件错误（`HTTP 423 Locked`、账号被锁、密钥库被锁）都被说成
+ * 「文件被那个窗口占着」✗ —— 正是这一条要防的错换了个方向。
+ * 最终修法：**这个分支整个去掉** ✗。既然「只认 lock 开头的词」✓，`file is locked`
+ * 与 `locked for writing` 已经覆盖了真被锁的情况 ✓；写成 `\bblocked\b` 也不对 ✗
+ * —— 那会重新匹配 `blocked by corporate proxy`，把 #204 修的 P0 又带回来 ✗。
  */
 const BUSY =
-  /\blocked\b|being used by another|resource busy|\bEBUSY\b|file is locked|locked for writing|another process (is )?using|另一个程序正在使用|正被.{0,30}(占用|使用)|(文件|它)已?被占用|已被.{0,20}打开/i;
+  /being used by another|resource busy|\bEBUSY\b|file is locked|locked for writing|another process (is )?using|另一个程序正在使用|正被.{0,30}(占用|使用)|(文件|它)已?被占用|已被.{0,20}打开/i;
 
 /** 错误文本里点到了 Excel / WPS，或 WPS 的表格后缀。 */
 const OFFICE_OPEN =

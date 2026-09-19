@@ -4,10 +4,10 @@
 # 而 agent 的**实时转录**落在 ~\.pi\agent\sessions\<工作树>\*.jsonl ✓。
 # 判据不是"进程还在不在"（进程会一直躺着 ✓），而是**转录有没有在长** ✓。
 #
-# 用法（在这台机器上）：powershell -NoProfile -File agent-dashboard.ps1 [-SampleSeconds 8] [-Tail 60]
+# 用法（在这台机器上）：powershell -NoProfile -File agent-dashboard.ps1 [-SampleSeconds 12] [-Tail 60]
 # 也可从别处经 qm guest exec / SSH 调（见 gui/DEVELOPING-WINDOWS.md）。
 param(
-  [int]$SampleSeconds = 8,
+  [int]$SampleSeconds = 12,
   [int]$Tail = 60,
   [string]$SessionRoot = ''
 )
@@ -112,7 +112,7 @@ foreach ($k in ($trees.Keys | Sort-Object)) {
     $text = (($o.message.content | Where-Object { $_.type -eq 'text' } | ForEach-Object { $_.text }) -join ' ')
     if ($role -eq 'user' -and $text) { $lastUser = $text }
     if ($role -eq 'assistant') {
-      $tools = (($o.message.content | Where-Object { $_.type -eq 'tool_use' } | ForEach-Object { $_.name }) -join ',')
+      $tools = (($o.message.content | Where-Object { $_.type -eq 'toolCall' } | ForEach-Object { $_.name }) -join ',')
       if ($tools) { $lastTools = $tools }
       if ($text -and $text.Length -gt 30) { $lastAsst = $text }
     }
