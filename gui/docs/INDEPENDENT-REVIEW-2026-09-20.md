@@ -1,6 +1,6 @@
 # 独立评审：最近合并的一批（#200 / #201 / #202 / #204 / #205）
 
-- **评审分支**：`feat/independent-review`（worktree `/private/tmp/r3-review`，HEAD `b0b3a7d`）
+- **评审分支**：`feat/independent-review`（worktree `<评审工作区>`，HEAD `b0b3a7d`）
 - **评审时间**：2026-09-20
 - **评审对象**（`git log` 就近这 5 个提交）：
   | 提交 | 标题 |
@@ -10,12 +10,18 @@
   | `aef4cab` | `test(trust)`: 「原文件一字未动」改成真目录真字节的检查 (#202) |
   | `3c9d640` | `fix(recovery)`: 公司代理挡住请求时，不再被说成「文件被 Excel 占着」 (#204) |
   | `b0b3a7d` | `feat(windows)`: 一条命令看清「每个子 agent 在干什么」 (#205) |
-- **纪律**：**没有改任何产品代码**。方法一（挑 5 条断言真的改坏一次）在 `/tmp/r3-mut` 这个 **git worktree 副本**里做，做完 `git checkout -- .` 复原；评审工作区始终 `git status` 干净。
+- **纪律**：**没有改任何产品代码**。方法一（挑 5 条断言真的改坏一次）在 `<实验副本>` 这个 **git worktree 副本**里做，做完 `git checkout -- .` 复原；评审工作区始终 `git status` 干净。
 - **唯一的产出代码**：`gui/src/simple/recovery-proxy.test.ts`（**能红的测试**，不是产品修复；当前 HEAD 上 **1 红 2 绿**，理由见发现 1）。
 
 > ⚠️ **这条红是有意的**，也是本分支唯一的红：产品 bug 一天不修，它就一天红着（这正是任务要的「能红的测试」）。所以在本分支上 `bun test src` 会看到 `874 pass / 1 fail`（基线是 872/0）——**不是我把别的东西弄红了**。它红的那条就是发现 1 的可复现判据。修好后应全绿。
 
 ---
+
+> **脱敏说明** ✓：机器上的原件里有真实家目录与工作区路径 ✓；收进仓库这份换成了
+> `<家目录>` / `<仓库根>` / `<评审工作区>` / `<实验副本>` / `<网关地址>` ✓，**除此之外一个字节没改** ✓。
+> （第一次提交时没脱敏 ✓，CI 的 `secret-scan` 当场判红 ✓ —— 闸门工作正常 ✓。有意思的是：
+> 报告自己列的"没发现问题"里写着 `secret-scan.sh` 通过 ✓ —— 那是因为它跑的时候这份报告
+> **还没进它自己的提交** ✗，属于典型的自指盲区 ✓。）
 
 ## 0. 结论先行
 
@@ -84,7 +90,7 @@ OUT: close-file:关掉那个窗口再试 | copy-detail:复制详情
 **正确修法（实测）**：把 `\blocked\b` 这个分支**整个删掉**。注释自己说的就是「英文里只认 lock 开头的词」——`file is locked` / `locked for writing` 已经覆盖真被锁的情况，那个分支本来就是凭空多出来的。
 
 ```console
-# 在 /tmp/r3-mut 副本里执行：把 BUSY 首部的 「\blocked\b|」 删掉
+# 在 <实验副本> 副本里执行：把 BUSY 首部的 「\blocked\b|」 删掉
 $ bun test src/simple/recovery.test.ts src/simple/recovery-proxy.test.ts
  37 pass / 0 fail          # 原有 34 条 + 我新增的 3 条，全绿
 ```
@@ -130,7 +136,7 @@ $tools = (($o.message.content | Where-Object { $_.type -eq 'tool_use' } | ForEac
 $ python3 - <<'PY'   # 统计所有 pi 转录里 tool 内容块的类型
 import json,glob,collections
 h=collections.Counter()
-for f in glob.glob('/Users/muyouming/.pi/agent/sessions/*/*.jsonl'):
+for f in glob.glob('<家目录>/.pi/agent/sessions/*/*.jsonl'):
   for l in open(f,encoding='utf-8',errors='ignore'):
     try:
       o=json.loads(l)
@@ -258,7 +264,7 @@ $ grep -rn "SampleSeconds\|agent-dashboard" --include="*.ps1" --include="*.md" .
 
 ## 2. 改坏它也不红 / 套话断言（最有价值的发现）
 
-我按任务要求，**至少挑了 5 条新增断言在 `/tmp/r3-mut` 副本上真的改坏一次**。红了的（说明断言有牙）记 `✓红`；怎么改都不红的记 `✗套话`。
+我按任务要求，**至少挑了 5 条新增断言在 `<实验副本>` 副本上真的改坏一次**。红了的（说明断言有牙）记 `✓红`；怎么改都不红的记 `✗套话`。
 
 | # | 被改坏的断言 | 改坏方式 | 结果 | 语言 |
 | --- | --- | --- | --- | --- |
@@ -350,7 +356,7 @@ bun test src/simple/recovery-proxy.test.ts   # 1 fail（能红的测试）
 python3 - <<'PY'
 import json, glob, collections
 h = collections.Counter()
-for f in glob.glob('/Users/muyouming/.pi/agent/sessions/*/*.jsonl'):
+for f in glob.glob('<家目录>/.pi/agent/sessions/*/*.jsonl'):
     for l in open(f, encoding='utf-8', errors='ignore'):
         try:
             o = json.loads(l)
@@ -375,4 +381,4 @@ grep -n "12 秒" gui/VERIFICATION-MAP.md
 #   在副本里把 Home.tsx 的 visibleTasks() 过滤掉 doc.worksummary，然后 bun test src → 872 pass
 ```
 
-**方法学备注**：所有"改坏产品代码"的实验都在 `/tmp/r3-mut`（`git worktree add HEAD` 出来的**独立副本**）里做，每次改完 `git checkout -- <file>` 复原；评审工作区 `/private/tmp/r3-review` **全程 `git status` 干净**，产品代码**零改动**。
+**方法学备注**：所有"改坏产品代码"的实验都在 `<实验副本>`（`git worktree add HEAD` 出来的**独立副本**）里做，每次改完 `git checkout -- <file>` 复原；评审工作区 `<评审工作区>` **全程 `git status` 干净**，产品代码**零改动**。
