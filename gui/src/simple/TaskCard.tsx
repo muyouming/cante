@@ -7,11 +7,13 @@
 // says how often it worked, and (if it ever failed) a second line opens the
 // newest plain-Chinese reason. With no history the card renders exactly as it
 // always did: no number, no encouragement, nothing invented.
-import { Show, createSignal } from "solid-js";
+import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { TRUST, evidenceLine } from "./copy.ts";
 import { evidenceFor, failureFor } from "./evidence.ts";
+import { HintChip } from "./HintText.tsx";
+import { hintsIn } from "./hints.ts";
 import type { TaskDef, TaskRun } from "./tasks/index.ts";
 
 export interface TaskCardProps {
@@ -29,6 +31,9 @@ export default function TaskCard(props: TaskCardProps): JSX.Element {
   const [showFailure, setShowFailure] = createSignal(false);
   const evidence = () => evidenceFor(props.runs ?? [], props.task.id);
   const failure = () => failureFor(props.runs ?? [], props.task.id);
+  // 标题或例子里有她可能不认识的词时，各给一个问号入口。入口放在卡片按钮**外面**
+  // ——按钮里不能再套按钮（点里面会连带触发整张卡），所以它是主按钮的兄弟。
+  const words = () => hintsIn(`${props.task.title}\n${props.task.example}`);
 
   return (
     <div class="flex w-full flex-col gap-1.5">
@@ -43,6 +48,14 @@ export default function TaskCard(props: TaskCardProps): JSX.Element {
         </span>
         <span class="text-[16px] leading-relaxed text-slate-400">{props.task.example}</span>
       </button>
+
+      <Show when={words().length > 0}>
+        <div class="flex flex-wrap items-center gap-2">
+          <For each={words()}>
+            {(matched) => <HintChip hint={matched.hint} term={matched.term} />}
+          </For>
+        </div>
+      </Show>
 
       <Show when={evidence()}>
         {(track) => (
