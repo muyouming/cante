@@ -24,7 +24,9 @@ import { inspectSelection, nothingReadable, pickStepLine } from "./format-check.
 import { QUEUE } from "./copy-queue.ts";
 import { jobFor, nextWaiting, positionOf, queueSummary, type QueuedJob } from "./queue.ts";
 import { formatElapsed, type RunProgressView } from "./progress.ts";
-import type { TaskDef, TaskError, TaskRun } from "./tasks/index.ts";
+// #r4 — 「还要多久」：只报一个从真机样本量出来的常见范围，不承诺、不倒计时。
+import { waitView } from "./wait.ts";
+import { taskById, type TaskDef, type TaskError, type TaskRun } from "./tasks/index.ts";
 import ApprovalSheet from "./ApprovalSheet.tsx";
 import ConfirmSheet from "./ConfirmSheet.tsx";
 // r25 — 助手停下来问结构化问题时的大按钮回答卡（挂法和审批卡一样：暂停一出现就要能答）。
@@ -159,6 +161,14 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
   // the member still renders instead of throwing.
   const progress = (): RunProgressView =>
     store.progress?.() ?? { steps: [], startedAt: null, elapsedMs: 0 };
+
+  // #r4 — 这一句只说她这类事一般要多久，以及这次是否已经比一般情况久。
+  // 分组按**正在跑的那件活**取（它可能来自队列里另一张卡），取不到就按整体兜底。
+  const waitLine = () => {
+    const run = currentRun();
+    const group = run ? (taskById(run.taskId)?.group ?? props.task.group) : props.task.group;
+    return waitView(group, progress().elapsedMs);
+  };
 
   const step = createMemo<Step>(() => {
     // 上一件的结果还没看完：先把结果给她，下一件的确认页不许盖上来。
@@ -781,6 +791,10 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
               {PROGRESS_COPY.elapsed(formatElapsed(progress().elapsedMs))}
               <span class="ml-2 text-slate-400">{PROGRESS_COPY.keepOpen}</span>
             </p>
+            <p class="mt-2 text-[16px] text-slate-300">{waitLine().line}</p>
+            <Show when={waitLine().caveat}>
+              <p class="mt-1 text-[16px] text-slate-500">{waitLine().caveat}</p>
+            </Show>
             <p class="mt-2 text-[16px] text-slate-400">{PROGRESS_COPY.promise}</p>
 
             <div class="mt-6">
