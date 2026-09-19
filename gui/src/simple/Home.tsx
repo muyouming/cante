@@ -12,7 +12,7 @@
 import { For, Show, createSignal, onMount } from "solid-js";
 import type { JSX } from "solid-js";
 
-import { HOME, TASK_GROUPS, taskGroupRank } from "./copy.ts";
+import { COMMON, HOME, TASK_GROUPS, taskGroupRank } from "./copy.ts";
 // r24 — 「第一句话该怎么说」：三句例子两边（向导最后一步、首页输入框旁）共用。
 import {
   FIRST_RUN,
@@ -44,6 +44,12 @@ import { describe as describeSchedule } from "./schedule.ts";
 import { RESULTS } from "./copy-results.ts";
 import { resultCount } from "./results.ts";
 import ResultsPanel from "./ResultsPanel.tsx";
+// r5 — 重开后主动提一句「上次有件事没做完」：她不用自己想到去点历史。
+// 只在最近一轮真的没做完时出现；她放过的那一轮不再提（见 resume.ts）。
+import { RESUME } from "./copy-resume.ts";
+import { readDismissedRunId, rememberDismissedRunId, shouldOfferResume } from "./resume.ts";
+import History from "./History.tsx";
+import { useFocusLayer } from "./FocusLayer.tsx";
 import TaskCard from "./TaskCard.tsx";
 import TaskLibrary from "./TaskLibrary.tsx";
 import type { Store } from "../store.ts";
@@ -76,6 +82,17 @@ export default function Home(props: HomeProps): JSX.Element {
   const [libraryOpen, setLibraryOpen] = createSignal(false);
   // r17 — 同上：这是首页自己开的一层「我做的结果」。
   const [resultsOpen, setResultsOpen] = createSignal(false);
+  // r5 — 「上次没做完」那句提示：她放过的**那一轮**的 id（本地记着的一条事实），
+  // 以及点「看看」时在首页上开的那层「我做过的事」。
+  const [dismissedRunId, setDismissedRunId] = createSignal<string | null>(readDismissedRunId());
+  const [resumeHistoryOpen, setResumeHistoryOpen] = createSignal(false);
+  // 出现条件就是「最近一轮没做完、且她还没放过这一轮」——没有就不出现，不做常驻横幅。
+  const offerResume = (): boolean => shouldOfferResume(props.store.runs(), dismissedRunId());
+  const resumeLayer = useFocusLayer({
+    open: () => resumeHistoryOpen(),
+    onEscape: () => setResumeHistoryOpen(false),
+  });
+
   // The shell's store, required: a fallback here would be a second store, and a
   // store opens its own connection to the daemon.
   const store = (): Store => props.store;
@@ -168,6 +185,25 @@ export default function Home(props: HomeProps): JSX.Element {
     input?.focus();
   }
 
+  // r5 — 她点「看看上次那件事」：开「我做过的事」，并把这一轮记成「她看过了」。
+  // 只开界面，不碰任何一轮的进度——不自动继续做。
+  function openResumeHistory(): void {
+    const run = props.store.runs()[0];
+    if (run) {
+      rememberDismissedRunId(run.id);
+      setDismissedRunId(run.id);
+    }
+    setResumeHistoryOpen(true);
+  }
+
+  // r5 — 她说「这次不用」：记下放过这一轮，同一轮不再提。同样不动任何事。
+  function dismissResume(): void {
+    const run = props.store.runs()[0];
+    if (!run) return;
+    rememberDismissedRunId(run.id);
+    setDismissedRunId(run.id);
+  }
+
   // r24 — 她第一次做成的那件事；以及同一件事「多说一个条件」的那一句。
   // 结果卡片归别的 workstream，而这里是她做完之后一定回到的那一屏。
   const firstWin = () => firstWinRun(props.store.runs());
@@ -224,6 +260,38 @@ export default function Home(props: HomeProps): JSX.Element {
         <div class="mx-auto w-full max-w-3xl">
           <h1 class="text-[26px] leading-tight font-bold text-slate-100">{HOME.greeting}</h1>
           <p class="mt-2 text-[16px] text-slate-400">{HOME.intro}</p>
+
+          {/* r5 — 上次那件事没做完：主动说一句，按钮直接把她带到那件记录前。
+              只有最近一轮真的没做完时才出现；点「这次不用」同一轮就不再提。
+              两个按钮都不开始做任何事——看与不看都是她点的。 */}
+          <Show when={offerResume()}>
+            <section
+              class="mt-5 rounded-2xl border-2 border-amber-600 bg-amber-950/30 px-5 py-4"
+              aria-label={RESUME.ariaSection}
+            >
+              <h2 class="text-[20px] font-semibold text-amber-100">{RESUME.title}</h2>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-200">{RESUME.body}</p>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-400">{RESUME.note}</p>
+              <div class="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={openResumeHistory}
+                  aria-label={RESUME.ariaOpen}
+                  class="min-h-[48px] rounded-xl bg-amber-500 px-6 text-[16px] font-bold text-slate-950 hover:bg-amber-400"
+                >
+                  {RESUME.open}
+                </button>
+                <button
+                  type="button"
+                  onClick={dismissResume}
+                  aria-label={RESUME.ariaDismiss}
+                  class="min-h-[44px] rounded-xl border border-slate-600 px-6 text-[16px] font-semibold text-slate-200 hover:bg-slate-800"
+                >
+                  {RESUME.dismiss}
+                </button>
+              </div>
+            </section>
+          </Show>
 
           {/* r24 — 她刚做成第一件事。同一件事原来还能说得更细，这句话就摆在这里，
               点一下同样能填进下面的框：第一次成功之后最该学的就是这一句。 */}
@@ -512,6 +580,30 @@ export default function Home(props: HomeProps): JSX.Element {
       {/* r17 — 全屏的「我做的结果」。打开文件/文件夹都走 store，面板自己不碰桥接。 */}
       <Show when={resultsOpen()}>
         <ResultsPanel store={store()} onClose={() => setResultsOpen(false)} />
+      </Show>
+
+      {/* r5 — 首页上那层「我做过的事」：她点「看看上次那件事」时打开，直接看那件
+          没做完的记录。只读，不改任何一轮的状态。 */}
+      <Show when={resumeHistoryOpen()}>
+        <div
+          ref={resumeLayer}
+          class="fixed inset-0 z-50 flex flex-col bg-[#0b0f14] px-5 py-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label={RESUME.historyLabel}
+        >
+          <button
+            type="button"
+            onClick={() => setResumeHistoryOpen(false)}
+            aria-label={RESUME.historyLabel}
+            class="mb-3 min-h-[44px] self-start rounded-lg pr-3 text-[16px] text-slate-400 hover:text-slate-200"
+          >
+            ← {COMMON.back}
+          </button>
+          <div class="min-h-0 flex-1 overflow-y-auto">
+            <History store={store()} />
+          </div>
+        </div>
       </Show>
 
       {/* #74 — 全屏的任务库。挑中一张卡片就关掉它，交给原来的任务流程。 */}
