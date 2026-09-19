@@ -26,11 +26,13 @@ import {
   visionFallbackNote,
 } from "./capabilities.ts";
 import { FORMAT_COPY, hasExcelFile, hasImageFile, hasPdfFile } from "./copy-capability.ts";
+// P0 — 确认页上「不用这个」：去掉一份文件是**只改输入、不动她的文件**。
+import { CONFIRM_FILES, PASTES_CONTENT_GROUP } from "./copy-files.ts";
 import { useFocusLayer } from "./FocusLayer.tsx";
 import { inspectSelection, nothingReadable as nothingReadableVerdict } from "./format-check.ts";
 import { evidenceFor, failureFor } from "./evidence.ts";
 import { fileName, folderName, hasActiveRisk, planRisks } from "./run.ts";
-import { risksForTask } from "./tasks/index.ts";
+import { FREE_TEXT_TASK_ID, risksForTask, taskById } from "./tasks/index.ts";
 import {
   defaultPreAnswerIndex,
   preAnswerDecisions,
@@ -52,6 +54,8 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   const [allowOverwrite, setAllowOverwrite] = createSignal(false);
   const [showAllFiles, setShowAllFiles] = createSignal(false);
   const [showFailure, setShowFailure] = createSignal(false);
+  // P0 — 这次在确认页上去掉过哪几份（只是不再当输入）。留着让她反悔：能加回来。
+  const [removed, setRemoved] = createSignal<string[]>([]);
   // 「动手前先定好这几件事」——每一道题她选的是哪一条（题号 → 选项下标）。
   const [answers, setAnswers] = createSignal<Record<string, number>>({});
   let cancelButton: HTMLButtonElement | undefined;
@@ -61,6 +65,27 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   const risky = () => hasActiveRisk(risks());
   const files = () => run()?.files ?? [];
   const visibleFiles = () => (showAllFiles() ? files() : files().slice(0, 6));
+  // 这件事要不要她选的文件。卡片不在（旧记录）时退回自由任务：它也要文件。
+  const def = () => taskById(run()?.taskId ?? "");
+  const needsFiles = (): boolean => {
+    const card = def();
+    if (card) return card.needs === "files" || card.needs === "folder";
+    return (run()?.taskId ?? "") === FREE_TEXT_TASK_ID;
+  };
+  const needsFolder = (): boolean => def()?.needs === "folder";
+  // 去掉过、现在确实不在这批输入里的那几份（她又用「再选一个」放回来的就不算）。
+  const removedNow = (): string[] => removed().filter((path) => !files().includes(path));
+  // 她把需要文件的这件事去到了一份不剩：这时才开始跑不了，得说清为什么 + 给条出路。
+  //
+  // 两个条件缺一不可：
+  //   * `removedNow().length > 0`：只拦**她自己去掉**造成的空。微信那几张 needs "files"
+  //     的卡可以一份文件都不选、内容整段贴在话里（`WechatImport` 的粘贴入口），
+  //     只按「文件为空」去拦会把那条合法的粘贴路一起堵死；
+  //   * `!pastesContent()`：微信族的文件是**加法不是门槛**（卡片自己的注释），即使她
+  //     把选的文件都去掉了，贴进来的那段话仍然是输入——所以那一族不拦。
+  const pastesContent = (): boolean => def()?.group === PASTES_CONTENT_GROUP;
+  const removedAllFiles = (): boolean =>
+    needsFiles() && !pastesContent() && files().length === 0 && removedNow().length > 0;
   // #75 — 选中的是 Excel，而这台电脑还读不了。这是边界，不是错误。
   const showSheetFallback = () => hasExcelFile(files()) && !sheetCapability().available;
   // #50 — 同上，选中的是 PDF 而这台电脑还处理不了。
@@ -84,6 +109,8 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
     const staged = run();
     if (!staged || staged.state !== "preview" || staged.id === syncedRunId) return;
     syncedRunId = staged.id;
+    // 每开一张新的确认页，上一件去掉过哪几份不该跟过来。
+    setRemoved([]);
     // 每开一张新的确认页，先把她没动过的那些按默认值同步进指令。
     const defaults: Record<string, number> = {};
     for (const decision of preAnswerDecisions(staged.taskId)) {
@@ -98,6 +125,34 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
     setAnswers(next);
     setPreAnswers(run()?.taskId ?? "", next);
   }
+
+  // P0 — 「不用这个」：只把这一份从这次的输入里去掉（`run.files`），不删她的文件。
+  // 去掉后 `composedInstruction` 拼出的【要处理的文件】里就没有它了。
+  function removeFile(path: string): void {
+    props.store.removeRunFile(path);
+    setRemoved((list) => (list.includes(path) ? list : [...list, path]));
+  }
+
+  /** 「加回来」：把刚去掉的那一份放回这次的输入；已有的不会重复。 */
+  function restoreFile(path: string): void {
+    props.store.addRunFile(path);
+    setRemoved((list) => list.filter((item) => item !== path));
+  }
+
+  /** 「再选一个」：重新打开选文件的窗口（文件夹类任务打开文件夹那一个）。 */
+  async function pickAgain(): Promise<void> {
+    try {
+      if (needsFolder()) {
+        const path = await props.store.pickFolder();
+        if (path) props.store.addRunFile(path);
+        return;
+      }
+      const paths = await props.store.pickFiles({ multiple: true, extensions: def()?.accept });
+      for (const path of paths ?? []) props.store.addRunFile(path);
+    } catch {
+      // 窗口没打开：她已经看到 store 的提示，这里不重复第二遍。
+    }
+  }
   // #64 — what this computer's own history says, or nothing at all.
   const track = () => evidenceFor(props.store.runs(), run()?.taskId ?? "");
   const failure = () => failureFor(props.store.runs(), run()?.taskId ?? "");
@@ -107,6 +162,8 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   const verdictNote = () => formatAdviceNote(verdict());
   // 一个都读不了时，开始按钮旁边要写清为什么现在别点。
   const startBlockNote = () => formatStartBlockNote(verdict());
+  // P0 — 需要文件的卡被去掉到一份不剩时，同样在开始按钮旁说清为什么。
+  const blockNote = (): string | null => (removedAllFiles() ? CONFIRM_FILES.cannotStart : startBlockNote());
   // 上面那条判断只有一份（format-check.ts），选文件处用的是同一个函数。
   const nothingReadable = (): boolean => nothingReadableVerdict(verdict());
   const blockedFiles = (): string[] => {
@@ -242,14 +299,44 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
             </h3>
             <Show
               when={files().length > 0}
-              fallback={<p class="mt-2 text-[16px] text-slate-400">这次不涉及文件，内容来自你写的话。</p>}
+              fallback={
+                // 她把需要文件的这件事去到了一份不剩（刚去掉最后一个）：说清为什么
+                // 现在不能开始 + 一条出路。只是「不拿它当输入」，她的文件一份没动。
+                <Show
+                  when={removedAllFiles()}
+                  fallback={<p class="mt-2 text-[16px] text-slate-400">这次不涉及文件，内容来自你写的话。</p>}
+                >
+                  <div class="mt-2 rounded-xl border border-amber-600 bg-amber-950/40 px-4 py-3">
+                    <p class="text-[20px] font-semibold text-amber-100">{CONFIRM_FILES.emptyHeading}</p>
+                    <p class="mt-1 text-[16px] leading-relaxed text-amber-100/90">{CONFIRM_FILES.emptyBody}</p>
+                    <p class="mt-1 text-[16px] leading-relaxed text-slate-200">{CONFIRM_FILES.emptyPickHint}</p>
+                    <button
+                      type="button"
+                      onClick={() => void pickAgain()}
+                      class="mt-2 min-h-[44px] rounded-lg border border-sky-500 px-4 text-[16px] font-semibold text-sky-100 hover:bg-sky-900/60"
+                    >
+                      {CONFIRM_FILES.pickAgain}
+                    </button>
+                  </div>
+                </Show>
+              }
             >
               <ul class="mt-2 space-y-1">
                 <For each={visibleFiles()}>
                   {(path) => (
-                    <li class="truncate rounded-lg bg-slate-800/60 px-3 py-2 text-[16px] text-slate-200" title={fileName(path)}>
-                      {fileName(path)}
-                      <span class="ml-2 text-[16px] text-slate-500">在 {folderName(path)}</span>
+                    <li class="flex items-center gap-2 rounded-lg bg-slate-800/60 px-3 py-2">
+                      <span class="min-w-0 flex-1 truncate text-[16px] text-slate-200" title={fileName(path)}>
+                        {fileName(path)}
+                        <span class="ml-2 text-[16px] text-slate-500">{CONFIRM_FILES.fileInFolder(folderName(path))}</span>
+                      </span>
+                      <button
+                        type="button"
+                        aria-label={CONFIRM_FILES.removeLabel(fileName(path))}
+                        onClick={() => removeFile(path)}
+                        class="shrink-0 min-h-[44px] rounded-lg px-2 text-[16px] text-slate-300 hover:bg-slate-700 hover:text-slate-100"
+                      >
+                        {CONFIRM_FILES.removeOne}
+                      </button>
                     </li>
                   )}
                 </For>
@@ -263,6 +350,33 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
                   还有 {files().length - visibleFiles().length} 个，全部展开
                 </button>
               </Show>
+            </Show>
+
+            {/* 去掉过东西：列出来 + 一个「加回来」，去掉是能反悔的。 */}
+            <Show when={removedNow().length > 0}>
+              <div class="mt-3 rounded-xl border border-slate-700 bg-slate-800/50 px-4 py-3">
+                <p class="text-[16px] font-semibold text-slate-200">{CONFIRM_FILES.removedHeading}</p>
+                <ul class="mt-2 space-y-1">
+                  <For each={removedNow()}>
+                    {(path) => (
+                      <li class="flex items-center gap-2">
+                        <span class="min-w-0 flex-1 truncate text-[16px] text-slate-300" title={fileName(path)}>
+                          {fileName(path)}
+                          <span class="ml-2 text-[16px] text-slate-500">{CONFIRM_FILES.fileInFolder(folderName(path))}</span>
+                        </span>
+                        <button
+                          type="button"
+                          aria-label={CONFIRM_FILES.undoLabel(fileName(path))}
+                          onClick={() => restoreFile(path)}
+                          class="shrink-0 min-h-[44px] rounded-lg px-2 text-[16px] text-sky-300 hover:bg-slate-700"
+                        >
+                          {CONFIRM_FILES.undoRemove}
+                        </button>
+                      </li>
+                    )}
+                  </For>
+                </ul>
+              </div>
             </Show>
 
             <Show when={showSheetFallback()}>
@@ -391,15 +505,16 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
               </div>
               <button
                 type="button"
+                disabled={removedAllFiles()}
                 onClick={() => void props.store.dryRun()}
-                class="min-h-[52px] shrink-0 rounded-xl border border-sky-500 px-6 text-base font-semibold text-sky-100 hover:bg-sky-900/60"
+                class="min-h-[52px] shrink-0 rounded-xl border border-sky-500 px-6 text-base font-semibold text-sky-100 hover:bg-sky-900/60 disabled:cursor-not-allowed disabled:border-slate-700 disabled:text-slate-500"
               >
                 {TRY_FIRST.action}
               </button>
             </div>
             <div class="flex flex-wrap items-center justify-end gap-3">
-              {/* #88 — 开始按钮被禁用时，理由得写在她点之前，而不是点完才知道。 */}
-              <Show when={startBlockNote()}>
+              {/* #88 / P0 — 开始按钮被禁用时，理由得写在她点之前，而不是点完才知道。 */}
+              <Show when={blockNote()}>
                 {(note) => (
                   <p class="mr-auto max-w-md text-[16px] leading-relaxed text-amber-200">{note()}</p>
                 )}
@@ -414,7 +529,7 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
               </button>
               <button
                 type="button"
-                disabled={nothingReadable()}
+                disabled={nothingReadable() || removedAllFiles()}
                 onClick={() => void props.store.confirmRun(allowOverwrite())}
                 class="min-h-[52px] rounded-xl bg-sky-500 px-8 text-base font-bold text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
               >

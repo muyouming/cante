@@ -7,6 +7,8 @@
 //
 //   bun test gui/src
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRoot } from "solid-js";
 
@@ -877,6 +879,104 @@ describe("replyToRun", () => {
 });
 
 // ---------------------------------------------------------------------------
+
+// P0 — 确认页上「不用这个」。
+//
+// 三条要钉住的：
+//   1. 去掉真的改的是**输入**：`composedInstruction` 里那一份不再出现（不是只改显示）；
+//   2. 绝不删她的文件：去掉前后，磁盘上那份文件原封不动（这里用真文件验）；
+//   3. 只对停在确认页的这次生效：已经在动手的不许这样改。
+describe("P0 确认页：不用这个（去掉一份文件）", () => {
+  const TASK = {
+    id: "excel.merge",
+    title: "把几张表合成一张",
+    plan: ["打开这几张表", "合成一张新表"],
+  };
+
+  test("去掉后真正发出去的指令里不再有那一份（走 composedInstruction）", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这两张表合成一张");
+
+    // 去掉之前：两份都在指令里。
+    const before = store.composedInstruction(store.currentRun()!);
+    expect(before).toContain("/work/a.xlsx");
+    expect(before).toContain("/work/b.xlsx");
+    expect(before).toContain("一共 2 个");
+
+    store.removeRunFile("/work/b.xlsx");
+    expect(store.currentRun()?.files).toEqual(["/work/a.xlsx"]);
+
+    // 去掉之后：真正发出去的那段里，「b.xlsx」一个字母都不剩。
+    const after = store.composedInstruction(store.currentRun()!);
+    expect(after).not.toContain("/work/b.xlsx");
+    expect(after).toContain("/work/a.xlsx");
+    expect(after).toContain("一共 1 个");
+
+    // 而且开始之后真发出去的，就是这段（逐字一致）。
+    await store.confirmRun();
+    const sent = opCalls("send_input") as Array<{ text: string }>;
+    expect(sent.at(-1)?.text).toBe(after);
+    dispose();
+  });
+
+  test("去掉一份文件绝不删她的文件：磁盘上那份原封不动", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cante-remove-"));
+    try {
+      const keep = join(dir, "保留.xlsx");
+      const drop = join(dir, "不用这个.xlsx");
+      writeFileSync(keep, "区域,金额\n华东,1200\n");
+      writeFileSync(drop, "备注\n这份别删\n");
+      const before = readFileSync(drop, "utf8");
+
+      const { store, dispose } = await setup();
+      await store.startRun(TASK, [keep, drop], "把这两张表合成一张");
+      store.removeRunFile(drop);
+
+      // 她的文件还在，内容一个字没变。
+      expect(existsSync(drop)).toBe(true);
+      expect(readFileSync(drop, "utf8")).toBe(before);
+      // 而且这次运行没有任何一条桥命令去动过文件（begin_run 只在点开始后才发生）。
+      expect(opCalls("begin_run")).toEqual([]);
+      dispose();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("去掉是能反悔的：加回来又回到输入里", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这两张表合成一张");
+    store.removeRunFile("/work/b.xlsx");
+    store.addRunFile("/work/b.xlsx");
+    expect(store.currentRun()?.files).toEqual(["/work/a.xlsx", "/work/b.xlsx"]);
+    expect(store.composedInstruction(store.currentRun()!)).toContain("/work/b.xlsx");
+    // 加回来不重复。
+    store.addRunFile("/work/b.xlsx");
+    expect(store.currentRun()?.files).toEqual(["/work/a.xlsx", "/work/b.xlsx"]);
+    dispose();
+  });
+
+  test("已经在动手的这次不能去掉文件（那是改半路，不是改准备）", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这两张表合成一张");
+    await store.confirmRun();
+    expect(store.currentRun()?.state).toBe("running");
+    store.removeRunFile("/work/b.xlsx");
+    expect(store.currentRun()?.files).toEqual(["/work/a.xlsx", "/work/b.xlsx"]);
+    dispose();
+  });
+
+  test("去掉最后一个：输入就是空的，开始拼出的指令如实说没有文件", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/a.xlsx"], "把这两张表合成一张");
+    store.removeRunFile("/work/a.xlsx");
+    expect(store.currentRun()?.files).toEqual([]);
+    // 指令跟着变：文件那一节变成「这次没有选文件」（不是还挂着那一份）。
+    expect(store.composedInstruction(store.currentRun()!)).toContain("这次没有选文件");
+    expect(store.composedInstruction(store.currentRun()!)).not.toContain("/work/a.xlsx");
+    dispose();
+  });
+});
 
 describe("失败记录：可核对的原因不能被洗掉（r17）", () => {
   const TASK = {

@@ -201,7 +201,9 @@ const INLINE_COPY_BUDGET: Readonly<Record<string, number>> = {
   // 出来的现状（按“一段中文算一处”统计）。
   // #192 A：原「先试跑给我看（只看不动）」那一句已搬进 copy.ts 的 TRY_FIRST，
   // 所以这一格从 21 减到 20（台账只减不增）。
-  "ConfirmSheet.tsx": 20,
+  // P0：两处文件名后的「在 …」搬进了 copy-files.ts 的 CONFIRM_FILES.fileInFolder，
+  // 所以再减到 19（同一句话一处，文件列表和「已经去掉的」共用）。
+  "ConfirmSheet.tsx": 19,
   // History.tsx 的 22 处已经全部搬进 copy-history.ts（#57 那一轮），从台账里退场。
   "PrivacyPanel.tsx": 13,
   "ResultCard.tsx": 18,
