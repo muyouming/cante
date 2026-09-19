@@ -101,12 +101,27 @@ New-Item -ItemType Directory -Force -Path $seedDir | Out-Null
 # 先备份（只备份一次；重复 seed 不会把备份覆盖成“铺过的”那份）。
 # 也要记下**跑之前到底有没有**这个文件：没有的话，restore 应该把它删掉，而不是
 # 把“第一次铺进去的那份”又放回去（那样就留下了痕迹 —— 实测踩到）。
-$originalExisted = Test-Path $runsFile
-if ($originalExisted) {
-    if (-not (Test-Path $backup)) { Copy-Item $runsFile $backup -Force; Say ("  已备份原 runs.json → " + $backup) }
-    else { Say ("  （备份已存在，不覆盖：" + $backup + "）") }
+#
+# **已经在铺过的状态里再 seed 一次**（没先 restore）时，要注意：
+# `runs.json` 现在是**我们铺的**，不能拿它当真原样去备份、也不能重新算 originalExisted ✗。
+# 否则第二次 seed 会把“夹具”当成“真实历史”记下来，最后 restore 就把夹具留下了——
+# 实测踩到。所以在建备份/写记号之前先读一眼已有的记号：有就沿用它的 originalExisted。
+$previousOriginal = $null
+if (Test-Path $marker) {
+    try { $previousOriginal = [bool](Get-Content $marker -Raw -Encoding UTF8 | ConvertFrom-Json).originalExisted } catch {}
+}
+$originalExisted = $null
+if ($previousOriginal -ne $null) {
+    $originalExisted = $previousOriginal
+    Say ('  已经铺过一次了（记号还在）—— 沿用第一次记下的原样：originalExisted=' + $originalExisted)
 } else {
-    Say '  （跑之前本来就没有 runs.json；restore 时会把它删掉）'
+    $originalExisted = Test-Path $runsFile
+    if ($originalExisted) {
+        if (-not (Test-Path $backup)) { Copy-Item $runsFile $backup -Force; Say ("  已备份原 runs.json → " + $backup) }
+        else { Say ("  （备份已存在，不覆盖：" + $backup + "）") }
+    } else {
+        Say '  （跑之前本来就没有 runs.json；restore 时会把它删掉）'
+    }
 }
 
 # 1) 造 K 份真结果文件（用应用自带的工具，跟别的验收一样）

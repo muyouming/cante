@@ -212,3 +212,86 @@ powershell -File gui\scripts\windows\a11y-uia.ps1 -Scenario results -WorkDir <�
 
 **跑完机器已还原**：`runs.json` 是**跑之前的状态**（本来没有 → 已删除，复核输出 `ABSENT ✓`）；
 关掉了所有 `cante-gui` / `cante-bridge` 残留进程（`leftover=0`）。
+
+---
+
+## 8. 修复后（闭环）：#230 已合入 main，同一份夹具再跑一遍
+
+**修复**：`4e404c9`（#230「结果面板每一行的按钮名字带上文件名」）把
+`copy-results.ts` 里那两句常量改成函数：
+
+```ts
+ariaOpen:       (name: string): string => `打开 ${name}`,
+ariaOpenFolder: (name: string): string => `打开 ${name} 所在的文件夹`,
+```
+
+`ResultsPanel.tsx` 传的是 `entry.name`（结果文件名）。**这一节只是复验，没改产品代码。**
+
+### 8.1 前 / 后对照（同一份夹具：47 行结果 = N 应相同）
+
+| | 可 Tab 按钮 **N** | 不同名字 **M** | `M < N/4`？ | `distinct-button-names` | 其余 5 条判据 | 退出码 |
+| --- | --- | --- | --- | --- | --- | --- |
+| **修复前**（`1dd1608`） | **95** | **3** | 成立（3 < 23.75） | **✗ 红** | ✓ | 3（产品问题） |
+| **修复后**（`b16e3d5`，含 #230） | **95** | **95** | 不成立 | **✓ 绿** | ✓ | **0**（全过） |
+
+**N 没变（95）而 M 从 3 涨到 95** —— 这正是要的那个形状：按钮一个没多、一个没少，
+只是**每一个都开始叫自己的文件名**。修复前那 3 个名字是
+`打开这个结果文件` ×47、`打开这个结果文件所在的文件夹` ×47、`回到首页` ×1。
+
+### 8.2 修复后的原始输出（逐字）
+
+```
+=== 读屏分辨度（results）：可 Tab 按钮 95 个 / 不同名字 95 个 ===
+  （身份来源：runtimeId 可用 97 次 / 退回矩形 0 次）
+  1 × 「打开 结果_挑出华东区-32.xlsx 所在的文件夹」
+  1 × 「打开 结果_挑出华东区-33.xlsx」
+  1 × 「打开 结果_挑出华东区-32.xlsx」
+  1 × 「打开 结果_挑出华东区-31.xlsx」
+  …（其余 91 行同理，每个名字出现 1 次）
+  ✓ 95 个可 Tab 按钮有 95 个不同名字（不算 M < N/4）。
+
+Tab 第 96 步回到起点：Edit「搜索做过的结果文件」
+
+=== 判据汇总 ===
+  ✓ [results] focusable-have-names
+  ✓ [results] tab-loops
+  ✓ [results] tab-not-stuck
+  ✓ [results] tab-reachable-buttons-44px
+  ✓ [results] distinct-button-names
+  ✓ [results] esc-closes
+
+a11y-uia: OK — results 这一场的判据都满足。
+```
+
+**独立核对**（不走脚本的判据，直接数 `visited-results.json`）：
+`buttons: 95 / distinct names: 95 / duplicate names: 0` ✓。
+另外在**构建产物**里核过：`dist/assets/*.js` 里有 `打开 ${e}`、没有旧常量
+`打开这个结果文件`（0 处）—— 说明验的确实是修复后的代码，不是缓存。
+
+### 8.3 按要求的超时方式跑的（`Start-Job` + `Wait-Job -Timeout 180`）
+
+```powershell
+$j = Start-Job { & powershell -NoProfile -ExecutionPolicy Bypass -File gui\scripts\windows\a11y-uia.ps1 `
+      -Scenario results -WorkDir <目录> -Exe <现构建的 cante-gui.exe> *>&1 }
+if (Wait-Job $j -Timeout 180) { Receive-Job $j } else { Stop-Job $j; Remove-Job $j -Force; '超时：180 秒没跑完' }
+```
+
+**实测耗时 `66.9s`，没超时**（`Wait-Job` 返回真）。这一次也同样是 **N=95 / M=95**、判据全绿。
+（脚本自己会把超时与"确认没有"分开写；这里如实报的是"跑完了"。）
+
+> 说明：这一轮**没有任何一条命令超过 10 分钟** —— 最长的就是这条 66.9s 的 Job。
+> 上一轮那次 8.8 分钟的卡顿（提权任务管理器抢前台）已经由「快速失败」修掉，本轮没再出现
+> （那扇窗口也已由隔壁工作树的 peer 关掉）。
+
+### 8.4 这一轮又补掉的一个夹具缺陷（顺带）
+
+**重复 seed 而没先 restore 时，会把夹具当成真实历史留下** ✗：
+记号里记着「跑之前有没有 runs.json」，但**重复 seed** 会用**当前（已经是夹具的）**
+runs.json 重新算一遍，还把备份覆盖成夹具 —— 于是 restore 把夹具放回去、留在她面板里
+（我清机器时实测踩到）。修法：seed 前先读**已有的记号**，有就沿用第一次记下的
+`originalExisted`，不再重算。**实测**：连 seed 两次后 restore，最终 `runs.json` **不存在**（对）。
+
+### 8.5 跑完机器状态
+
+`runs.json` 已还原成**跑之前的样子**（本来没有 → 已删除，`file-safety\` 目录为空）；
+两个夹具的备份/记号都已清掉；`cante-gui` / `cante-bridge` 残留进程 **0**。
