@@ -12,6 +12,7 @@ import { For, Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { TRUST, TRY_FIRST, evidenceLine } from "./copy.ts";
+import HintText from "./HintText.tsx";
 import { PRE_ANSWER_COPY } from "./copy-preanswer.ts";
 import type { PreAnswerDecision } from "./copy-preanswer.ts";
 import {
@@ -203,7 +204,9 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
                     <span class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-800 text-[16px] text-slate-300">
                       {index() + 1}
                     </span>
-                    <span>{step}</span>
+                    <span>
+                      <HintText text={step} />
+                    </span>
                   </li>
                 )}
               </For>
