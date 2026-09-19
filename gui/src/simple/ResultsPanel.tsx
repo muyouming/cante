@@ -210,7 +210,7 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
                           type="button"
                           disabled={!canOpen(entry)}
                           onClick={() => void props.store.openPath(entry.path)}
-                          aria-label={RESULTS.actions.ariaOpen}
+                          aria-label={RESULTS.actions.ariaOpen(entry.name)}
                           class="min-h-[48px] rounded-xl bg-sky-500 px-5 text-[16px] font-bold text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
                         >
                           {RESULTS.actions.open}
@@ -218,7 +218,7 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
                         <button
                           type="button"
                           onClick={() => void props.store.revealPath(entry.path)}
-                          aria-label={RESULTS.actions.ariaOpenFolder}
+                          aria-label={RESULTS.actions.ariaOpenFolder(entry.name)}
                           class="min-h-[48px] rounded-xl border border-slate-600 px-5 text-[16px] font-semibold text-slate-100 hover:bg-slate-800"
                         >
                           {RESULTS.actions.openFolder}
