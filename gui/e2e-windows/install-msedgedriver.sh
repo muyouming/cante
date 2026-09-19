@@ -89,18 +89,28 @@ printf '==> WebView2 运行时：%s\n' "${webview2_version:-（读不到）}"
 printf '==> Edge 浏览器：%s\n' "${edge_version:-（读不到）}"
 [ -n "$target" ] || die "这台机器上读不到 Edge/WebView2 版本，装不了匹配的驱动。"
 
-# Try the exact runtime build first, then the newest build of the same major.
+# Try the exact runtime build first, then walk back.
+#
+# 2026-09-19：CI 上 `curl: (22) ... 400` 卡红过一个 PR ✗ —— 微软那个 CDN 对**某些具体版本**
+# 会返回 400（同一个地址在人肉下载时又是好的 ✓），所以只试"目标版本 + 同主版本最新"不够 ✗。
+# 这里改成**逐级回退**（同主版本里往前找几个 ✓），并且**把试过的每个版本与它的 HTTP 码都打出来** ✓
+# —— 下次再红，日志里直接能看出是"CDN 挂了"还是"版本被下架了" ✓，不用猜 ✓。
 installed=""
-for candidate in "$target" "$(latest_for_major "$target")"; do
+tried=""
+for candidate in "$target" "$(latest_for_major "$target")" \
+                 "$(latest_for_major $(( ${target%%.*} - 1 )) 2>/dev/null)" ; do
   [ -n "$candidate" ] || continue
+  case " $tried " in *" $candidate "*) continue ;; esac
+  tried="$tried $candidate"
   printf '==> 试 msedgedriver %s\n' "$candidate"
   if curl -fsSL --retry 2 --retry-delay 3 --max-time 300 \
     "$BASE/$candidate/edgedriver_win64.zip" -o "$ZIP"; then
     installed="$candidate"
     break
   fi
+  printf '    这个版本拿不到（见上面的 curl 错误码）—— 继续往下一个候选 ✓\n'
 done
-[ -n "$installed" ] || die "微软那边没有可下载的 msedgedriver（试过 $target 及其同主版本的最新版）。"
+[ -n "$installed" ] || die "微软那边没有可下载的 msedgedriver（试过：${tried:-无}）。看上面的 curl 错误码：400/404 是版本被下架或地址变了，超时/5xx 是 CDN 抖动——这两种要分开处理 ✗。"
 
 if command -v unzip >/dev/null 2>&1; then
   unzip -o -q "$ZIP" -d "$DEST"
