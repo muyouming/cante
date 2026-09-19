@@ -15,28 +15,28 @@ import { placeOf } from "./location.ts";
 
 describe("placeOf：把她熟悉的位置认出来", () => {
   test("桌面 / 下载 / 文档 / 图片 / 微信，中英文都认，Windows 与苹果分隔符都认", () => {
-    expect(placeOf("C:\\Users\\王姐\\Desktop\\汇总表.xlsx")).toBe("desktop");
-    expect(placeOf("C:\\Users\\王姐\\桌面\\汇总表.xlsx")).toBe("desktop");
-    expect(placeOf("/home/wang/Desktop/汇总表.xlsx")).toBe("desktop");
-    expect(placeOf("C:\\Users\\王姐\\Downloads\\汇总表.xlsx")).toBe("downloads");
-    expect(placeOf("C:\\Users\\王姐\\下载\\汇总表.xlsx")).toBe("downloads");
-    expect(placeOf("C:\\Users\\王姐\\Documents\\汇总表.xlsx")).toBe("documents");
-    expect(placeOf("C:\\Users\\王姐\\我的文档\\汇总表.xlsx")).toBe("documents");
-    expect(placeOf("C:\\Users\\王姐\\Pictures\\照片.jpg")).toBe("pictures");
+    expect(placeOf("C:\\Users\\用户名\\Desktop\\汇总表.xlsx")).toBe("desktop");
+    expect(placeOf("C:\\Users\\用户名\\桌面\\汇总表.xlsx")).toBe("desktop");
+    expect(placeOf("/home/user/Desktop/汇总表.xlsx")).toBe("desktop");
+    expect(placeOf("C:\\Users\\用户名\\Downloads\\汇总表.xlsx")).toBe("downloads");
+    expect(placeOf("C:\\Users\\用户名\\下载\\汇总表.xlsx")).toBe("downloads");
+    expect(placeOf("C:\\Users\\用户名\\Documents\\汇总表.xlsx")).toBe("documents");
+    expect(placeOf("C:\\Users\\用户名\\我的文档\\汇总表.xlsx")).toBe("documents");
+    expect(placeOf("C:\\Users\\用户名\\Pictures\\照片.jpg")).toBe("pictures");
     expect(placeOf("C:\\WeChat Files\\汇总表.xlsx")).toBe("wechat");
-    expect(placeOf("C:\\Users\\王姐\\微信\\汇总表.xlsx")).toBe("wechat");
+    expect(placeOf("C:\\Users\\用户名\\微信\\汇总表.xlsx")).toBe("wechat");
   });
 
   test("大小写与正反斜杠混用都认", () => {
-    expect(placeOf("C:/Users/Wang/DESKTOP/汇总表.xlsx")).toBe("desktop");
-    expect(placeOf("C:\\Users\\Wang\\Desktop/汇总表.xlsx")).toBe("desktop");
+    expect(placeOf("C:/Users/username/DESKTOP/汇总表.xlsx")).toBe("desktop");
+    expect(placeOf("C:\\Users\\username\\Desktop/汇总表.xlsx")).toBe("desktop");
   });
 
   test("认不出来就说认不出来，绝不猜", () => {
     expect(placeOf("C:\\项目资料\\2026\\汇总表.xlsx")).toBe("other");
     expect(placeOf("汇总表.xlsx")).toBe("other");
     // 桌面下面的子文件夹不是桌面：说成桌面会让她去错地方。
-    expect(placeOf("C:\\Users\\王姐\\Desktop\\备份\\汇总表.xlsx")).toBe("other");
+    expect(placeOf("C:\\Users\\用户名\\Desktop\\备份\\汇总表.xlsx")).toBe("other");
   });
 
   test("只是名字里带「桌面」两字、实际不是桌面的，不算桌面", () => {
