@@ -36,8 +36,8 @@ Guest Agent 还要装 virtio-serial ✓）。
 
 | 验证 | 在哪 | 看什么 |
 | --- | --- | --- |
-| `gate` job（Linux） | `.github/workflows/gui.yml` | 与本地 e2e 同判据（**判据必须一致** ✓ —— 曾经"本地绿 CI 红"✗）|
-| `windows` job（windows-latest） | 同上 | 同一份测试在 Windows 上跑 ✓ + `tauri-driver` 界面冒烟 ✓ + msedgedriver 与 WebView2 版本匹配 ✓ |
+| `gate` job（Linux） | `.github/workflows/gui.yml` | **直接跑 `gui/scripts/e2e.sh`** ✓（本地 8 步全在内 ✓，所以判据一致 ✓ —— 曾经"本地绿 CI 红"✗）；job 里另外**重复**跑了 secret scan 与许可检查 ✓（冗余但无害 ✓）|
+| `windows` job（windows-latest） | 同上 | **同一份 `e2e.sh`** ✓（判据一致 ✓）+ 真 WebView2 界面冒烟：装 `tauri-driver` ✓ → 取**匹配 WebView2 版本**的 `msedgedriver` ✓ → `tauri build --debug --no-bundle` ✓ → **降权**跑（提权会让 WebView2 忽略 `WEBVIEW2_*` ✗）→ **上传证据 artifact** ✓ |
 | 发布流水线 | `.github/workflows/gui-release.yml` | 双平台安装包 + **产物闸门跑在打出来的 dmg 上** ✓ |
 
 ## 四、这张表自己怎么保持不腐
@@ -47,3 +47,7 @@ Guest Agent 还要装 virtio-serial ✓）。
   "要真 Windows 桌面"✓），**不要**让人以为本地 e2e 覆盖了它 ✗；
 - 记录文件（`WINDOWS-ACCEPTANCE-N.md` / `SWEEP-*.md`）是**证据** ✓，这张表是**索引** ✓ ——
   两者别混：`SWEEP-0.2.1.md` 是一次运行的记录 ✓，不是"我们每次都这样"的承诺 ✓。
+- **退出码也要写在这张表能查到的地方** ✓：Windows 那几个验收脚本用 `0`=通过 / `2`=**环境问题** /
+  `3`=**产品问题** ✓（`accept-first-screen.ps1` ✓、`run-accept-drive.ps1` ✓）—— 把这两类分开，
+  正是我们最怕混淆的那一类 ✗✓。新脚本**沿用**这套约定，别自创 ✗。
+
