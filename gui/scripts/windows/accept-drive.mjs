@@ -1,19 +1,26 @@
 // 「装好的应用 + 包里的桥 + 这台机器上的 pi → 点一张卡 → 真的出一份文件」的驱动。
 //
-// 它由 `accept-install.ps1` 用一组 ACCEPT_* 环境变量启动，做三件事：
+// 它由 `accept-install.ps1` / `run-accept-drive.ps1` 用一组 ACCEPT_* 环境变量启动，做三件事：
 //   1. 起 tauri-driver，对着**装好的** cante-gui.exe 开一个 WebDriver 会话；
-//   2. 在真实 WebView2 里点卡片 → 选文件（原生对话框交给 accept-file-dialog.ps1）→
-//      写一句话 → 生成计划 → 开始；
+//   2. 在真实 WebView2 里点卡片 → （文件卡：选文件；文字卡：直接把整段字贴进来）→
+//      写一句话 → 生成计划 → 确认页（顺手用 UIA 读「先给我看一眼」是否在屏上）→ 开始；
 //   3. 跑的过程中替她把审批页点成「允许这次」（并把次数记下来），最后把结果页文字、
 //      截图、每一步耗时写成 JSON。
 //
-// 它**不判断**产出文件对不对 —— 那是 accept-install.ps1 用应用自带的 cante-sheets 做的，
+// 两种卡（由 ACCEPT_TEXT / ACCEPT_PASTE_TEXT 决定走哪条）：
+//   * **文件卡**（needs:"files"/"folder"）：第一步是选文件，原生对话框交给
+//     accept-file-dialog.ps1；需要 ACCEPT_INPUT 指一张输入表。
+//   * **文字卡**（needs:"text"，例如 doc.worksummary）：**没有选文件这一步**，
+//     第一屏就是「这个任务不用选文件，直接说你要写什么就行」；来料整段贴进输入框。
+//     不要用文件卡那条路去驱动它（会卡在等「选择文件」上）—— 这就是加这个开关的原因。
+//
+// 它**不判断**产出文件对不对 —— 那是 run-accept-drive.ps1 用应用自带的 cante-sheets 做的，
 // 因为「界面说成功」不算证据（AGENTS.md §3.6）。
 //
 // 为什么单独一个 .mjs：WebDriver 的客户端是 selenium-webdriver（gui/node_modules 里已有），
 // 而 PowerShell 里没有对应的库。PowerShell 负责安装/卸载/取证，Node 负责驱动窗口。
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -35,6 +42,26 @@ const WORKDIR = env.ACCEPT_WORKDIR ?? "";
 const INPUT = env.ACCEPT_INPUT ?? "";
 const CARD = env.ACCEPT_CARD ?? "从大表里挑出想要的行";
 const INSTRUCTION = env.ACCEPT_INSTRUCTION ?? "把华东区的记录挑出来，另存成一张新表";
+/**
+ * 撕进来的那段文字（`needs: "text"` 的卡，例如 doc.worksummary）：它**不用先存成文件**，
+ * 直接贴进输入框就能做。给了它就走「不选文件」那条路：跳过原生对话框、也不再要求
+ * ACCEPT_INPUT。来料是文字还是文件，由**卡片自己**决定（TaskRunner 根据 needs 决定第一屏），
+ * 驱动只负责按卡片实际长什么样去驱动 —— 所以这里用一个显式开关，而不是去猜。
+ *   ACCEPT_TEXT=1（或给了 ACCEPT_PASTE_TEXT）→ 卡片是 needs:"text"，跳过选文件
+ */
+const PASTE_TEXT = env.ACCEPT_PASTE_TEXT ?? "";
+const TEXT_MODE = env.ACCEPT_TEXT === "1" || PASTE_TEXT !== "";
+/**
+ * 确认页上要当证据读的那几个字（#192 A）。**这里不做可见性判定** —— 实测：
+ * msedgedriver 启动应用时会用自己的值覆盖 WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS
+ * （查 msedgewebview2.exe 的命令行，里面没有 force-renderer-accessibility），
+ * 于是 WebDriver 带起来的窗口里，UI Automation 只能看到 3 个元素（壳），看不到 DOM。
+ * 也就是说：走 WebDriver 这条路，UIA 根本读不到确认页的文字。
+ *
+ * 可见性证据改由 `read-confirm-visible.ps1` 取证（它自己启动应用，没经过 msedgedriver，
+ * UIA 能读到整棵树）。驱动只把“确认页到了”这个事实记下来，作为那条独立取证的锚点。
+ */
+const VISIBLE_NEEDLE = env.ACCEPT_VISIBLE_NEEDLE ?? "先给我看一眼（只看不动）";
 const ARTIFACTS = env.ACCEPT_ARTIFACTS ?? WORKDIR;
 const RESULT_JSON = env.ACCEPT_RESULT_JSON ?? path.join(ARTIFACTS, "accept-drive-result.json");
 const HELPER = env.ACCEPT_DIALOG_HELPER ?? path.join(env.ACCEPT_SCRIPT_DIR ?? ".", "accept-file-dialog.ps1");
@@ -163,6 +190,11 @@ async function capture(driver, tag) {
   return saved;
 }
 
+/** 确认页已经到了 —— 记下这个事实（可见性证据由 read-confirm-visible.ps1 单独取）。 */
+function noteConfirmPage() {
+  return { reached: true, needle: VISIBLE_NEEDLE };
+}
+
 /** 跑起来之后替她点：审批 → 允许这次；结构化提问 → 按它的建议来；追问 → 你看着办。 */
 async function driveToResult(driver) {
   // 结果卡的 done 标题（唯一来源：gui/src/simple/ResultCard.tsx 的 STATE_TITLE.done ✓）。
@@ -231,7 +263,14 @@ async function main() {
   }
   requireFile("msedgedriver", MSEDGEDRIVER);
   requireFile("tauri-driver", TAURI_DRIVER);
-  requireFile("输入文件", INPUT);
+  // 文字卡（needs:"text"）不选文件，也就不该逼着调用方给一张输入表。
+  if (TEXT_MODE) {
+    if (!PASTE_TEXT.trim()) {
+      log("==> 文字卡模式（ACCEPT_TEXT=1），但没给 ACCEPT_PASTE_TEXT；输入框会空着。");
+    }
+  } else {
+    requireFile("输入文件", INPUT);
+  }
   if (!existsSync(HELPER)) fail(`对话框助手不存在：${HELPER}`);
   mkdirSync(ARTIFACTS, { recursive: true });
 
@@ -249,6 +288,7 @@ async function main() {
     log(`==> pi：${PI_BIN}`);
   }
   log(`==> 工作目录：${WORKDIR}`);
+  log(`==> 卡片模式：${TEXT_MODE ? "文字卡（贴一段字，不选文件）" : "文件卡（选文件，原生对话框）"}`);
 
   let driver = null;
   let driverProc = null;
@@ -258,6 +298,11 @@ async function main() {
       env: cleanEnv({
         ...(ZERO_ENV ? {} : { CANTE_BIN, PI_BIN }),
         CANTE_ADMIN_CONFIG: adminFile,
+        // WebView2 默认把 DOM 的 UIA 树藏起来（Chromium 只在真有辅助工具请求时才开）。
+        // 这个变量让它一启动就把无障碍树打开，于是 read-visible-text.ps1 能读到
+        // 每个元素的名字与**矩形**（#192 A 的可见性证据靠它）。
+        // 不能提权跑：提权进程会忽略 WEBVIEW2_*（DEV 文档记过）。
+        WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: "--force-renderer-accessibility",
       }),
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -301,27 +346,40 @@ async function main() {
       await card.click();
     });
 
-    await phase("选文件（原生对话框）", async () => {
-      await waitForText(driver, (t) => t.includes("选择文件"), "选文件这一步");
-      const helper = startDialogHelper();
-      await clickButton(driver, "选择文件");
-      const finished = await helper.done;
-      if (finished.code !== 0) fail(`填原生对话框的助手退出码 ${finished.code}（见上面的 [dialog] 行）`);
-      steps.push({ name: "  填原生对话框", ms: finished.ms });
-      const basename = path.basename(INPUT);
-      await waitForText(driver, (t) => t.includes(basename), `选中的文件 ${basename}`, 30_000);
-      await clickButton(driver, "下一步");
-    });
+    if (TEXT_MODE) {
+      // 文字卡：第一屏就是「写一句话」，没有选文件这一步（TaskRunner 根据 needs 决定）。
+      // 把「流水账」贴进同一句输入框 —— 产品就是让她选中、复制、贴进来（和微信那条卡同一条路）。
+      await phase("文字卡：不选文件，直接写（跳过原生对话框）", async () => {
+        await waitForText(driver, (t) => t.includes("这个任务不用选文件"), "文字卡的第一步");
+      });
+    } else {
+      await phase("选文件（原生对话框）", async () => {
+        await waitForText(driver, (t) => t.includes("选择文件"), "选文件这一步");
+        const helper = startDialogHelper();
+        await clickButton(driver, "选择文件");
+        const finished = await helper.done;
+        if (finished.code !== 0) fail(`填原生对话框的助手退出码 ${finished.code}（见上面的 [dialog] 行）`);
+        steps.push({ name: "  填原生对话框", ms: finished.ms });
+        const basename = path.basename(INPUT);
+        await waitForText(driver, (t) => t.includes(basename), `选中的文件 ${basename}`, 30_000);
+        await clickButton(driver, "下一步");
+      });
+    }
 
     await phase("写一句话并生成计划", async () => {
       const box = await waitForElement(driver, By.css("#task-instruction"), "输入框 #task-instruction");
-      await box.sendKeys(INSTRUCTION);
+      // 文字卡把整段流水账一起贴进去（Instruction 先说做什么，再把来料接在后面）。
+      const payload = TEXT_MODE && PASTE_TEXT ? `${INSTRUCTION}\n\n${PASTE_TEXT}` : INSTRUCTION;
+      await box.sendKeys(payload);
       await clickButton(driver, "生成计划");
     });
 
-    await phase("确认页 → 开始", async () => {
+      await phase("确认页 → 开始", async () => {
       const confirm = await waitForText(driver, (t) => t.includes("它打算这样做"), "确认页");
       log(`--- 确认页（节选）---\n${confirm.split("\n").map((l) => "  | " + l).slice(0, 16).join("\n")}`);
+      // 可见性不在这里判（WebDriver 带起来的窗口读不到 DOM，原因见文件头）。
+      // 只记“确认页到了”，真正的可见性证据由 read-confirm-visible.ps1 单独取。
+      result.confirmPage = noteConfirmPage();
       await clickButton(driver, "开始");
     });
 
