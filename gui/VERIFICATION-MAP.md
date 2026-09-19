@@ -12,6 +12,7 @@
 | 秘密扫描（第 1 步） | `bash gui/scripts/secret-scan.sh` | 命中的 `文件:行` + 它打印的原因 ✓ | 未跟踪文件（扫描只扫 `git ls-files` 里的 ✓）|
 | 许可清单是否过期（第 3 步） | `bash gui/scripts/license-inventory.sh --check` | 变了哪几个组件（版本/许可/新增/删除）✓ | 许可**原文**是否齐全（那是生成物里的事 ✓）|
 | 界面三屏 + 键盘 + 两种窗口尺寸 | `bash gui/scripts/dom-smoke.sh` | 每屏的可见文字、键盘走查、两个尺寸的版面数字 ✓ | **显示缩放**（125%/150%）✗、真 WebView2 ✗ |
+| **显示缩放（125%/150%）下的版面** | `python3 gui/scripts/zoom/driver.py`（先 `bun run build:web` ✓） | 逐场景的字号 ✓ / 按钮可点高度 ≥44 ✓ / 横向滚动 ✗ / **真的够不着**的控件数 ✓ / 底部固定输入区占比 ✓ | **真实 Windows 缩放的观感** ✗、**真 WebView2** ✗、非整数缩放的取整 ✗（都是建模 ✓，见脚本头注释 ✓）|
 | 界面性能基线 | `bash gui/scripts/measure-web.sh` | 首页到关键元素的**中位数**、DOM 节点数、资源字节 ✓ | 真机 GPU 下的数字 ✗ |
 | 提示词体量 | `bun gui/scripts/measure-prompts.ts` | 有没有整句重复、按内容裁段是否安全 ✓ | 模型是否**理解**那段话 ✗ |
 | 打包产物闸门（配置≠产物 ✓） | `bash gui/scripts/verify-bundle.sh --dmg <dmg>` | 挂载后的**真实目录清单** + 工具能否在包里跑 ✓ | Windows 安装包内容（那边单独跑 ✓）|
