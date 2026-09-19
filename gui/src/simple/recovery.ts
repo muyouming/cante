@@ -141,6 +141,24 @@ const IMAGE =
   /图片|照片|截图|相片|image|\.(png|jpe?g|bmp|webp|gif|tiff?|heic|heif|avif)\b|\bocr\b|识别不出|认不出|看不清|读不出.{0,10}(字|文字)|不能读.{0,6}图片/i;
 
 /**
+ * 被公司的网络挡住 / 代理要她先证明身份（#204 之后的缺口：两种网错的出路不分）。
+ *
+ * 为什么和下面的 NETWORK 分开：NETWORK 给的是「过一会儿再试」，那对「网络断了」
+ * 是对的，但对「公司不让我连」是错的 —— 等多久也不会通，她真能做的下一步是
+ * **问公司网管**。真机验收（WINDOWS-ACCEPTANCE-15）里 `wire`（真的连不上）与
+ * `proxy407`（代理要认证）两种错法，在屏幕上给的是同一个动作，就是这个缺口。
+ *
+ * 这一条必须排在 NETWORK 前面：命中它的原文（例如 `407`）往往也命中 NETWORK，
+ * 两者都命中时，更具体的那条才是真的 —— 和下面 STALLED_MARKER 那条一样。
+ *
+ * 中文只认**带「被」**的说法（`被公司网络挡住`）：`copy.ts` 给用户看的那句通用
+ * 网络文案里恰好有「公司的网络挡住了」五个字，但没有「被」。这里若写成不带「被」
+ * 的宽匹配，就会把**每一条**普通断网都抢过来判成「被公司挡住」，正好是反面的错。
+ */
+const PROXY_BLOCK =
+  /(?<![\w.\/-])407(?![\w.])|proxy[ -]?auth(entication)?|corporate proxy|company proxy|\b(blocked|denied|rejected|forbidden) by [^\n]{0,40}proxy\b|\bvia (a |an )?proxy\b|被(公司|企业)(的)?(网络|代理)/i;
+
+/**
  * 连不上网 / 服务方不可用。
  *
  * `connection error` 这一串是断网时真正会到这里的原文：动手的组件报的是
@@ -273,6 +291,10 @@ export function actionsFor(error: RecoveryError, context?: RecoveryContext): Rec
     // 所以出路是先确认网络、再从头走一遍；文件安全那句在 `copy.ts` 的停滞文案里。
     // 这一条要排在 NETWORK 前面：两者都命中时，更具体的那条才是真的。
     actions = [action("retry", RECOVERY.stalled)];
+  } else if (PROXY_BLOCK.test(text)) {
+    // 公司不让连：等多久也不会通，她真能做的下一步是问公司网管。这里**只给这一条**，
+    // 不再附「过一会儿再试」—— 那正是她照做也永远没用的一步。
+    actions = [action("copy-detail", RECOVERY.askAdmin)];
   } else if (NETWORK.test(text)) {
     actions = [action("retry", RECOVERY.retryLater)];
   } else if (AUTH.test(text)) {
