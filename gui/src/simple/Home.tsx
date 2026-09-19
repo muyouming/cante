@@ -39,6 +39,9 @@ import { SCHEDULE } from "./copy-schedule.ts";
 import { QUEUE } from "./copy-queue.ts";
 import { describeQueue, nextWaiting, queueSummary } from "./queue.ts";
 import { LIBRARY } from "./copy-library.ts";
+// r25 — 她说了一句话之后，先用「你是想做这个吗」把最像的几张卡摆出来。
+import { SUGGEST } from "./copy-suggest.ts";
+import { suggestTasks } from "./catalog.ts";
 import { describe as describeSchedule } from "./schedule.ts";
 // r17 — 结果文件散在原文件旁边，「上次那张表在哪」需要在首页有个答案。
 import { RESULTS } from "./copy-results.ts";
@@ -65,6 +68,10 @@ export default function Home(props: HomeProps): JSX.Element {
   let input: HTMLInputElement | undefined;
   // F4 — 框里已经有她自己打的字时，先问她一句（这一句就是那条例子），她说换才换。
   const [pendingExample, setPendingExample] = createSignal<string | null>(null);
+  // r25 — 她刚说的那句话，以及由它认出来的「最像的几张卡」。`tasks` 为空表示
+  // 一张都不像：那时如实说没看懂，不硬凑（见 copy-suggest.ts）。她挑一张就走
+  // 和点卡片同一条路；「照我说的做」还是原来那条自由路（onSubmitText）。
+  const [said, setSaid] = createSignal<{ text: string; tasks: TaskDef[] } | null>(null);
   // #58 — 「技术同事设了什么」默认收起，只有她主动点开才展开。
   const [adminOpen, setAdminOpen] = createSignal(false);
   // r3 — 「该怎么说」那一段与三句例子：做过至少一轮就默认收起。`null` = 还没被
@@ -212,10 +219,27 @@ export default function Home(props: HomeProps): JSX.Element {
     const example = exampleForSentence(value);
     const task = example ? taskById(example.taskId) : undefined;
     if (task) {
+      setSaid(null);
       props.onPickTask(task);
       return;
     }
-    props.onSubmitText(value);
+    // r25 — 不是照着例子说的：先问一句「你是想做这个吗」，把最像的几张卡摆出来
+    // （判据见 catalog.ts 的 suggestTasks，只认卡自己的标题和示例）。一张都不像
+    // 时 tasks 为空，照样留在这一屏如实说「没看懂」。两条都不替她动手。
+    setSaid({ text: value, tasks: suggestTasks(value, visibleTasks()) });
+  };
+
+  /** r25 — 她挑了「最像的」里的一张：走和点卡片完全相同的那条路。 */
+  const pickSuggested = (picked: TaskDef): void => {
+    setSaid(null);
+    props.onPickTask(picked);
+  };
+
+  /** r25 — 最像的几张都不是：还是照她原话走（原来那条自由路，一个字不改）。 */
+  const justDoIt = (): void => {
+    const value = said()?.text ?? "";
+    setSaid(null);
+    if (value) props.onSubmitText(value);
   };
 
   return (
@@ -430,6 +454,7 @@ export default function Home(props: HomeProps): JSX.Element {
               onInput={(event) => {
                 setText(event.currentTarget.value);
                 if (hint()) setHint(null);
+                if (said()) setSaid(null);
               }}
               class="min-h-[52px] min-w-0 flex-1 rounded-xl border border-slate-700 bg-[#141b24] px-4 text-[18px] text-slate-100 placeholder:text-slate-500"
             />
@@ -445,6 +470,39 @@ export default function Home(props: HomeProps): JSX.Element {
               {hint()}
             </p>
           </Show>
+          {/* r25 — 她刚说了一句话：先问「你是想做这个吗」，把最像的几张卡摆出来。
+              每一张都是一个 44px 的按钮，点一张就走和点卡片同一条路；一张都不像时
+              如实说没看懂，并留一条「照我说的做」的自由路。
+              紧凑地排成一行（可换行）：这一段在底部固定区里，撑得太高会把输入框
+              挤出屏幕（800×560 的窗口实测过）。 */}
+          <Show when={said()}>{(entry) => (
+            <section class="rounded-xl border border-sky-700 bg-sky-950/30 px-4 py-3" role="status">
+              <p class="text-[16px] font-medium text-sky-100">{SUGGEST.title}</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <For each={entry().tasks}>
+                  {(task) => (
+                    <button
+                      type="button"
+                      onClick={() => pickSuggested(task)}
+                      class="min-h-[44px] rounded-xl border border-sky-600 bg-[#111820] px-4 text-left text-[16px] leading-snug text-sky-50 hover:border-sky-400"
+                    >
+                      {task.title}
+                    </button>
+                  )}
+                </For>
+                <button
+                  type="button"
+                  onClick={justDoIt}
+                  class="min-h-[44px] rounded-xl border border-dashed border-slate-500 px-4 text-[16px] text-slate-200 hover:bg-slate-800"
+                >
+                  {SUGGEST.justDoIt}
+                </button>
+              </div>
+              <p class="mt-2 text-[16px] leading-relaxed text-sky-200">
+                {entry().tasks.length > 0 ? SUGGEST.hint : SUGGEST.none}
+              </p>
+            </section>
+          )}</Show>
           {/* F4 — 框里有她自己打的字时，点例子不能静默把它清掉：就在这里问一句，
               她说换才换（换不换都是她点的）。 */}
           <Show when={pendingExample()}>
@@ -472,8 +530,11 @@ export default function Home(props: HomeProps): JSX.Element {
               下面，点一下就跑进框里。它们是唯一的口子，不是一份功能清单。
                r3 — 她做过至少一轮之后，门槛已经迈过去了：默认收起，留一个 44px 的
               入口（键盘 Tab 到得了、回车能展开）。从没做过就照旧全展开，第一屏
-              体验一个字不变；展开/收起都不碰她在框里已经打的字。 */}
-          <Show when={!guideVisible()}>
+              体验一个字不变；展开/收起都不碰她在框里已经打的字。
+               r25 — 她刚说完一句话、下面正摆着「你是想做这个吗」时，这一段先收起
+              来：两段都在说「这件事怎么说」，同时摆着既是重复，也会把底部固定区
+              撑过小窗口的高度（800×560 实测）。她一改字，这段又回来。 */}
+          <Show when={!said() && !guideVisible()}>
             <button
               type="button"
               onClick={() => setGuideOpen(true)}
@@ -483,7 +544,7 @@ export default function Home(props: HomeProps): JSX.Element {
               {FIRST_RUN.guideToggleShow}
             </button>
           </Show>
-          <Show when={guideVisible()}>
+          <Show when={!said() && guideVisible()}>
             <p class="text-[16px] leading-relaxed text-slate-300">{FIRST_RUN.homeTitle}</p>
             <div class="flex flex-wrap gap-2">
               <For each={SAY_EXAMPLES}>
