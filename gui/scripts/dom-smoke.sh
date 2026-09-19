@@ -34,14 +34,48 @@
 # Outside Tauri the bridge is unavailable by design, so this also pins the
 # browser-preview fallback: the app must explain itself instead of going blank.
 #
-# Chrome is required and is deliberately NOT part of `scripts/e2e.sh` (CI has no
-# Chrome, and this is a developer/agent aid rather than a release gate).
+# Chrome is required, and the script finds it on any of the three platforms. It
+# is the LAST step of `scripts/e2e.sh`, so the local gate and CI (the Linux `gate`
+# job, which already has Chrome) run the exact same assertions — that is the
+# repository's rule: a local green that CI cannot reproduce is worthless.
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP_DIR"
 
-CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+# Chrome lives in a different place on every platform: an app bundle on macOS, a
+# package on Linux, an install directory on Windows. Probe the usual spots so the
+# same script works on a laptop and in CI, and keep CHROME= as the override for a
+# browser that lives somewhere else.
+find_chrome() {
+  if [ -n "${CHROME:-}" ]; then
+    printf '%s' "$CHROME"
+    return
+  fi
+  local candidate found
+  for candidate in \
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    "/c/Program Files/Google/Chrome/Application/chrome.exe" \
+    "${LOCALAPPDATA:-/c/Users/${USER:-me}/AppData/Local}/Google/Chrome/Application/chrome.exe" \
+    google-chrome \
+    google-chrome-stable \
+    chromium \
+    chromium-browser; do
+    if [ -x "$candidate" ]; then
+      printf '%s' "$candidate"
+      return
+    fi
+    if found="$(command -v "$candidate" 2>/dev/null)" && [ -n "$found" ]; then
+      printf '%s' "$found"
+      return
+    fi
+  done
+  # Nothing found: print nothing and still succeed, so the -x check below is the
+  # only failure message (under `set -e`, the last failed probe would otherwise
+  # abort the script silently).
+  return 0
+}
+CHROME="$(find_chrome)"
 # 0 = let the kernel pick a free port; serve.py writes the real one to
 # $WORK/port. The old fixed 8099 was shared by every worktree on a machine, so
 # two agents running the smoke at once silently attached to each other's server
@@ -68,9 +102,11 @@ cleanup() {
 trap cleanup EXIT
 
 if [ ! -x "$CHROME" ]; then
-  echo "dom-smoke: no Chrome at $CHROME (set CHROME=… to point at one)" >&2
+  echo "dom-smoke: no Chrome found (looked on PATH for google-chrome/chromium, plus the" >&2
+  echo "  macOS app bundle and the Windows install dirs). Set CHROME=… to point at one." >&2
   exit 2
 fi
+"$CHROME" --version 2>/dev/null | sed 's/^/dom-smoke: /' || true
 
 echo "==> building web assets"
 bun run build:web >/dev/null
@@ -873,7 +909,12 @@ cat > "$WORK/tryfirst.js" <<'JS'
     rect: null,
     inFooter: false,
     footerScrolls: null,
+    // 从「先给我看一眼」向上、直到 [role=dialog]，一路记下会滚的祖先。
+    // 只看最近的 <footer> 会被骗：把那一块套一层 overflow-y-auto 的盒子，footer
+    // 自己仍然不滚，可是那一块会随内容滚走（评审实测 ✓）。
+    ancestorScrolls: [],
     confirmScrolls: null,
+    actionInsideConfirmScroller: false,
     startRect: null,
     actionIsOutline: false,
     startIsFilled: false,
@@ -955,6 +996,20 @@ cat > "$WORK/tryfirst.js" <<'JS'
       var footer = action.closest("footer");
       out.inFooter = !!footer;
       out.footerScrolls = footer ? getComputedStyle(footer).overflowY : null;
+      // 向上找到确认页的 [role=dialog]（含），把每个 overflow-y∈{auto,scroll} 的
+      // 祖先记下来。干净的树上它是空的；套一层会滚的盒子立刻非空。
+      var scrolls = [];
+      for (var p = action.parentElement; p; p = p.parentElement) {
+        var ps = getComputedStyle(p);
+        if (ps.overflowY === "auto" || ps.overflowY === "scroll") {
+          scrolls.push(
+            ((p.className || p.tagName) + "").toString().slice(0, 56) +
+              " [overflow-y:" + ps.overflowY + "]",
+          );
+        }
+        if (p.getAttribute && p.getAttribute("role") === "dialog") break;
+      }
+      out.ancestorScrolls = scrolls;
       var style = getComputedStyle(action);
       out.actionIsOutline = parseFloat(style.borderTopWidth) > 0;
       out.heading = (function () {
@@ -977,8 +1032,11 @@ cat > "$WORK/tryfirst.js" <<'JS'
       out.startRect = round(start.getBoundingClientRect());
       out.startIsFilled = getComputedStyle(start).backgroundColor !== "rgba(0, 0, 0, 0)";
     }
+    // 确认页正文本来就是可以滚的（计划可能很长）——记下它，顺便钉住「先给我
+    // 看一眼」不在它里面：一旦页脚被挪进正文滚区，这一块就会随正文滚走。
     var scroller = (layer || document).querySelector(".overflow-y-auto");
     out.confirmScrolls = scroller ? getComputedStyle(scroller).overflowY : null;
+    out.actionInsideConfirmScroller = !!(scroller && action && scroller.contains(action));
     out.focusLabel = document.activeElement
       ? (document.activeElement.textContent || "").trim().slice(0, 14)
       : null;
@@ -1496,6 +1554,16 @@ for index, path in enumerate(sys.argv[1:]):
         problems.append("「先给我看一眼」不在不可滚动的页脚里（会随正文滚，藏起来了）")
     if report.get("footerScrolls") not in (None, "visible"):
         problems.append(f"确认页的页脚自己会滚（overflow-y={report.get('footerScrolls')}），「先看一眼」会跟着滚走")
+    # r25：只看最近的 <footer> 会被骗。把那一块套一层会滚的盒子，footer 自己不滚，
+    # 可那一块会随内容滚走 ✗。所以向上一直查到 [role=dialog]，任一祖先会滚就算问题。
+    scrolled = report.get("ancestorScrolls") or []
+    if scrolled:
+        problems.append(
+            "「先给我看一眼」被套在会滚的祖先里（" + "；".join(scrolled)
+            + "），往下滚它就没了——不算第一眼就看得见"
+        )
+    if report.get("actionInsideConfirmScroller"):
+        problems.append("「先给我看一眼」落在确认页的正文滚区里（应该固定在不滚的页脚；正文一长它就被滚走）")
     if report.get("startRect") is None:
         problems.append("确认页上没有「开始」按钮")
     elif report.get("rect") and report.get("startRect"):
@@ -1519,6 +1587,11 @@ for index, path in enumerate(sys.argv[1:]):
         f"dom-smoke: {label}: 先给我看一眼 found={report.get('found')} visible={report.get('visible')} "
         f"inFooter={report.get('inFooter')} rect={rect} 开始={report.get('startRect')} "
         f"初始焦点={report.get('focusLabel')!r} 标题={report.get('heading')!r}"
+    )
+    print(
+        f"  | 向上到 [role=dialog] 会滚的祖先 {len(scrolled)} 个：{scrolled or '（无）'}；"
+        f"确认页正文滚区 overflow-y={report.get('confirmScrolls')!r}，"
+        f"「先看一眼」在正文滚区里 {report.get('actionInsideConfirmScroller')}"
     )
     if report.get("hint"):
         print(f"  | 说清了什么：{report['hint']}")

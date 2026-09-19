@@ -15,7 +15,7 @@ source "$here/toolchain.sh"
 cd "$gui_root"
 
 # 步骤总数（加/删步骤时改这里；它只影响最后那行统计的显示）
-total=8
+total=9
 current=0
 
 step() {
@@ -48,5 +48,10 @@ step "bun test fixtures" bun test fixtures
 # 那套 Xcode 许可绕行脚本的提示），所以本机仍然跑得动。
 CARGO_WARNINGS_DENIED="${RUSTFLAGS:-} -D warnings"
 step "cargo test (src-tauri)" env RUSTFLAGS="$CARGO_WARNINGS_DENIED" cargo test --manifest-path src-tauri/Cargo.toml
+# 最后一步：真渲染界面、真的量“她看到什么”。放在最后是有意的——它最慢（约 13 秒
+# 本机 / 需装 Chrome 的 CI 更多），前面全是快的；而且它是唯一能看见「界面里到底
+# 长什么样」的检查，源码扫描证明不了（评审实测：把「先给我看一眼」套进会滚的盒子，
+# 源码扫描和旧的 dom-smoke 都是绿的 ✗）。放进门禁，本地与 CI 才判据一致。
+step "dom smoke (rendered UI in Chrome)" bash scripts/dom-smoke.sh
 
 printf '\ne2e: OK (%d/%d steps passed)\n' "$current" "$total"

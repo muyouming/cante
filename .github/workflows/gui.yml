@@ -57,12 +57,51 @@ jobs:
           toolchain: stable
           cache-workspaces: gui/src-tauri -> target
 
+      # --- The rendered-UI smoke, in the job that can actually run a browser ----
+      #
+      # `scripts/dom-smoke.sh` is the only check in this repository that really
+      # renders the interface and asserts on what a person would see. It used to
+      # run on no machine but a developer's laptop, which is how a real defect
+      # (the "先给我看一眼" block wrapped in a scrolling container) stayed green:
+      # the source scan cannot see it and the old probe looked at the wrong node.
+      #
+      # It runs in THIS job (Linux) and not the Windows one because the browser
+      # it drives is Chrome, and this job is the one that already runs on every
+      # `gui/**` change and builds the web assets. The Windows job is the real
+      # WebView2 window — a different runtime, deliberately tested by a different
+      # tool (tauri-driver), so a Chrome dump there would prove nothing extra.
+      #
+      # ubuntu-latest already ships Google Chrome, so this normally reuses it; the
+      # fallback installs it if an image ever stops. `dom-smoke.sh` finds Chrome
+      # on PATH itself (google-chrome / chromium), so no CHROME= is needed here.
+      # It is also step 9 of `e2e.sh` below, on purpose: the local gate and CI run
+      # the same assertions. The named step here is the one that fails by name.
+      - name: Ensure Chrome for the rendered UI smoke
+        run: |
+          if command -v google-chrome >/dev/null || command -v google-chrome-stable >/dev/null; then
+            (google-chrome --version || google-chrome-stable --version)
+            echo "reusing the runner image's Chrome"
+          else
+            wget -q -O - https://dl.google.com/linux/linux_signing_key.pub \
+              | sudo gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg
+            echo "deb [signed-by=/usr/share/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+              | sudo tee /etc/apt/sources.list.d/google-chrome.list >/dev/null
+            sudo apt-get update
+            sudo apt-get install -y google-chrome-stable
+          fi
+
+      - name: Rendered UI smoke (real Chrome, scripts/dom-smoke.sh)
+        run: bash gui/scripts/dom-smoke.sh
+
       # One command, the same one a developer runs: `gui/scripts/e2e.sh` installs
       # deps, runs the frontend tests and typecheck, builds the web assets (which
       # `tauri::generate_context!` reads at compile time), runs the fixture tests,
-      # and finally `cargo test`. Driving CI through the script is deliberate —
-      # a hand-written step list drifts from the local gate, which is exactly how
-      # a missing `vite build` before `cargo test` slipped through once.
+      # `cargo test`, and finally the rendered-UI smoke (`dom-smoke.sh`, step 9).
+      # Driving CI through the script is deliberate — a hand-written step list
+      # drifts from the local gate, which is exactly how a missing `vite build`
+      # before `cargo test` slipped through once. The dom-smoke step above is
+      # redundant with step 9 on purpose (like the duplicated secret scan): a
+      # failure there names itself instead of hiding inside `e2e.sh`.
       - name: Run the app's e2e gate
         run: bash gui/scripts/e2e.sh
 

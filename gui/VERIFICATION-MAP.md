@@ -8,10 +8,10 @@
 
 | 验证 | 怎么跑 | 看什么当证据 | 什么**不**覆盖 ✗ |
 | --- | --- | --- | --- |
-| **完整本地门禁（8 步）** | `bash gui/scripts/e2e.sh` | 每步的原始输出；任一步红即停 | 真 Windows 才能验的东西（见第二节）✗ |
+| **完整本地门禁（9 步）** | `bash gui/scripts/e2e.sh` | 每步的原始输出；任一步红即停 | 真 Windows 才能验的东西（见第二节）✗ |
 | 秘密扫描（第 1 步） | `bash gui/scripts/secret-scan.sh` | 命中的 `文件:行` + 它打印的原因 ✓ | 未跟踪文件（扫描只扫 `git ls-files` 里的 ✓）|
 | 许可清单是否过期（第 3 步） | `bash gui/scripts/license-inventory.sh --check` | 变了哪几个组件（版本/许可/新增/删除）✓ | 许可**原文**是否齐全（那是生成物里的事 ✓）|
-| 界面三屏 + 键盘 + 两种窗口尺寸 | `bash gui/scripts/dom-smoke.sh` | 每屏的可见文字、键盘走查、两个尺寸的版面数字 ✓ | **显示缩放**（125%/150%）✗、真 WebView2 ✗ |
+| 界面三屏 + 键盘 + 两种窗口尺寸 + 确认页「先给我看一眼」 | `bash gui/scripts/dom-smoke.sh`（**也是 e2e 第 9 步**，所以本地与 CI 都跑 ✓） | 每屏的可见文字、键盘走查、两个尺寸的版面数字、确认页上那一块**向上到 `[role=dialog]` 有没有会滚的祖先** ✓ | **显示缩放**（125%/150%）✗、真 WebView2 ✗（那是 Windows job 的 `tauri-driver` ✓）；Linux `gate` job 用的 Chrome 与她的 Windows 上真跑的 WebView2 **不是同一个渲染器** ✗ |
 | 界面性能基线 | `bash gui/scripts/measure-web.sh` | 首页到关键元素的**中位数**、DOM 节点数、资源字节 ✓ | 真机 GPU 下的数字 ✗ |
 | 提示词体量 | `bun gui/scripts/measure-prompts.ts` | 有没有整句重复、按内容裁段是否安全 ✓ | 模型是否**理解**那段话 ✗ |
 | 打包产物闸门（配置≠产物 ✓） | `bash gui/scripts/verify-bundle.sh --dmg <dmg>` | 挂载后的**真实目录清单** + 工具能否在包里跑 ✓ | Windows 安装包内容（那边单独跑 ✓）|
@@ -36,7 +36,7 @@ Guest Agent 还要装 virtio-serial ✓）。
 
 | 验证 | 在哪 | 看什么 |
 | --- | --- | --- |
-| `gate` job（Linux） | `.github/workflows/gui.yml` | **直接跑 `gui/scripts/e2e.sh`** ✓（本地 8 步全在内 ✓，所以判据一致 ✓ —— 曾经"本地绿 CI 红"✗）；job 里另外**重复**跑了 secret scan 与许可检查 ✓（冗余但无害 ✓）|
+| `gate` job（Linux） | `.github/workflows/gui.yml` | **直接跑 `gui/scripts/e2e.sh`** ✓（本地 9 步全在内 ✓，所以判据一致 ✓ —— 曾经"本地绿 CI 红"✗）；job 里另外**重复**跑了 secret scan、许可检查与 `dom-smoke.sh` ✓（冗余但无害 ✓，且各自单独命名、失败时不藏在 `e2e.sh` 里 ✓）；**跑 `dom-smoke` 前先确保 Chrome**（ubuntu-latest 自带就复用，装不上就兜底 `apt-get install google-chrome-stable` ✓）|
 | `windows` job（windows-latest） | 同上 | **同一份 `e2e.sh`** ✓（判据一致 ✓）+ 真 WebView2 界面冒烟：装 `tauri-driver` ✓ → 取**匹配 WebView2 版本**的 `msedgedriver` ✓ → `tauri build --debug --no-bundle` ✓ → **降权**跑（提权会让 WebView2 忽略 `WEBVIEW2_*` ✗）→ **上传证据 artifact** ✓ |
 | 发布流水线 | `.github/workflows/gui-release.yml` | 双平台安装包 + **产物闸门跑在打出来的 dmg 上** ✓ |
 
