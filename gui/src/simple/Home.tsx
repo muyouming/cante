@@ -25,6 +25,9 @@ import {
   takeSentence,
 } from "./copy-first-run.ts";
 import { ADMIN, adminDefaultText, adminDisabledText, adminNetworkText } from "./copy-admin.ts";
+// r3 — 三句例子是第一次用的人的门槛，用过的就是噪音：底部那条不滚，它多高就吃
+// 掉多少卡片。判据是 store 里有没有完成过的轮次（已有的真实事实，不新造状态）。
+import { examplesStartOpen } from "./first-use.ts";
 import {
   adminConfig,
   disabledTaskNames,
@@ -64,6 +67,11 @@ export default function Home(props: HomeProps): JSX.Element {
   const [pendingExample, setPendingExample] = createSignal<string | null>(null);
   // #58 — 「技术同事设了什么」默认收起，只有她主动点开才展开。
   const [adminOpen, setAdminOpen] = createSignal(false);
+  // r3 — 「该怎么说」那一段与三句例子：做过至少一轮就默认收起。`null` = 还没被
+  // 她手动点过，跟着「有没有做过」这条事实走；点过之后就以她的意思为准。这样既不会
+  // 在她第一次用的时候把入口藏掉，也不会在她展开之后又自己收回。
+  const [guideOpen, setGuideOpen] = createSignal<boolean | null>(null);
+  const guideVisible = (): boolean => guideOpen() ?? examplesStartOpen(props.store.runs());
   // #74 — the ability centre is a local overlay; the shell does not need to know.
   const [libraryOpen, setLibraryOpen] = createSignal(false);
   // r17 — 同上：这是首页自己开的一层「我做的结果」。
@@ -461,21 +469,43 @@ export default function Home(props: HomeProps): JSX.Element {
             </div>
           </Show>
           {/* r24 — 「该怎么说」才是第一次用的人真正的门槛：三句人话就摆在输入框
-              下面，点一下就跑进框里。它们是唯一的口子，不是一份功能清单。 */}
-          <p class="text-[16px] leading-relaxed text-slate-300">{FIRST_RUN.homeTitle}</p>
-          <div class="flex flex-wrap gap-2">
-            <For each={SAY_EXAMPLES}>
-              {(example) => (
-                <button
-                  type="button"
-                  onClick={() => pickExample(example.sentence)}
-                  class="min-h-[44px] rounded-xl border border-slate-700 bg-[#141b24] px-4 text-[16px] text-slate-200 hover:border-sky-500"
-                >
-                  {example.sentence}
-                </button>
-              )}
-            </For>
-          </div>
+              下面，点一下就跑进框里。它们是唯一的口子，不是一份功能清单。
+               r3 — 她做过至少一轮之后，门槛已经迈过去了：默认收起，留一个 44px 的
+              入口（键盘 Tab 到得了、回车能展开）。从没做过就照旧全展开，第一屏
+              体验一个字不变；展开/收起都不碰她在框里已经打的字。 */}
+          <Show when={!guideVisible()}>
+            <button
+              type="button"
+              onClick={() => setGuideOpen(true)}
+              aria-expanded={guideVisible()}
+              class="min-h-[44px] self-start rounded-xl border border-slate-700 bg-[#141b24] px-4 text-[16px] text-slate-200 hover:border-sky-500"
+            >
+              {FIRST_RUN.guideToggleShow}
+            </button>
+          </Show>
+          <Show when={guideVisible()}>
+            <p class="text-[16px] leading-relaxed text-slate-300">{FIRST_RUN.homeTitle}</p>
+            <div class="flex flex-wrap gap-2">
+              <For each={SAY_EXAMPLES}>
+                {(example) => (
+                  <button
+                    type="button"
+                    onClick={() => pickExample(example.sentence)}
+                    class="min-h-[44px] rounded-xl border border-slate-700 bg-[#141b24] px-4 text-[16px] text-slate-200 hover:border-sky-500"
+                  >
+                    {example.sentence}
+                  </button>
+                )}
+              </For>
+            </div>
+            <button
+              type="button"
+              onClick={() => setGuideOpen(false)}
+              class="min-h-[44px] self-start rounded-xl border border-slate-700 bg-[#141b24] px-4 text-[16px] text-slate-200 hover:border-sky-500"
+            >
+              {FIRST_RUN.guideToggleHide}
+            </button>
+          </Show>
         </form>
       </div>
 

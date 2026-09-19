@@ -98,6 +98,13 @@ export function exampleClick(current: string, sentence: string): ExampleClick {
 export const FIRST_RUN = {
   /** 首页：摆在三句例子上面。要说清「点一下会怎样」。 */
   homeTitle: "不知道怎么说？点一句照说，改几个字就行",
+  /**
+   * r3 — 她做过至少一轮之后，这段话与三句例子默认收起来，只留这个 44px 的口子。
+   * 要点出来「点一下就能看见」，否则收起来等于藏掉。
+   */
+  guideToggleShow: "不知道该怎么说？点这里看三句例子",
+  /** 她展开之后还能收回：不让她为了省地方只能一直摊着。 */
+  guideToggleHide: "收起这三句例子",
   /** 向导最后一步的标题：接下来是三条承诺。 */
   promisesTitle: "开始之前，先记住三件事",
   /**
