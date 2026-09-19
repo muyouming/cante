@@ -165,7 +165,7 @@ export const PRE_ANSWER_DECISIONS = {
   /** 汇总：被隐藏的行算不算进合计。 */
   groupHiddenRows: {
     id: "hidden-rows",
-    question: "表里被我收起来（隐藏）的行，要不要算进汇总？",
+    question: "表里隐藏起来的行（在 Excel 里点过隐藏的那些），要不要算进汇总？",
     options: [
       {
         label: "不算，跳过隐藏的行",
