@@ -68,7 +68,22 @@ describe("#192 A：先看一眼这条路，第一眼就看得见", () => {
     const startTag = source.slice(startOpen, source.indexOf(">", start) + 1);
     expect(startTag).toContain("bg-sky-500");
     // 危险动作的默认焦点不许破：打开时仍然落在「取消」上。
+    //
+    // 只断言 `initialFocus: () => cancelButton` 这一句会被骗过：把挂 ref 的那一行
+    // 挪到「开始」按钮上、变量名照旧叫 cancelButton，这句和 ref 都还在，焦点却会
+    // 落到最危险的那个按钮上。所以这里把 ref 钉到**取消按钮本身**：含 ref 的那个
+    // <button> 开标签到闭合标签之间，必须有 取消 和 cancelRun，且不许出现 开始。
     expect(source).toContain("initialFocus: () => cancelButton");
+    const ref = indexOf(source, "cancelButton = element");
+    expect(ref).toBeGreaterThan(-1);
+    const open = source.lastIndexOf("<button", ref);
+    const close = source.indexOf("</button>", ref);
+    expect(open).toBeGreaterThan(-1);
+    expect(close).toBeGreaterThan(ref);
+    const tag = source.slice(open, close);
+    expect(tag).toContain("cancelRun");
+    expect(tag).toContain("取消");
+    expect(tag).not.toContain("开始");
     // 先看一眼是描边按钮（有 border），不是第二个填色的主按钮，降低误点。
     const action = indexOf(source, "TRY_FIRST.action");
     const actionOpen = source.lastIndexOf("<button", action);
