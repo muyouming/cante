@@ -21,6 +21,10 @@ import { RESULTS } from "./copy-results.ts";
 // 两轮各自的文案模块都要（核对 + 复制成微信能贴的文字）。
 import { VERIFY } from "./copy-verify.ts";
 import { SHARE, shareReadFailed } from "./copy-share.ts";
+// 内容层核对：她真正会问的是「这是我要的那个吗」——把行数、列名、首屏几行
+// 从产出文件里照抄出来（不是替她下「内容没问题」的判断）。
+import { SHEET_PEEK } from "./copy-sheet-peek.ts";
+import { readSheetPeek, type SheetPeekResult } from "./sheet-peek.ts";
 // 她做完之后的下一步通常是打印或发出去：这里给她「文件在哪 + 怎么打印」。
 import { LOCATION, PRINT } from "./copy-print.ts";
 import { placeOf } from "./location.ts";
@@ -171,6 +175,34 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
       setCopyNote(VERIFY.copyFailed);
     }
   }
+
+  // 内容层核对：她真正会问的是「这是我要的那个吗」。我们不替她回答，而是把
+  // 产出文件里她自己能核对的三个数照抄出来：第一行下面的行数、第一行的列名、
+  // 最前面几行。走的是和「复制成微信」同一条真读路径（read_result_sheet →
+  // cante-sheets read）；读不出来就如实说读不出来，绝不报一个 0。
+  //
+  // 只对第一个表格类结果读一次：一张表的结果最常见，也是为了不让她一按就触发
+  // 一堆读盘。
+  const [peek, setPeek] = createSignal<{ path: string; result: SheetPeekResult } | null>(null);
+  let peekKey = "";
+  createEffect(() => {
+    const current = run();
+    const target = files().find((file) => isTablePath(file.path));
+    if (!show() || !target || current?.undone === true) {
+      peekKey = "";
+      setPeek(null);
+      return;
+    }
+    const key = `${current?.id ?? ""}|${target.path}`;
+    if (key === peekKey) return;
+    peekKey = key;
+    setPeek(null);
+    const cap = sheetCapability();
+    void readSheetPeek(target.path, cap.available ? cap.path : null).then((result) => {
+      // 迟到的回答：画面已经换成另一次运行的话，就不要贴旧结论。
+      if (peekKey === key) setPeek({ path: target.path, result });
+    });
+  });
 
   async function sendReply(text: string): Promise<void> {
     const trimmed = text.trim();
@@ -556,6 +588,73 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
                           </Show>
                           <p class="mt-1 text-[16px] leading-relaxed text-slate-300">{share()?.note}</p>
                         </div>
+                      </Show>
+
+                      {/* 她自己能核对的那几个数：行数、列名、首屏几行。全部照抄，
+                          不汇总、不解释、不写「内容没问题」那种自证的话。 */}
+                      <Show when={peek()?.path === file.path}>
+                        <section class="rounded-xl border border-slate-700 bg-slate-900/50 px-3 py-3">
+                          <h3 class="text-[20px] font-bold text-slate-100">{SHEET_PEEK.title}</h3>
+                          <Show when={peek()!.result.kind === "ok"}>
+                            <p class="mt-1 text-[16px] leading-relaxed text-slate-200">
+                              {SHEET_PEEK.rows(peek()!.result.peek!.rows)}
+                            </p>
+                            <p class="mt-2 text-[16px] leading-relaxed text-slate-300">
+                              {SHEET_PEEK.columnsLabel(
+                                peek()!.result.peek!.columns.length,
+                                peek()!.result.peek!.columnCount,
+                              )}
+                            </p>
+                            <p class="mt-1 whitespace-pre-wrap break-words text-[16px] leading-relaxed text-slate-100">
+                              {peek()!.result.peek!.columns.join(" ｜ ")}
+                            </p>
+                            <Show
+                              when={peek()!.result.peek!.rows > 0}
+                              fallback={
+                                <p class="mt-2 text-[16px] leading-relaxed text-slate-300">
+                                  {SHEET_PEEK.onlyColumns}
+                                </p>
+                              }
+                            >
+                              <p class="mt-2 text-[16px] leading-relaxed text-slate-300">
+                                {peek()!.result.peek!.rows > peek()!.result.peek!.head.length
+                                  ? SHEET_PEEK.headMore(peek()!.result.peek!.head.length)
+                                  : SHEET_PEEK.headAll}
+                              </p>
+                              <Show
+                                when={
+                                  peek()!.result.peek!.columnCount >
+                                  peek()!.result.peek!.columns.length
+                                }
+                              >
+                                <p class="mt-1 text-[16px] leading-relaxed text-slate-400">
+                                  {SHEET_PEEK.narrowed(peek()!.result.peek!.columns.length)}
+                                </p>
+                              </Show>
+                              <ul class="mt-2 flex flex-col gap-1">
+                                <For each={peek()!.result.peek!.head}>
+                                  {(row) => (
+                                    <li class="whitespace-pre-wrap break-words rounded-lg bg-black/20 px-3 py-2 text-[16px] leading-relaxed text-slate-100">
+                                      {row.join(" ｜ ")}
+                                    </li>
+                                  )}
+                                </For>
+                              </ul>
+                            </Show>
+                          </Show>
+                          <Show when={peek()!.result.kind === "empty"}>
+                            <p class="mt-1 text-[16px] leading-relaxed text-slate-300">
+                              {SHEET_PEEK.empty}
+                            </p>
+                          </Show>
+                          <Show when={peek()!.result.kind === "unknown"}>
+                            <p class="mt-1 text-[16px] leading-relaxed text-slate-300">
+                              {peek()!.result.reason === "no-tool"
+                                ? SHEET_PEEK.noTool
+                                : SHEET_PEEK.unknown}
+                            </p>
+                          </Show>
+                        </section>
                       </Show>
                     </div>
                   </Show>
