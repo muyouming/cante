@@ -67,9 +67,12 @@ export const RESULTS = {
   // ---- 每一条上的两个动作 ------------------------------------------------
   actions: {
     open: "打开文件",
-    ariaOpen: "打开这个结果文件",
+    // 名字必须带上文件名：真机 UIA 走查量到 47 行的按钮共用同一句常量，读屏 Tab
+    // 到第 30 行时分不清是哪一份结果（WINDOWS-ACCEPTANCE-19.md §3）。带上文件名
+    // 她就能听出是哪一份；文件名她本来就认得，也不用把机器位置念出来。
+    ariaOpen: (name: string): string => `打开 ${name}`,
     openFolder: "打开所在文件夹",
-    ariaOpenFolder: "打开这个结果文件所在的文件夹",
+    ariaOpenFolder: (name: string): string => `打开 ${name} 所在的文件夹`,
     /** 文件已经不在时，「打开文件」为什么点不动。 */
     goneDisabled: "文件已经不在了，先按上面的办法找一找",
   },
