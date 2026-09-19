@@ -3,6 +3,10 @@
 // undo. The Tauri bridge is faked the same way `store.test.ts` fakes it, so a
 // shape drift in either direction fails here instead of at runtime.
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createRoot } from "solid-js";
 
 import type { EventMsg } from "./protocol.ts";
@@ -14,6 +18,14 @@ const handlers = new Map<string, Set<Handler>>();
 const calls: Array<{ name: string; args: unknown }> = [];
 let beforeEntries: unknown[] = [];
 let afterEntries: unknown[] = [];
+// 当某个用例把它指到一个**真实临时目录**时，桥的 begin_run / snapshot_paths
+// 会去真扫这个目录（见 scanReal），于是 store 的前后对比算的是**磁盘上的字节**，
+// 而不是某个变量里预先写好的数组。
+let realDir: string | null = null;
+// 真实快照会把要动的文件**复制**到应用自己的私有目录（桥那一层的契约）。
+// 指一个真目录时，这个桩会真的去复制：于是"原件没被改"与"备的是副本不是搬走"
+// 都能在真实字节上核。
+let realBackupDir: string | null = null;
 let runRecords: unknown[] = [];
 let undoReply: { restored: string[]; failed: string[] } = { restored: [], failed: [] };
 let hydration: {
@@ -52,6 +64,8 @@ function reset(): void {
   calls.length = 0;
   beforeEntries = [];
   afterEntries = [];
+  realDir = null;
+  realBackupDir = null;
   runRecords = [];
   undoReply = { restored: [], failed: [] };
   hydration = {
@@ -78,8 +92,17 @@ mock.module("./tauri.ts", () => ({
       case "catalog":
         return { providers: [] };
       case "begin_run":
+        // 真目录在的时候，答案来自一次真实磁盘扫描：store 的前后对比就建立在
+        // 真文件的字节上（size / mtime / 行数）。同时按桥的契约把要动的文件
+        // **复制**进私有备份目录（真是复制，不是搬走）。
+        if (realDir) {
+          const entries = scanReal(realDir);
+          if (realBackupDir) copyAll(realDir, realBackupDir);
+          return { entries, roots: [realDir], unbacked: [], truncated: false };
+        }
         return { entries: beforeEntries, roots: ["/work"], unbacked: [], truncated: false };
       case "snapshot_paths":
+        if (realDir) return { entries: scanReal(realDir), roots: [realDir], truncated: false };
         return { entries: afterEntries, roots: ["/work"], truncated: false };
       case "run_log":
         return { runs: runRecords };
@@ -128,6 +151,102 @@ async function setup() {
   store.connect();
   await Bun.sleep(15);
   return { store, dispose };
+}
+
+// ---- 真实文件系统上的指纹与扫描 --------------------------------------------
+
+/**
+ * A byte-level fingerprint of a whole directory tree: every entry as a line
+ * (`d <path>` for a directory; `f <path> <size> <sha256>` for a file), sorted.
+ * Two fingerprints are equal only when the tree has the exact same shape and
+ * every file is byte-for-byte identical. This is the assertion the dry-run
+ * promise rests on — nothing here compares one variable to another.
+ */
+function treeFingerprint(root: string): string[] {
+  const lines: string[] = [];
+  const walk = (rel: string): void => {
+    const abs = rel ? join(root, rel) : root;
+    for (const name of readdirSync(abs).sort()) {
+      const childRel = rel ? `${rel}/${name}` : name;
+      const stats = statSync(join(root, childRel));
+      if (stats.isDirectory()) {
+        lines.push(`d ${childRel}`);
+        walk(childRel);
+      } else {
+        const hash = createHash("sha256").update(readFileSync(join(root, childRel))).digest("hex");
+        lines.push(`f ${childRel} ${stats.size} ${hash}`);
+      }
+    }
+  };
+  walk("");
+  return lines.sort();
+}
+
+// The same text extensions the Rust scanner counts lines for (files.rs).
+const TEXT_EXTS = new Set([
+  "txt", "md", "markdown", "csv", "tsv", "json", "jsonl", "log", "xml", "html", "htm",
+  "yaml", "yml", "ini", "toml", "srt", "vtt", "rs", "ts", "tsx", "js", "jsx", "py", "css", "sql",
+]);
+
+/**
+ * A stand-in for the Rust `begin_run` / `snapshot_paths` scan, reading real
+ * files. It is deliberately small and faithful enough for the diff's inputs
+ * (path / size / mtime / line count); it is **not** the product's scanner, so
+ * anything that depends on the scanner's exact behavior belongs in
+ * `src-tauri/tests/files.rs`. Its only job here is to feed the store facts from
+ * disk instead of from a hand-written array.
+ */
+function scanReal(root: string): Array<{ path: string; size: number; mtime_ms: number; lines: number | null }> {
+  const out: Array<{ path: string; size: number; mtime_ms: number; lines: number | null }> = [];
+  const walk = (rel: string): void => {
+    const abs = rel ? join(root, rel) : root;
+    for (const name of readdirSync(abs).sort()) {
+      const childRel = rel ? `${rel}/${name}` : name;
+      const stats = statSync(join(root, childRel));
+      if (stats.isDirectory()) {
+        walk(childRel);
+        continue;
+      }
+      out.push({
+        path: `${root}/${childRel}`.replaceAll("\\", "/"),
+        size: stats.size,
+        mtime_ms: Math.floor(stats.mtimeMs),
+        lines: countTextLines(join(root, childRel), childRel),
+      });
+    }
+  };
+  walk("");
+  out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  return out;
+}
+
+function countTextLines(abs: string, rel: string): number | null {
+  const ext = rel.includes(".") ? rel.slice(rel.lastIndexOf(".") + 1).toLowerCase() : "";
+  if (!TEXT_EXTS.has(ext)) return null;
+  const bytes = readFileSync(abs);
+  if (bytes.length === 0) return 0;
+  let newlines = 0;
+  for (const byte of bytes) if (byte === 0x0a) newlines += 1;
+  return bytes[bytes.length - 1] === 0x0a ? newlines : newlines + 1;
+}
+
+/** Copy every regular file under `root` into `dest`, recreating subfolders. */
+function copyAll(root: string, dest: string): void {
+  mkdirSync(dest, { recursive: true });
+  const walk = (rel: string): void => {
+    const abs = rel ? join(root, rel) : root;
+    for (const name of readdirSync(abs).sort()) {
+      const childRel = rel ? `${rel}/${name}` : name;
+      const stats = statSync(join(root, childRel));
+      if (stats.isDirectory()) {
+        mkdirSync(join(dest, childRel), { recursive: true });
+        walk(childRel);
+      } else {
+        writeFileSync(join(dest, childRel), readFileSync(join(root, childRel)));
+      }
+    }
+  };
+  walk("");
 }
 
 function event(name: string, payload: unknown): EventMsg {
@@ -233,39 +352,86 @@ describe("confirmation gate", () => {
     expect(names).toContain("begin_run");
   });
 
-  test("先看一眼跑完：原文件一字未动 —— 记录里的影响全是 0", async () => {
+  test("先看一眼跑完：原文件一字未动 —— 真目录、真字节，不是拿变量比变量", async () => {
     // #192 A 的核心事实。「先给我看一眼」这条路的全部意义就是：跑完以后原文件
-    // 一个字都没变、也没多出文件。这里把它变成可核对的事实，而不是界面上的一句
-    // 承诺：让这一轮跑完，前后两次快照完全一样，看记录里到底记了什么。
-    beforeEntries = [
-      { path: "/work/a.xlsx", size: 100, mtime_ms: 100, lines: 20 },
-      { path: "/work/b.xlsx", size: 100, mtime_ms: 100, lines: 20 },
-    ];
-    // 试跑没动任何文件，所以"跑完"时看到的还是同一份。
-    afterEntries = beforeEntries;
+    // 一个字都没变、也没多出文件、没少文件。
+    //
+    // 旧写法把 `afterEntries = beforeEntries` 直接写死，然后断言 impact 是 0——
+    // 那验的是桩行为和 dryRun 标志，**不是文件真没动**。这里改成：先在一个真实
+    // 临时目录里放真实文件，记下整棵树的逐文件 sha256 指纹；走完 store 的
+    // 「确认页 → 试跑 → 回合结束」，再读一次磁盘，断言指纹逐字节一致。
+    const dir = mkdtempSync(join(tmpdir(), "cante-trust-"));
+    const backup = mkdtempSync(join(tmpdir(), "cante-trust-backup-"));
+    try {
+      writeFileSync(join(dir, "一.xlsx"), "区域,金额\n华东,1200\n");
+      writeFileSync(join(dir, "二.xlsx"), "备注\n原件不要改\n");
+      mkdirSync(join(dir, "资料"));
+      writeFileSync(join(dir, "资料", "说明.txt"), "这是原件的说明\n");
+      realDir = dir;
+      realBackupDir = backup;
 
-    const { store } = await setup();
-    await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这些表合起来");
-    await store.dryRun();
-    emit("event", event("TurnEnd", { status: "Completed", steps: 2 }));
-    await Bun.sleep(20);
+      const before = treeFingerprint(dir);
+      // 指纹本身不是空的：空目录会让上面那句断言变成一句空话。
+      expect(before.filter((line) => line.startsWith("f ")).length).toBe(3);
 
-    const run = store.currentRun();
-    expect(run?.state).toBe("done");
-    expect(run?.dryRun).toBe(true);
-    // 没有新增 / 修改 / 删除：原来那两个文件就长这样。
-    expect(run?.impact).toEqual({ created: 0, modified: 0, deleted: 0, messages: 0 });
-    // 结果里一个"产出文件"都没有。
-    expect(run?.result?.files).toEqual([]);
-    expect(run?.result?.summary).toContain("没有改动任何文件");
-    // 记到磁盘上的那份也一样：undo 里没有任何要回滚的东西。
-    const saved = opCalls("save_run")[0] as { run: { undo: { created: string[]; modified: string[]; deleted: string[] } } };
-    expect(saved.run.undo.created).toEqual([]);
-    expect(saved.run.undo.modified).toEqual([]);
-    expect(saved.run.undo.deleted).toEqual([]);
-    // 试跑不算"真做过这件事"：结果卡上「在这台电脑上做过 N 次」只数真跑，
-    // 否则一次只看不动的试跑会虚报成成功记录。
-    expect(evidenceFor(store.runs(), TASK.id)).toBeNull();
+      const { store } = await setup();
+      await store.startRun(TASK, [join(dir, "一.xlsx"), join(dir, "二.xlsx")], "把这些表合起来");
+      await store.dryRun();
+      emit("event", event("TurnEnd", { status: "Completed", steps: 2 }));
+      await Bun.sleep(20);
+
+      const run = store.currentRun();
+      expect(run?.state).toBe("done");
+      expect(run?.dryRun).toBe(true);
+      // 真检查：跑完后再读一次磁盘，和跑之前**逐文件、逐字节**比。
+      const after = treeFingerprint(dir);
+      expect(after).toEqual(before);
+      // 快照备的是**副本**：私有备份目录里确实出现了一份逐字节相同的拷贝。
+      // 指纹用的是相对路径，所以两份应该完全相等。如果桥那一层把"复制"写成
+      // "搬走"，这里就会红（原件指纹也会先红）。
+      expect(treeFingerprint(backup)).toEqual(before);
+      // 没有新增 / 修改 / 删除：原来那两个文件就长这样。
+      expect(run?.impact).toEqual({ created: 0, modified: 0, deleted: 0, messages: 0 });
+      // 结果里一个"产出文件"都没有。
+      expect(run?.result?.files).toEqual([]);
+      expect(run?.result?.summary).toContain("没有改动任何文件");
+      // 记到磁盘上的那份也一样：undo 里没有任何要回滚的东西。
+      const saved = opCalls("save_run")[0] as { run: { undo: { created: string[]; modified: string[]; deleted: string[] } } };
+      expect(saved.run.undo.created).toEqual([]);
+      expect(saved.run.undo.modified).toEqual([]);
+      expect(saved.run.undo.deleted).toEqual([]);
+      // 试跑不算"真做过这件事"：结果卡上「在这台电脑上做过 N 次」只数真跑，
+      // 否则一次只看不动的试跑会虚报成成功记录。
+      expect(evidenceFor(store.runs(), TASK.id)).toBeNull();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      rmSync(backup, { recursive: true, force: true });
+    }
+  });
+
+  test("这条真检查不是空的：原文件改一个字节，指纹就变（否则上面那句断言形同虚设）", () => {
+    // 反面对照。如果指纹函数永远返回同一个值，上面那条「一字未动」的断言就
+    // 抓不到任何东西。这里故意改一个字节 + 增删文件，证明它能红。
+    const dir = mkdtempSync(join(tmpdir(), "cante-trust-sense-"));
+    try {
+      const file = join(dir, "一.txt");
+      writeFileSync(file, "原件\n");
+      const before = treeFingerprint(dir);
+      writeFileSync(file, "原件!\n");
+      expect(treeFingerprint(dir)).not.toEqual(before);
+      // 内容相同、只是 mtime 变了的"触碰"，字节指纹如实说"没变"（指纹只认内容
+      // 与目录形状，这正是"原文件一字未动"要问的问题）。
+      const same = treeFingerprint(dir);
+      writeFileSync(file, "原件!\n");
+      expect(treeFingerprint(dir)).toEqual(same);
+      // 多出一个文件、少掉一个文件，都要能被看见。
+      writeFileSync(join(dir, "新.txt"), "new\n");
+      expect(treeFingerprint(dir)).not.toEqual(same);
+      rmSync(join(dir, "新.txt"));
+      expect(treeFingerprint(dir)).toEqual(same);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

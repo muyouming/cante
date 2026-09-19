@@ -11,7 +11,8 @@
 | **完整本地门禁（9 步）** | `bash gui/scripts/e2e.sh` | 每步的原始输出；任一步红即停 | 真 Windows 才能验的东西（见第二节）✗ |
 | 秘密扫描（第 1 步） | `bash gui/scripts/secret-scan.sh` | 命中的 `文件:行` + 它打印的原因 ✓ | 未跟踪文件（扫描只扫 `git ls-files` 里的 ✓）|
 | 许可清单是否过期（第 3 步） | `bash gui/scripts/license-inventory.sh --check` | 变了哪几个组件（版本/许可/新增/删除）✓ | 许可**原文**是否齐全（那是生成物里的事 ✓）|
-| 界面三屏 + 键盘 + 两种窗口尺寸 + 确认页「先给我看一眼」 | `bash gui/scripts/dom-smoke.sh`（**也是 e2e 第 9 步**，所以本地与 CI 都跑 ✓） | 每屏的可见文字、键盘走查、两个尺寸的版面数字、确认页上那一块**向上到 `[role=dialog]` 有没有会滚的祖先** ✓ | **显示缩放**（125%/150%）✗、真 WebView2 ✗（那是 Windows job 的 `tauri-driver` ✓）；Linux `gate` job 用的 Chrome 与她的 Windows 上真跑的 WebView2 **不是同一个渲染器** ✗ |
+| 界面三屏 + 键盘 + 两种窗口尺寸 + 确认页「先给我看一眼」 | `bash gui/scripts/dom-smoke.sh`（**也是 e2e 第 9 步** ✓，所以本地与 CI 都跑 ✓） | 每屏的可见文字、键盘走查、两个尺寸的版面数字、确认页上那一块**向上到 `[role=dialog]` 有没有会滚的祖先** ✓ | **显示缩放**（125%/150%）✗（下面那条单独量 ✓）、真 WebView2 ✗（那是 Windows job 的 `tauri-driver` ✓）；Linux `gate` job 的 Chrome 与她的 Windows 上真跑的 WebView2 **不是同一个渲染器** ✗ |
+| **显示缩放（125%/150%）下的版面** | `python3 gui/scripts/zoom/driver.py`（先 `bun run build:web` ✓；`ZOOM_STUB_RUNS=N` 量「她已经做过一轮」那一面 ✓） | 逐场景的字号 ✓ / 按钮可点高度 ≥44 ✓ / 横向滚动 ✗ / **真的够不着**的控件数 ✓ / 底部固定输入区占比 ✓ | **真实 Windows 缩放的观感** ✗、**真 WebView2** ✗、非整数缩放的取整 ✗（都是建模 ✓，见脚本头注释 ✓）|
 | 界面性能基线 | `bash gui/scripts/measure-web.sh` | 首页到关键元素的**中位数**、DOM 节点数、资源字节 ✓ | 真机 GPU 下的数字 ✗ |
 | 提示词体量 | `bun gui/scripts/measure-prompts.ts` | 有没有整句重复、按内容裁段是否安全 ✓ | 模型是否**理解**那段话 ✗ |
 | 打包产物闸门（配置≠产物 ✓） | `bash gui/scripts/verify-bundle.sh --dmg <dmg>` | 挂载后的**真实目录清单** + 工具能否在包里跑 ✓ | Windows 安装包内容（那边单独跑 ✓）|
@@ -30,6 +31,7 @@ Guest Agent 还要装 virtio-serial ✓）。
 | **装完就能干活（端到端，零环境变量）** | `gui\scripts\windows\run-accept-drive.ps1`（一行命令 ✓，也可用 `accept-install.ps1 -ZeroEnv` ✓） | phase 行耗时 ✓、结果页出现「做好了」✓、**产出文件读回核对** ✓、**原件 sha256 前后一致** ✓ | 慢模型下的耗时 ✗（本地桥+pi 不是 850s 那种 ✓）|
 | **产物闸门（安装目录）** | `gui\scripts\windows\verify-bundle.sh --dir <安装目录>` | 四个可执行文件 + 随包执行组件都在、都能跑 ✓ | 安装包内部（要装完才看得到 ✓）|
 | **周度自动普查** | 计划任务 `CanteWeeklySweep` | `C:\cante-sweep\report-YYYYMMDD.md` ✓ | 需要桌面的场景 ✗ |
+| **每个子 agent 在干什么（一眼看清）** | `gui\scripts\windows\agent-dashboard.ps1` | 每个工作树的**转录文件 12 秒有没有在长** ✓（唯一能回答「现在在不在干活」的判据 ✓）、停了多久 ✓、分支/改动/提交/未推 ✓、最后一句人话与用过的工具 ✓ | **看不清内容对不对** ✗（它只读转录，不做对错判断 ✓）；也看不到**模型侧**为什么慢 ✗ |
 | 纯取证（**不进门禁** ✗） | `capture-window.ps1` / `collect-environment.ps1` / `probe-installed-app.ps1` / `dump-window-text.ps1` | 截图、环境事实、窗口文字 | **它们只产出证据、不做断言** ✓（`dump-window-text.ps1` 被上面的脚本复用 ✓）|
 
 ## 三、CI（另一台机器上的双平台 ✓）

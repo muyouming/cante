@@ -8,7 +8,7 @@
 // one-click undo right next to it.
 //
 // A failure is never a stack trace: 发生了什么 + 你可以怎么做.
-import { For, Show, createEffect, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { FOLLOWUP, TRUST } from "./copy.ts";
@@ -21,14 +21,19 @@ import { RESULTS } from "./copy-results.ts";
 // 两轮各自的文案模块都要（核对 + 复制成微信能贴的文字）。
 import { VERIFY } from "./copy-verify.ts";
 import { SHARE, shareReadFailed } from "./copy-share.ts";
+// 她做完之后的下一步通常是打印或发出去：这里给她「文件在哪 + 怎么打印」。
+import { LOCATION, PRINT } from "./copy-print.ts";
+import { placeOf } from "./location.ts";
 import { SCHEDULE } from "./copy-schedule.ts";
 import { checkNoteFromRows, lastAgentText } from "./evidence.ts";
-import { endedWithQuestion } from "./followup.ts";
-import { fileName, folderName, onlineHint, onlineLabel, type RunResultFile } from "./run.ts";
+import { endedWithQuestion, nextStepsFor, type NextStep } from "./followup.ts";
+// r25 — 做完之后那一步的文案（按钮文字很短，2–4 个字）。
+import { NEXT_STEP } from "./copy-next.ts";
+import { fileName, onlineHint, onlineLabel, type RunResultFile } from "./run.ts";
 import { CHAT_MAX_WIDTH, chatTextSummary, isTablePath, tableToChatText, type TableRow } from "./share.ts";
 import { sheetCapability } from "./capabilities.ts";
 import { describe as describeSchedule, describeCadence, type Cadence, type Schedule } from "./schedule.ts";
-import type { TaskRun } from "./tasks/index.ts";
+import { taskById, type TaskRun } from "./tasks/index.ts";
 import { verifyResultFiles, type Verification } from "./verify.ts";
 import type { Store } from "../store.ts";
 import { errorText, invoke } from "../tauri.ts";
@@ -104,6 +109,27 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
   const lastText = () => lastAgentText(props.store.rows()) ?? "";
   const producedFiles = () => run()?.result?.files.length ?? 0;
   const asking = () => show() && endedWithQuestion(lastText(), producedFiles());
+  // r25 — 她刚做成一件事，下一步十有八九要做的那件事。只在真做完、而且这次真产出了
+  // 文件时才出现（这一步的前提就是「拿刚做好的这份继续」）；它正在问她话时不出现——
+  // 那时她要做的是回话，不是再开一件事。目标是目录里真有的卡，真能一键开始。
+  const nextSteps = createMemo<NextStep[]>(() => {
+    const current = run();
+    if (!current || state() !== "done" || asking() || current.undone === true) return [];
+    return nextStepsFor({
+      taskId: current.taskId,
+      resultFiles: files().map((file) => file.path),
+    });
+  });
+
+  async function startNext(step: NextStep): Promise<void> {
+    const target = taskById(step.taskId);
+    if (!target) return;
+    await props.store.startRun(
+      { id: target.id, title: target.title, plan: target.plan },
+      step.files,
+      step.say,
+    );
+  }
   // #140 — 刚撤销完的那句话由上面的 Notice 来说；这条状态标签只在她没有那句话时
   // 挂着（例如程序重开、从记录里读回「已撤销」，那时没有提示可显示）。
   const undoNoticeShown = (): boolean => {
@@ -481,9 +507,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
                     <p class="truncate text-base font-semibold text-slate-100" title={fileName(file.path)}>
                       {fileName(file.path)}
                     </p>
-                    <p class="truncate text-[16px] text-slate-500" title={folderName(file.path)}>
-                      位置：{folderName(file.path)}
-                    </p>
+                    <p class="text-[16px] text-slate-500">{LOCATION[placeOf(file.path)]}</p>
                     <p class="mt-1 text-[16px] text-slate-300">{file.summary}</p>
                   </div>
                   <div class="flex shrink-0 flex-wrap gap-3">
@@ -505,6 +529,10 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
                   {/* r17 — 告诉她这些结果以后还能从哪儿找回来，一次说完，不多嘴。 */}
                   <p class="w-full text-[16px] leading-relaxed text-slate-400 sm:basis-full">
                     {RESULTS.keepHint}
+                  </p>
+                  {/* 打印：她不一定会想到「先打开再按 Ctrl+P」，说一句就够了。 */}
+                  <p class="w-full text-[16px] leading-relaxed text-slate-400 sm:basis-full">
+                    {PRINT.hint}
                   </p>
                   {/* 表格类结果可以变成微信里能贴的文字。只是复制，不是发送。 */}
                   <Show when={isTablePath(file.path)}>
@@ -541,6 +569,29 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
           <p class="rounded-2xl border border-slate-700 bg-slate-800/40 px-4 py-3 text-[16px] text-slate-300">
             这次没有生成新文件。
           </p>
+        </Show>
+
+        {/* r25 — 做完之后的那一步。她刚做成一件事，最自然的下一个动作就摆在这儿，
+            点一下接着做（用刚做好的这份结果）。不是只显示一句话：按钮真的会把目录里
+            那张卡摆到确认页上。绝不建议任何自动发送的动作。 */}
+        <Show when={nextSteps().length > 0}>
+          <section class="rounded-2xl border-2 border-sky-700 bg-sky-950/30 px-4 py-4">
+            <h3 class="text-[20px] font-semibold text-sky-100">{NEXT_STEP.heading}</h3>
+            <p class="mt-1 text-[16px] leading-relaxed text-sky-200/90">{NEXT_STEP.hint}</p>
+            <div class="mt-3 flex flex-wrap items-center gap-3">
+              <For each={nextSteps()}>
+                {(step) => (
+                  <button
+                    type="button"
+                    onClick={() => void startNext(step)}
+                    class="min-h-[52px] rounded-xl bg-sky-500 px-6 text-[18px] font-bold text-slate-950 hover:bg-sky-400"
+                  >
+                    {step.label}
+                  </button>
+                )}
+              </For>
+            </div>
+          </section>
         </Show>
 
         {/* #55 — 一次成功的任务之后，不打扰地问一句「以后要不要自动做」。

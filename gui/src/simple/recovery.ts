@@ -96,9 +96,17 @@ const ASSISTANT_MISSING = /动手的组件/;
 const NOT_FOUND =
   /no such file|file not found|cannot find the (file|path|folder)|path not found|\bENOENT\b|os error 2\b|找不到(该)?文件|文件不存在|已经?被(移动|移走|删除|删掉)|被移走|被删除/i;
 
-/** 文件正被别的程序占着。 */
+/**
+ * 文件正被别的程序占着。
+ *
+ * 英文里只认 **lock 开头**的词，不能写 `locked by` ✗ —— `blocked by` 的后半截
+ * 恰好**就是** `locked by` ✓，于是公司代理回的
+ * `403 Forbidden: blocked by corporate proxy` 被判成「文件被 Excel 占着」✗，
+ * 让她去关一个根本不存在的窗口（真机上实测到过，见 WINDOWS-ACCEPTANCE-13）。
+ * 这类网络/代理问题该走下面的 NETWORK ✓。
+ */
 const BUSY =
-  /being used by another|resource busy|\bEBUSY\b|file is locked|locked by|locked for writing|another process (is )?using|另一个程序正在使用|正被.{0,30}(占用|使用)|(文件|它)已?被占用|已被.{0,20}打开/i;
+  /\blocked\b|being used by another|resource busy|\bEBUSY\b|file is locked|locked for writing|another process (is )?using|另一个程序正在使用|正被.{0,30}(占用|使用)|(文件|它)已?被占用|已被.{0,20}打开/i;
 
 /** 错误文本里点到了 Excel / WPS，或 WPS 的表格后缀。 */
 const OFFICE_OPEN =
@@ -132,7 +140,7 @@ const IMAGE =
  * 于是她拿到的是「重新选一次文件」——网络断了和她的文件毫无关系。（真机验过）
  */
 const NETWORK =
-  /\b(ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNABORTED)\b|connection (refused|error|failed|reset)|cannot connect|can.?t connect|failed to connect|unable to connect|connect error|network (is )?unreachable|network error|no internet|fetch failed|socket hang ?up|getaddrinfo|\boffline\b|连接被拒绝|网络(断了|不通|异常)|连不上|服务方.{0,10}(不可用|连不上|没响应)|暂不可用|temporarily unavailable|\b50[234]\b|rate limit|quota/i;
+  /\b(ECONNREFUSED|ECONNRESET|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNABORTED)\b|connection (refused|error|failed|reset)|cannot connect|can.?t connect|failed to connect|unable to connect|connect error|network (is )?unreachable|network error|no internet|fetch failed|socket hang ?up|getaddrinfo|\boffline\b|连接被拒绝|网络(断了|不通|异常)|连不上|服务方.{0,10}(不可用|连不上|没响应)|暂不可用|temporarily unavailable|\b50[234]\b|rate limit|quota|(blocked|denied|rejected) by .{0,20}proxy|corporate proxy|company proxy|\bvia (a )?proxy\b|代理.{0,8}(挡住|拦截|拒绝|不通)|企业代理|公司(代理|网络).{0,10}(挡住|拦截|拒绝|不通)/i;
 
 /** 账号 / 密钥没配好。 */
 const AUTH =
