@@ -199,7 +199,9 @@ const INLINE_COPY_BUDGET: Readonly<Record<string, number>> = {
   // 归别的 workstream：ResultCard / TaskRunner / ConfirmSheet / History /
   // WechatImport / PrivacyPanel 的按钮、标题、状态词。数字是 2026-09 扫描
   // 出来的现状（按“一段中文算一处”统计）。
-  "ConfirmSheet.tsx": 21,
+  // #192 A：原「先试跑给我看（只看不动）」那一句已搬进 copy.ts 的 TRY_FIRST，
+  // 所以这一格从 21 减到 20（台账只减不增）。
+  "ConfirmSheet.tsx": 20,
   // History.tsx 的 22 处已经全部搬进 copy-history.ts（#57 那一轮），从台账里退场。
   "PrivacyPanel.tsx": 13,
   "ResultCard.tsx": 19,

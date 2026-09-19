@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { createRoot } from "solid-js";
 
 import type { EventMsg } from "./protocol.ts";
+import { evidenceFor } from "./simple/evidence.ts";
 
 type Handler = (payload: unknown) => void;
 
@@ -212,8 +213,59 @@ describe("confirmation gate", () => {
     await store.startRun(TASK, ["/work/a.xlsx"], "把这些表合起来");
     await store.dryRun();
     const sent = opCalls("send_input")[0] as { text: string };
+    // #192 A：从点「先给我看一眼」到真正发出去的字节，这条链要能一眼核完。
+    // 发出去的那段必须把四种写动作一个个封死，而且**不许**出现覆盖同意——
+    // 那是唯一允许改原文件的开关，试跑这条路不该带上它。
+    for (const verb of ["新建", "修改", "删除", "移动"]) {
+      expect(sent.text).toContain(verb);
+    }
     expect(sent.text).toContain("只试跑");
+    expect(sent.text).not.toContain("用户已明确同意");
     expect(store.currentRun()?.dryRun).toBe(true);
+    // 落盘的动作只有「动手前拍一份快照」和「把那句话说出去」两类；试跑不会
+    // 触发任何写文件/撤销/覆盖的命令。
+    const names = calls.map((call) => call.name);
+    expect(names).not.toContain("undo_run");
+    expect(names).not.toContain("open_path");
+    expect(names).not.toContain("reveal_path");
+    expect(names.filter((name) => name === "send_input")).toHaveLength(1);
+    // 拍快照只是把要动的文件复制进应用自己的私有备份目录，原文件只读不改。
+    expect(names).toContain("begin_run");
+  });
+
+  test("先看一眼跑完：原文件一字未动 —— 记录里的影响全是 0", async () => {
+    // #192 A 的核心事实。「先给我看一眼」这条路的全部意义就是：跑完以后原文件
+    // 一个字都没变、也没多出文件。这里把它变成可核对的事实，而不是界面上的一句
+    // 承诺：让这一轮跑完，前后两次快照完全一样，看记录里到底记了什么。
+    beforeEntries = [
+      { path: "/work/a.xlsx", size: 100, mtime_ms: 100, lines: 20 },
+      { path: "/work/b.xlsx", size: 100, mtime_ms: 100, lines: 20 },
+    ];
+    // 试跑没动任何文件，所以"跑完"时看到的还是同一份。
+    afterEntries = beforeEntries;
+
+    const { store } = await setup();
+    await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这些表合起来");
+    await store.dryRun();
+    emit("event", event("TurnEnd", { status: "Completed", steps: 2 }));
+    await Bun.sleep(20);
+
+    const run = store.currentRun();
+    expect(run?.state).toBe("done");
+    expect(run?.dryRun).toBe(true);
+    // 没有新增 / 修改 / 删除：原来那两个文件就长这样。
+    expect(run?.impact).toEqual({ created: 0, modified: 0, deleted: 0, messages: 0 });
+    // 结果里一个"产出文件"都没有。
+    expect(run?.result?.files).toEqual([]);
+    expect(run?.result?.summary).toContain("没有改动任何文件");
+    // 记到磁盘上的那份也一样：undo 里没有任何要回滚的东西。
+    const saved = opCalls("save_run")[0] as { run: { undo: { created: string[]; modified: string[]; deleted: string[] } } };
+    expect(saved.run.undo.created).toEqual([]);
+    expect(saved.run.undo.modified).toEqual([]);
+    expect(saved.run.undo.deleted).toEqual([]);
+    // 试跑不算"真做过这件事"：结果卡上「在这台电脑上做过 N 次」只数真跑，
+    // 否则一次只看不动的试跑会虚报成成功记录。
+    expect(evidenceFor(store.runs(), TASK.id)).toBeNull();
   });
 });
 
