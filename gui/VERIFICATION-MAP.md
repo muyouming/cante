@@ -60,3 +60,5 @@ Guest Agent 还要装 virtio-serial ✓）。
   `3`=**产品问题** ✓（`accept-first-screen.ps1` ✓、`run-accept-drive.ps1` ✓）—— 把这两类分开，
   正是我们最怕混淆的那一类 ✗✓。新脚本**沿用**这套约定，别自创 ✗。
 
+> 注：a11y 的**语义结构**（每份结果的标题 / 可数清单）本机有常驻文本扫描闸门（`a11y.test.ts` ✓），
+> 但**真机 UIA 复跑**仍待做 ✗（Windows 侧在做「读屏会怎么念」的清单 ✓）。
