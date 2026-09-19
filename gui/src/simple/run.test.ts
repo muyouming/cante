@@ -218,5 +218,15 @@ describe("run scaffolding", () => {
     const text = dryRunInstruction("整理表格");
     expect(text).toContain("只试跑");
     expect(text).toContain("不要");
+    // #192 A：这条路承诺「一个字都不会改」，所以四种写动作必须逐个点名封死。
+    // 少写一个（比如漏了「移动」）就等于留了条缝，这里把它钉住。
+    for (const verb of ["新建", "修改", "删除", "移动"]) {
+      expect(text).toContain(verb);
+    }
+    // 它是在卡片提示词**之后**追加的一段：卡片自己的安全规矩（结果另存新文件、
+    // 原文件只读）仍然在，试跑不会把它们顶掉。
+    expect(text.startsWith("整理表格")).toBe(true);
+    // 试跑永远不带覆盖同意那一段——那是唯一允许改原文件的开关。
+    expect(text).not.toContain("用户已明确同意");
   });
 });

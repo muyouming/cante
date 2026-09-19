@@ -86,13 +86,15 @@ bun run build:web >/dev/null
 cat > "$WORK/serve.py" <<'PY'
 import http.server, os, socketserver, sys, urllib.parse
 
-root, port, portfile, probe, layout, firstrun = (
+root, port, portfile, probe, layout, firstrun, bridge, tryfirst = (
     sys.argv[1],
     int(sys.argv[2]),
     sys.argv[3],
     sys.argv[4],
     sys.argv[5],
     sys.argv[6],
+    sys.argv[7],
+    sys.argv[8],
 )
 
 
@@ -100,7 +102,13 @@ def injected(query):
     flags = []
     if "provisioned=1" in query:
         flags.append("<script>window.__CANTE_PROVISIONED__=true;</script>")
-    for flag, path in (("probe=1", probe), ("layout=1", layout), ("firstrun=1", firstrun)):
+    for flag, path in (
+        ("probe=1", probe),
+        ("layout=1", layout),
+        ("firstrun=1", firstrun),
+        ("bridge=1", bridge),
+        ("tryfirst=1", tryfirst),
+    ):
         if flag in query:
             with open(path, encoding="utf-8") as handle:
                 flags.append("<script>" + handle.read() + "</script>")
@@ -148,6 +156,7 @@ PY
 echo "==> serving $APP_DIR/dist (requested PORT=$PORT; 0 = let the kernel choose)"
 python3 "$WORK/serve.py" "$APP_DIR/dist" "$PORT" "$WORK/port" \
   "$WORK/probe.js" "$WORK/layout.js" "$WORK/firstrun.js" \
+  "$WORK/bridge.js" "$WORK/tryfirst.js" \
   >"$WORK/server.out" 2>"$WORK/server.err" &
 SERVER_PID=$!
 
@@ -797,6 +806,200 @@ cat > "$WORK/firstrun.js" <<'JS'
 })();
 JS
 
+# The desktop-bridge stub (r22, #192 A). The confirm sheet is only reachable on
+# the real product path when `isBridgeAvailable()` is true — outside Tauri
+# App.tsx sends a chosen card straight to ErrorView. So to observe "先看一眼" in
+# a browser at all, the page needs a stand-in for the Tauri IPC. This stub
+# answers the handful of commands the confirm flow calls with the same shapes
+# `tauri.ts` documents; it never touches a real file, and the probe below never
+# presses 开始. It is a plain script in a real page, injected the same way as
+# every other probe here — there is no test-only hook inside the app.
+cat > "$WORK/bridge.js" <<'JS'
+(function () {
+  window.__CANTE_PROVISIONED__ = true;
+  function cb(fn) {
+    var id = "__probe_cb" + (window.__probe_seq = (window.__probe_seq || 0) + 1);
+    window[id] = fn;
+    return id;
+  }
+  window.__TAURI_INTERNALS__ = {
+    transformCallback: function (fn) { return cb(fn); },
+    unregisterCallback: function () {},
+    convertFileSrc: function (path) { return path; },
+    invoke: function (cmd) {
+      switch (cmd) {
+        case "plugin:event|listen":
+        case "plugin:event|unlisten":
+          return Promise.resolve(1);
+        case "events_since":
+          return Promise.resolve({
+            cursor: 0,
+            truncated: false,
+            events: [],
+            state: { status: "idle", session: null, pending_approval: null },
+          });
+        case "health":
+          return Promise.resolve({ ok: true, cante: "probe", cwd: "/tmp", daemon: true, status: "idle" });
+        case "run_log":
+          return Promise.resolve({ runs: [] });
+        case "tool_capabilities":
+          return Promise.resolve({ sheets: { available: false }, pdf: { available: false } });
+        case "begin_run":
+          return Promise.resolve({ entries: [], roots: ["/work"], unbacked: [], truncated: false });
+        case "pick_files":
+          return Promise.resolve({ paths: ["/work/一.xlsx", "/work/二.xlsx"] });
+        default:
+          return Promise.resolve({ ok: true });
+      }
+    },
+  };
+})();
+JS
+
+# The try-first probe (r22, #192 A). It drives the REAL product path with the
+# bridge stub above: home card → pick files → one sentence → 生成计划, and lands
+# on the confirmation sheet. Then it reports where "先给我看一眼" actually is:
+# which element, its rect, whether it is inside the non-scrolling <footer>, and
+# where the keyboard focus starts. It never clicks 开始 or 先看一眼, so nothing is
+# run and no file is touched. Facts only — the assertions are in the python
+# below, so a failure can say what the product needs rather than "rect moved".
+cat > "$WORK/tryfirst.js" <<'JS'
+(function () {
+  var out = {
+    error: null,
+    steps: [],
+    found: false,
+    visible: false,
+    rect: null,
+    inFooter: false,
+    footerScrolls: null,
+    confirmScrolls: null,
+    startRect: null,
+    actionIsOutline: false,
+    startIsFilled: false,
+    focusLabel: null,
+    heading: null,
+    hint: null,
+  };
+
+  function byText(text, scope) {
+    var list = Array.prototype.slice.call((scope || document).querySelectorAll("button"));
+    for (var i = 0; i < list.length; i++) {
+      if ((list[i].textContent || "").indexOf(text) >= 0) return list[i];
+    }
+    return null;
+  }
+
+  function click(el, name) {
+    if (!el) {
+      out.steps.push(name + ":missing");
+      return false;
+    }
+    el.focus();
+    el.click();
+    out.steps.push(name + ":clicked");
+    return true;
+  }
+
+  function round(rect) {
+    return {
+      x: Math.round(rect.left),
+      y: Math.round(rect.top),
+      w: Math.round(rect.width),
+      h: Math.round(rect.height),
+    };
+  }
+
+  async function settle(times) {
+    for (var i = 0; i < (times || 6); i++) await null;
+  }
+
+  async function run() {
+    await settle(20);
+    // The only card button on the home screen with an aria-label of the form
+    // "title。example" — the same one the layout probe uses, not a copied name.
+    var card = document.querySelector('button[aria-label*="。"]');
+    click(card, "card");
+    await settle(20);
+    click(byText("选择文件"), "pick");
+    await settle(20);
+    click(byText("下一步"), "next");
+    await settle(10);
+    var box = document.getElementById("task-instruction");
+    if (box) {
+      box.value = "把这两张表合成一张";
+      box.dispatchEvent(new Event("input", { bubbles: true }));
+      out.steps.push("type:ok");
+    } else {
+      out.steps.push("type:missing");
+    }
+    await settle(4);
+    click(byText("生成计划"), "plan");
+    await settle(40);
+
+    var layer = document.querySelector("[data-focus-layer]");
+    var scope = layer || document;
+    var action = byText("先给我看一眼", scope);
+    out.found = !!action;
+    if (action) {
+      var rect = action.getBoundingClientRect();
+      out.rect = round(rect);
+      // On screen without scrolling: inside the viewport on both axes.
+      out.visible =
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.top >= -1 &&
+        rect.bottom <= window.innerHeight + 1 &&
+        rect.left >= -1 &&
+        rect.right <= window.innerWidth + 1;
+      var footer = action.closest("footer");
+      out.inFooter = !!footer;
+      out.footerScrolls = footer ? getComputedStyle(footer).overflowY : null;
+      var style = getComputedStyle(action);
+      out.actionIsOutline = parseFloat(style.borderTopWidth) > 0;
+      out.heading = (function () {
+        var p = action.parentElement;
+        var found = null;
+        if (p) {
+          var ps = p.querySelectorAll("p");
+          if (ps.length) found = ps[0].textContent;
+        }
+        return found ? found.trim() : null;
+      })();
+      out.hint = (function () {
+        var p = action.parentElement;
+        var ps = p ? p.querySelectorAll("p") : [];
+        return ps.length > 1 ? ps[1].textContent.trim() : null;
+      })();
+    }
+    var start = byText("开始", scope);
+    if (start) {
+      out.startRect = round(start.getBoundingClientRect());
+      out.startIsFilled = getComputedStyle(start).backgroundColor !== "rgba(0, 0, 0, 0)";
+    }
+    var scroller = (layer || document).querySelector(".overflow-y-auto");
+    out.confirmScrolls = scroller ? getComputedStyle(scroller).overflowY : null;
+    out.focusLabel = document.activeElement
+      ? (document.activeElement.textContent || "").trim().slice(0, 14)
+      : null;
+  }
+
+  window.addEventListener("load", function () {
+    void (async function () {
+      try {
+        await run();
+      } catch (error) {
+        out.error = String((error && error.stack) || error);
+      }
+      var pre = document.createElement("pre");
+      pre.id = "tryfirst-report";
+      pre.textContent = JSON.stringify(out);
+      document.body.appendChild(pre);
+    })();
+  });
+})();
+JS
+
 # `$1` url path, `$2` output file, `$3` chrome profile tag, `$4` --window-size.
 # No --virtual-time-budget: the app keeps a reconcile interval alive, so virtual
 # time never settles and Chrome hangs. --dump-dom after load is enough — Solid
@@ -860,6 +1063,14 @@ dump "/?firstrun=1" "$WORK/dom-firstrun-large.html" firstrun-large "1180,760"
 
 echo "==> driving the first-run wizard to its last step (800×560)"
 dump "/?firstrun=1" "$WORK/dom-firstrun-small.html" firstrun-small "800,560"
+
+# #192 A — 真的走到确认页，量「先给我看一眼」在哪儿。两个窗口尺寸都跑：
+# 大窗口是她日常的，小窗口证明它没被挤到屏幕外面。
+echo "==> driving a card to the confirmation sheet and measuring 先给我看一眼 (1180×760)"
+dump "/?bridge=1&tryfirst=1" "$WORK/dom-tryfirst-large.html" tryfirst-large "1180,760"
+
+echo "==> driving a card to the confirmation sheet and measuring 先给我看一眼 (800×560)"
+dump "/?bridge=1&tryfirst=1" "$WORK/dom-tryfirst-small.html" tryfirst-small "800,560"
 
 exit_code=0
 python3 - "$WORK/dom-first-run.html" "$WORK/dom-home.html" "$WORK/dom-probe.html" <<'PY' || exit_code=1
@@ -1230,6 +1441,87 @@ for path in sys.argv[1:]:
         f"内容高 {content_h}；可滚区 {scroller.get('clientH')}→{scroller.get('scrollH')}；"
         f"暂存值点后 {report.get('stored')!r}，首页取走后 {report.get('keyAfter')!r}"
     )
+    if problems:
+        for problem in problems:
+            print(f"dom-smoke: {label}: {problem}", file=sys.stderr)
+        failed = 1
+
+if failed:
+    sys.exit(1)
+PY
+
+# ---- r22/#192 A：确认页上真的量一遍「先给我看一眼」 -------------------------
+#
+# 前面的源码扫描能证明「这一块排在不乱滚的页脚里」，但看不见窗口里到底长什么样。
+# 这一段拿真的渲染结果说话：用桥的替身（bridge.js）把卡→选文件→一句话→生成计划
+# 真跑一遍，落在确认页上，再量「先给我看一眼」在哪、是不是在屏幕里、是不是在不可以
+# 滚动的页脚里。两个窗口尺寸都要求它「第一眼就看得见」。
+#
+# 它不点 开始、也不点 先给我看一眼（点了会真发指令）：只量位置，不动文件。
+python3 - "$WORK/dom-tryfirst-large.html" "$WORK/dom-tryfirst-small.html" <<'PY' || exit_code=1
+import html, json, re, sys
+
+failed = 0
+for index, path in enumerate(sys.argv[1:]):
+    label = "try-first 1180×760" if index == 0 else "try-first 800×560"
+    dom = open(path, encoding="utf-8", errors="replace").read()
+    if len(dom) < 500:
+        print(f"dom-smoke: {label}: Chrome produced no DOM ({len(dom)} bytes)", file=sys.stderr)
+        failed = 1
+        continue
+    blob = re.search(r'<pre id="tryfirst-report">(.*?)</pre>', dom, flags=re.S)
+    if not blob:
+        print(f"dom-smoke: {label}: no report (探针没跑出来)", file=sys.stderr)
+        failed = 1
+        continue
+    try:
+        report = json.loads(html.unescape(blob.group(1)))
+    except ValueError as error:
+        print(f"dom-smoke: {label}: report is not JSON ({error})", file=sys.stderr)
+        failed = 1
+        continue
+    if report.get("error"):
+        print(f"dom-smoke: {label}: the probe threw: {report['error']}", file=sys.stderr)
+        failed = 1
+        continue
+
+    problems = []
+    if not report.get("found"):
+        problems.append("确认页上没有「先给我看一眼」这个按钮（可能又藏回折叠/滚动之后了）")
+    if not report.get("visible"):
+        problems.append(
+            f"「先给我看一眼」不在屏幕里（位置 {report.get('rect')}），要滚一下才看得到就不算第一眼"
+        )
+    if not report.get("inFooter"):
+        problems.append("「先给我看一眼」不在不可滚动的页脚里（会随正文滚，藏起来了）")
+    if report.get("footerScrolls") not in (None, "visible"):
+        problems.append(f"确认页的页脚自己会滚（overflow-y={report.get('footerScrolls')}），「先看一眼」会跟着滚走")
+    if report.get("startRect") is None:
+        problems.append("确认页上没有「开始」按钮")
+    elif report.get("rect") and report.get("startRect"):
+        a, s = report["rect"], report["startRect"]
+        # 两个按钮不许重叠：重叠就是误点的温床。
+        overlap_x = a["x"] < s["x"] + s["w"] and s["x"] < a["x"] + a["w"]
+        overlap_y = a["y"] < s["y"] + s["h"] and s["y"] < a["y"] + a["h"]
+        if overlap_x and overlap_y:
+            problems.append("「先给我看一眼」和「开始」重叠了，容易误点")
+    # 危险动作的默认焦点仍然落在安全的那个答案上（取消）。
+    if report.get("focusLabel") != "取消":
+        problems.append(f"打开确认页时焦点不在「取消」上（在 {report.get('focusLabel')!r}）")
+    # 「开始」仍然是填色的主按钮，先看一眼是描边的：两者不会混。
+    if not report.get("startIsFilled"):
+        problems.append("「开始」不再是填色主按钮（和先看一眼分不出来）")
+    if not report.get("actionIsOutline"):
+        problems.append("「先给我看一眼」不是描边按钮（可能做成了第二个填色主按钮）")
+
+    rect = report.get("rect") or {}
+    print(
+        f"dom-smoke: {label}: 先给我看一眼 found={report.get('found')} visible={report.get('visible')} "
+        f"inFooter={report.get('inFooter')} rect={rect} 开始={report.get('startRect')} "
+        f"初始焦点={report.get('focusLabel')!r} 标题={report.get('heading')!r}"
+    )
+    if report.get("hint"):
+        print(f"  | 说清了什么：{report['hint']}")
     if problems:
         for problem in problems:
             print(f"dom-smoke: {label}: {problem}", file=sys.stderr)

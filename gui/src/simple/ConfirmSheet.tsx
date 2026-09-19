@@ -11,7 +11,7 @@
 import { For, Show, createEffect, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
-import { TRUST, evidenceLine } from "./copy.ts";
+import { TRUST, TRY_FIRST, evidenceLine } from "./copy.ts";
 import { PRE_ANSWER_COPY } from "./copy-preanswer.ts";
 import type { PreAnswerDecision } from "./copy-preanswer.ts";
 import {
@@ -379,36 +379,48 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
             </Show>
           </div>
 
-          <footer class="flex flex-wrap items-center justify-end gap-3 border-t border-slate-800 bg-slate-900 px-6 py-4">
-            {/* #88 — 开始按钮被禁用时，理由得写在她点之前，而不是点完才知道。 */}
-            <Show when={startBlockNote()}>
-              {(note) => (
-                <p class="mr-auto max-w-md text-[16px] leading-relaxed text-amber-200">{note()}</p>
-              )}
-            </Show>
-            <button
-              type="button"
-              ref={(element: HTMLButtonElement) => (cancelButton = element)}
-              onClick={() => props.store.cancelRun()}
-              class="min-h-[52px] rounded-xl border border-slate-600 px-6 text-base font-semibold text-slate-200 hover:bg-slate-800"
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              onClick={() => void props.store.dryRun()}
-              class="min-h-[52px] rounded-xl border border-sky-600 px-6 text-base font-semibold text-sky-200 hover:bg-sky-950/60"
-            >
-              先试跑给我看（只看不动）
-            </button>
-            <button
-              type="button"
-              disabled={nothingReadable()}
-              onClick={() => void props.store.confirmRun(allowOverwrite())}
-              class="min-h-[52px] rounded-xl bg-sky-500 px-8 text-base font-bold text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
-            >
-              开始
-            </button>
+          {/* #192 A — 「先给我看一眼」单独成一条路：固定在按钮排上方（footer 在滚动区
+              之外，一打开就看得见，不用先滚到底），用她的话说清「只看不动」。
+              它故意是描边按钮、不是填色按钮，和「开始」不会混：危险动作的默认焦点
+              仍然落在「取消」上（initialFocus 就是它），这条不会抢。 */}
+          <footer class="border-t border-slate-800 bg-slate-900 px-6 py-4">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-700 bg-sky-950/40 px-4 py-3">
+              <div class="min-w-0">
+                <p class="text-base font-semibold text-sky-100">{TRY_FIRST.heading}</p>
+                <p class="mt-1 text-[16px] leading-relaxed text-sky-200/90">{TRY_FIRST.hint}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => void props.store.dryRun()}
+                class="min-h-[52px] shrink-0 rounded-xl border border-sky-500 px-6 text-base font-semibold text-sky-100 hover:bg-sky-900/60"
+              >
+                {TRY_FIRST.action}
+              </button>
+            </div>
+            <div class="flex flex-wrap items-center justify-end gap-3">
+              {/* #88 — 开始按钮被禁用时，理由得写在她点之前，而不是点完才知道。 */}
+              <Show when={startBlockNote()}>
+                {(note) => (
+                  <p class="mr-auto max-w-md text-[16px] leading-relaxed text-amber-200">{note()}</p>
+                )}
+              </Show>
+              <button
+                type="button"
+                ref={(element: HTMLButtonElement) => (cancelButton = element)}
+                onClick={() => props.store.cancelRun()}
+                class="min-h-[52px] rounded-xl border border-slate-600 px-6 text-base font-semibold text-slate-200 hover:bg-slate-800"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                disabled={nothingReadable()}
+                onClick={() => void props.store.confirmRun(allowOverwrite())}
+                class="min-h-[52px] rounded-xl bg-sky-500 px-8 text-base font-bold text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+              >
+                开始
+              </button>
+            </div>
           </footer>
         </section>
       </div>
