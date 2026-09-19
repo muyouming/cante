@@ -32,6 +32,10 @@ Guest Agent 还要装 virtio-serial ✓）。
 | **产物闸门（安装目录）** | `gui\scripts\windows\verify-bundle.sh --dir <安装目录>` | 四个可执行文件 + 随包执行组件都在、都能跑 ✓ | 安装包内部（要装完才看得到 ✓）|
 | **周度自动普查** | 计划任务 `CanteWeeklySweep` | `C:\cante-sweep\report-YYYYMMDD.md` ✓ | 需要桌面的场景 ✗ |
 | **每个子 agent 在干什么（一眼看清）** | `gui\scripts\windows\agent-dashboard.ps1` | 每个工作树的**转录文件 12 秒有没有在长** ✓（唯一能回答「现在在不在干活」的判据 ✓）、停了多久 ✓、分支/改动/提交/未推 ✓、最后一句人话与用过的工具 ✓ | **看不清内容对不对** ✗（它只读转录，不做对错判断 ✓）；也看不到**模型侧**为什么慢 ✗ |
+| **三种「麻烦路径」各跑一轮**（纯中文 / 中文+空格 / OneDrive 重定向桌面 ✓） | `gui\scripts\windows\accept-paths.ps1 -Only r1,r2,r3 -RedirectDesktop` | 每轮：产出真在盘上 ✓、`cante-sheets` 读回内容 ✓、**原文件 sha256 前后一致** ✓；汇总「通过 N / N」，**0 轮 = 退出码 1**（不许把「没跑」写成「通过」✗）；桌面重定向 `applied` + **`reverted` 两处读回确认** ✓ | 映射网络驱动器、`%TEMP%` 被重定向 ✗；每轮**只跑一次**（没复跑排除偶发 ✗）|
+| **「服务方真的断了」的四种错法**（`wire` 真防火墙挡出站 / `proxy407` / `dead` / `cut` ✓） | `gui\scripts\windows\run-offline.ps1 -Scenario wire`（或 proxy407 / dead / cut） | **反向判据** ✓：同一条连接「加规则前 CONNECTED (exit 0) / 加规则后 REFUSED (exit 1)」= 现场真被按住 ✓；她看到的**屏幕原文** ✓；原文件 sha256 一致 ✓；**开跑前先清残留 + 跑完删规则 + 删后 `ABSENT` 复查** ✓ | 真把网卡禁用 ✗；真企业代理 ✗（这台机器上没有 ✓）|
+| **结果页/「我做的结果」的最终文案** | `gui\scripts\windows\run-accept-drive.ps1` + `read-result-page.ps1` | **从屏幕读回文字**逐条对照 `copy-print.ts` / `location.ts` ✓（5/5 命中 ✓）；两屏**都没有机器路径** ✓；#215 的「表里是什么样」**真读出来** ✓ | 「空历史」时的面板那一面 ✗；#215「读不出表格」的回退路径 ✗（没在真机单独造 ✓）|
+| **结果找不到时说不说「不在了」** | `gui\scripts\windows\run-results-audit.ps1` | 四种现场（normal/deleted/renamed/moved ✓）：三种「找不到」都**如实说不在了** ✓（无一种显示成还在、无一种空白 ✓）；点「打开所在文件夹」**真的开出文件夹** ✓（证据是 **Shell 里数到的窗口** ✓，不是 DOM 自述 ✓）；原文件 sha256 一致 ✓ | 同名文件歧义 ✗；企业预置那台机器 ✗；真实鼠标体感 ✗。**注意**：`renamed`/`moved` **没跑任务**（用已登记在册的现有结果当靶子 ✓）——报告里分开写了 ✓ |
 | 纯取证（**不进门禁** ✗） | `capture-window.ps1` / `collect-environment.ps1` / `probe-installed-app.ps1` / `dump-window-text.ps1` | 截图、环境事实、窗口文字 | **它们只产出证据、不做断言** ✓（`dump-window-text.ps1` 被上面的脚本复用 ✓）|
 
 ## 三、CI（另一台机器上的双平台 ✓）
