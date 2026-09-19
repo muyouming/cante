@@ -25,13 +25,20 @@ describe("actionsFor：常见失败各给一条能走的路", () => {
     // #197 真机挖出来的 P0：`blocked by corporate proxy` 里**含** `locked by` ✗，
     // 于是公司代理挡住请求时，她被叫去关一个根本不存在的 Excel 窗口 ✗。
     // 这条必须钉死：网络/代理的错误**永远不许**被说成文件问题。
-    test("公司代理挡住（403 blocked by corporate proxy）：不许说成文件被占用", () => {
+    //
+    // r5 起再加一条：这一条还**不许**跟普通断网混在同一个动作里。真机验收
+    // （WINDOWS-ACCEPTANCE-15）里 `wire` 与 `proxy407` 两种错法在屏幕上给的是
+    // 同一句「过一会儿再试」✗ —— 对公司挡住这件事，等到明天也不会通。
+    test("公司代理挡住（403 blocked by corporate proxy）：不许说成文件被占用，也不许只说「过一会儿再试」", () => {
       const proxy = actionsFor(
         err('403: {"message":"Forbidden: blocked by corporate proxy"}'),
       );
       expect(kinds(proxy)).not.toContain("close-file");
       expect(JSON.stringify(proxy)).not.toMatch(/Excel|WPS|关掉|占用|打开着/);
-      expect(kinds(proxy)[0]).toBe("retry");
+      // 出路是问公司网管，不是等网络自己好。
+      expect(kinds(proxy)).toEqual(["copy-detail"]);
+      expect(proxy[0]?.label).toContain("网管");
+      expect(proxy[0]?.why).toContain("不是你的电脑");
     });
 
     test("真是文件被锁：仍然判成「关掉那个窗口」（收紧规则不能把这条弄丢）", () => {

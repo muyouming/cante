@@ -24,6 +24,7 @@ export const RECOVERY: {
   readonly retry: RecoveryCopy;
   readonly retryBridge: RecoveryCopy;
   readonly retryLater: RecoveryCopy;
+  readonly askAdmin: RecoveryCopy;
   readonly pickFiles: RecoveryCopy;
   readonly pickOtherFile: RecoveryCopy;
   readonly closeFile: RecoveryCopy;
@@ -53,6 +54,18 @@ export const RECOVERY: {
   retryLater: {
     label: "过一会儿再试",
     why: "现在连不上帮你处理的服务方，多半是网络断了。先用浏览器看看别的网页能不能打开，过几分钟再点这个按钮。",
+  },
+  /**
+   * #204 补的缺口 —— 被公司的网络挡住 / 代理要她先证明身份。
+   *
+   * 这一条和上面「过一会儿再试」必须分开：那是「网络断了」，等一下可能就好；
+   * 这是「公司不让我连」，等多久也没用。她真能做的下一步是问公司网管，所以给
+   * 一个她能按的按钮（把这段说明复制给网管），并当面说清「这通常不是你的电脑坏了」
+   * —— 不然她会以为是自己电脑出毛病，白折腾半天。
+   */
+  askAdmin: {
+    label: "复制详情给公司网管",
+    why: "这通常不是你的电脑坏了，是公司的网络不让连。把下面这段说明发给公司网管，请他帮你开通。",
   },
   /**
    * #173 —— 跑到一半彻底没消息了。这一条比上面那条更确定：不是刚连不上，
