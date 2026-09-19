@@ -19,7 +19,7 @@
 import { For, Show, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
-import { COMMON, ERROR_VIEW, explainError } from "./copy.ts";
+import { COMMON, ERROR_VIEW, STALL, explainError, stallFacts } from "./copy.ts";
 import { actionsFor, causeOf } from "./recovery.ts";
 import type { RecoveryAction, RecoveryContext } from "./recovery.ts";
 // #140 — store 的「出错」那条原话在这里有个真出口：能认出具体原因（正被占用、
@@ -92,6 +92,10 @@ export default function ErrorView(props: ErrorViewProps): JSX.Element {
   // 原始出错对象上单独取回来交给 actionsFor。cause 只用于判断，不在这里渲染。
   const actions = (): RecoveryAction[] =>
     actionsFor({ ...human(), cause: causeOf(props.error) }, props.context);
+  // #173 —— 服务方中途没了这一屏，先摆「已经做到这里」：做到第几步、做完几个操作
+  // （桥从事件里数出来的真数字），以及原文件只读这条产品规矩。不是停滞时是 null，
+  // 这一块就不出现。
+  const facts = (): ReturnType<typeof stallFacts> => stallFacts(props.error);
 
   async function onCopy(): Promise<void> {
     // #175 走查：原来复制出去的只有程序那一行原文（`provider error: HTTP 429 Too Many
@@ -138,6 +142,20 @@ export default function ErrorView(props: ErrorViewProps): JSX.Element {
 
         <h2 class="mt-5 text-[20px] font-semibold text-slate-200">{ERROR_VIEW.whatTitle}</h2>
         <p class="mt-1 text-[17px] leading-relaxed text-slate-300">{human().what}</p>
+
+        {/* #173 —— 她最需要知道的是「已经做了什么、文件还在不在」。这两句都用
+            真事实：进度来自桥数过的事件，文件那句是产品规矩（结果一律另存新文件）。 */}
+        <Show when={facts()}>
+          {(block) => (
+            <div class="mt-5 rounded-xl border border-slate-800 bg-[#0e141b] px-4 py-3">
+              <h2 class="text-[20px] font-semibold text-slate-200">{STALL.title}</h2>
+              <ul class="mt-2 list-disc space-y-1 pl-5 text-[17px] leading-relaxed text-slate-300">
+                <For each={block().progress}>{(line) => <li>{line}</li>}</For>
+                <li>{block().files}</li>
+              </ul>
+            </div>
+          )}
+        </Show>
 
         <h2 class="mt-5 text-[20px] font-semibold text-slate-200">{ERROR_VIEW.howTitle}</h2>
         <p class="mt-1 text-[17px] leading-relaxed text-slate-300">{human().how}</p>

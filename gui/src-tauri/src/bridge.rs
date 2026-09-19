@@ -90,18 +90,32 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 /// #173 — the sentence the window shows when a turn went quiet. It is written
 /// here, not in the frontend, because only the adapter knows how far the turn
 /// got; `gui/src/simple/copy.ts` matches on [`STALL_HEADLINE`] to give it a
-/// stall-specific 发生了什么 / 你可以怎么做 page. `steps` is the number of
-/// assistant replies that already landed in the window.
-fn stall_message(steps: u32) -> String {
-    if steps > 0 {
-        format!(
-            "{STALL_HEADLINE}，可能网络断了。已经做到第 {steps} 步，原来的文件都还在。网络好了，点「再试一次」。"
-        )
-    } else {
-        format!(
-            "{STALL_HEADLINE}，可能网络断了。原来的文件都还在。网络好了，点「再试一次」。"
-        )
-    }
+/// stall-specific 发生了什么 / 你可以怎么做 page.
+///
+/// The two numbers are the **only** two facts the adapter really has, and both
+/// come from events it forwarded itself:
+///
+/// * `steps` — assistant replies that landed (`turn_start` count);
+/// * `tools` — tool calls that finished executing (non-denied
+///   `tool_execution_end` count). A call still in flight is deliberately *not*
+///   counted: “做完了几个操作” must not include work that had not returned.
+///
+/// Nothing here is inferred from the filesystem — the adapter never looks at
+/// files. “原来的文件都还在” is the product's own guarantee (results are
+/// always saved as new files), restated verbatim; it is not a measurement.
+/// The retry clause is equally literal: 「再试一次」 re-runs the whole thing
+/// from the top (a fresh run, back on the confirmation sheet), it does **not**
+/// resume the abandoned turn — see `CONTRACT.md`.
+fn stall_message(steps: u32, tools: u32) -> String {
+    let progress = match (steps, tools) {
+        (0, 0) => String::new(),
+        (0, tools) => format!("已经做完了 {tools} 个操作，"),
+        (steps, 0) => format!("已经做到第 {steps} 步，"),
+        (steps, tools) => format!("已经做到第 {steps} 步，做完了 {tools} 个操作，"),
+    };
+    format!(
+        "{STALL_HEADLINE}，可能网络断了。{progress}原来的文件都还在。网络好了，点「再试一次」，会把刚才那件事重做一遍。"
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +160,10 @@ struct TurnState {
     /// not clear it. `None` means pi did not report a limit, and the context
     /// snapshot is then left out rather than guessed.
     context_limit: Option<u32>,
+    /// #173 — tool calls that finished executing this turn (non-denied
+    /// `tool_execution_end`). The stall report quotes this as “做完 N 个操作”;
+    /// a call still in flight is not counted, because it has not finished.
+    tools_done: u32,
     /// #173 — a prompt is out and no `agent_settled` has closed it yet: the
     /// window is waiting for the assistant, so silence from `pi` is suspicious.
     /// Set when a prompt is written and again on `agent_start`; cleared on
@@ -195,6 +213,7 @@ impl TurnState {
     fn begin_turn(&mut self) {
         self.turn_id = Some(format!("turn_{}", protocol::ulid()));
         self.steps = 0;
+        self.tools_done = 0;
         self.stop_reason = None;
         self.error_message = None;
         self.requested_abort = false;
@@ -523,6 +542,9 @@ fn translate(event: &Value, state: &mut TurnState) -> Vec<Value> {
             if state.denied_reported.remove(&id) {
                 return Vec::new();
             }
+            // #173 — a call that really ran (allowed, or no gate) is one
+            // finished operation: the stall report says “做完 N 个操作”.
+            state.tools_done = state.tools_done.saturating_add(1);
             let mut out: Vec<Value> = state.take_start(&id).into_iter().collect();
             let failed = event.get("isError").and_then(Value::as_bool).unwrap_or(false);
             out.push(json!({ "ToolEnd": {
@@ -1316,9 +1338,10 @@ fn stall_watch(ctx: StallCtx) {
                 && now.duration_since(shared.last_pi_message) >= ctx.timeout
             {
                 let steps = shared.turn.steps;
+                let tools = shared.turn.tools_done;
                 shared.turn.abandon_turn();
                 parent = shared.parent.clone();
-                message = Some(stall_message(steps));
+                message = Some(stall_message(steps, tools));
             }
         }
         if let Some(message) = message {
@@ -2163,16 +2186,71 @@ mod tests {
     /// to say how far the turn got without claiming it finished.
     #[test]
     fn the_stall_report_names_the_marker_and_the_step_count() {
-        let message = stall_message(3);
+        let message = stall_message(3, 2);
         assert!(message.starts_with(STALL_HEADLINE), "{message}");
-        assert!(message.contains("已经做到第 3 步"), "{message}");
+        assert!(message.contains("已经做到第 3 步，做完了 2 个操作"), "{message}");
         assert!(message.contains("原来的文件都还在"), "{message}");
         assert!(!message.contains("完成"), "a stall must not read as success: {message}");
 
-        // Nothing happened yet: do not invent a step number.
-        let early = stall_message(0);
+        // Nothing happened yet: do not invent a step number or an operation count.
+        let early = stall_message(0, 0);
         assert!(early.starts_with(STALL_HEADLINE), "{early}");
         assert!(!early.contains("第"), "{early}");
+        assert!(!early.contains("个操作"), "{early}");
+
+        // Only calls finished, no reply counted yet: say the operation count,
+        // never a bare “第 0 步”.
+        let only_tools = stall_message(0, 4);
+        assert!(only_tools.contains("已经做完了 4 个操作"), "{only_tools}");
+        assert!(!only_tools.contains("第"), "{only_tools}");
+    }
+
+    /// #173 — 「再试一次」的语义必须如实写在话里：它会把整件事从头重做一遍，
+    /// 不是接着跑。桥从不 abort 正在跑的工具，所以这条不是「续跑」的承诺。
+    #[test]
+    fn the_stall_report_says_the_retry_starts_over() {
+        for message in [stall_message(3, 2), stall_message(0, 0), stall_message(0, 5), stall_message(1, 0)] {
+            assert!(
+                message.contains("会把刚才那件事重做一遍"),
+                "the retry must be described as a fresh run, not a resume: {message}"
+            );
+            assert!(!message.contains("接着"), "a stall must not promise to carry on: {message}");
+            assert!(!message.contains("继续"), "a stall must not promise to continue: {message}");
+        }
+    }
+
+    /// #173 — only calls that really finished count as “做完的操作”.
+    #[test]
+    fn finished_tool_calls_are_counted_for_the_stall_report() {
+        let mut state = TurnState::default();
+        translate(&json!({ "type": "agent_start" }), &mut state);
+        assert_eq!(state.tools_done, 0, "nothing has run yet");
+
+        translate(
+            &json!({ "type": "tool_execution_start", "toolCallId": "c1", "toolName": "bash", "args": {} }),
+            &mut state,
+        );
+        assert_eq!(state.tools_done, 0, "a started call has not finished: {}", state.tools_done);
+        translate(
+            &json!({ "type": "tool_execution_end", "toolCallId": "c1", "toolName": "bash", "isError": false, "result": {} }),
+            &mut state,
+        );
+        assert_eq!(state.tools_done, 1);
+
+        // A failed call still ran; it counts as one finished operation.
+        translate(
+            &json!({ "type": "tool_execution_start", "toolCallId": "c2", "toolName": "bash", "args": {} }),
+            &mut state,
+        );
+        translate(
+            &json!({ "type": "tool_execution_end", "toolCallId": "c2", "toolName": "bash", "isError": true, "result": {} }),
+            &mut state,
+        );
+        assert_eq!(state.tools_done, 2);
+
+        // A fresh turn starts the count over.
+        state.begin_turn();
+        assert_eq!(state.tools_done, 0);
     }
 
     /// #173 — after the watchdog gives up, the abandoned turn's late settle is

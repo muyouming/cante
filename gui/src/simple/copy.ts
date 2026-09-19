@@ -175,11 +175,12 @@ export const ERRORS = {
   // 这句会在出错页的提示框里、也可能在别处单独出现，所以不点名某个按钮——
   // 出错页上那个按钮叫「再试一次」，写死「重试」她就找不到它了。
   networkHow: "先用浏览器看看能不能打开网页；网络正常了，再试一次。",
-  // #173 —— 跑到一半彻底没消息了。不是「一开始就连不上」，而是**已经在做**：
-  // 所以要先告诉她做到哪儿了、原来的文件没事，然后再走一遍。步数由下面的
-  // explainError 从桥给的原文里取回来，取不到就不说数字——不编。
+  // #173 —— 跑到一半彻底没消息了。不是「一开始就连不上」，而是**已经在做**。
+  // 「做到哪儿了、文件怎么样」那两句单独一屏写（见下面的 STALL 与 stallFacts）：
+  // 用桥真报过的数字，取不到就不说——不编。这里只留她真能做的那一步，
+  // 而且「再试一次」是**从头重做**而不是接着跑，这句实话必须当面写出来。
   stallWhat: "连不上帮你处理的服务方，可能网络断了。",
-  stallHow: "已经做到的步骤、原来的文件都还在。网络好了，点「再试一次」。",
+  stallHow: "网络好了，点「再试一次」，会把刚才那件事重做一遍。",
   authWhat: "账号还没配置好，暂时用不了需要联网的功能。",
   authHow:
     "请找配置这台电脑的同事或管理员帮你配好账号，然后点「重试」。这期间可以先用不需要联网的功能。",
@@ -351,6 +352,50 @@ function rawDetail(input: unknown): string {
 }
 
 /**
+ * #173 —— 停滞那一屏的「已经做到这里」那一小块。
+ *
+ * 数字只有两个，都是桥**真的从事件里数出来的**（`bridge.rs` 的 `stall_message`）：
+ * 「第 N 步」是助手回话的次数，「N 个操作」是真正执行完的工具调用数。取不到就
+ * 一个字都不说——不拿一个编出来的数字让这一屏显得可靠。
+ *
+ * 文件那句是**产品的规矩**，不是量出来的：桥从头到尾不看文件，它没有「文件还是
+ * 原样」这个测量。所以只能把规矩如实说出来（原文件只读、结果另存成新文件），
+ * **不得**写成「已经核对过文件没变」——那是我们没做过、也没能力做的检查。
+ * 真正的变化量在结果卡片上（store 的 snapshot 对比），不在这一屏。
+ */
+export const STALL = {
+  /** 这一小块的小标题。 */
+  title: "已经做到这里",
+  stepsLine: (steps: number) => `做到第 ${steps} 步`,
+  opsLine: (ops: number) => `做完了 ${ops} 个操作`,
+  filesLine: "它对原来的文件只读，结果一律另存成新文件。",
+} as const;
+
+export interface StallFacts {
+  /** 桥从事件里数出来的进度；认不出来就是空数组（那一行就不画）。 */
+  progress: string[];
+  /** 文件那一句：产品规矩，不是测量——照实当规矩说。 */
+  files: string;
+}
+
+/**
+ * 停滞时该在屏上写明的「做到哪儿了」；不是停滞就返回 null。
+ *
+ * 只吃 `rawDetail`（能认字符串 / `{detail}` / `{message}`），所以无论是桥直接发的
+ * 那句、还是 store 收尾后记下的 `TaskRun.error`，都能拿到同一份事实。
+ */
+export function stallFacts(input: unknown): StallFacts | null {
+  const detail = rawDetail(input);
+  if (!STALLED_MARKER.test(detail)) return null;
+  const steps = Number(/已经做到第 (\d+) 步/.exec(detail)?.[1] ?? 0);
+  const ops = Number(/做完了 (\d+) 个操作/.exec(detail)?.[1] ?? 0);
+  const progress: string[] = [];
+  if (steps > 0) progress.push(STALL.stepsLine(steps));
+  if (ops > 0) progress.push(STALL.opsLine(ops));
+  return { progress, files: STALL.filesLine };
+}
+
+/**
  * Turn anything a layer below threw into 发生了什么 + 你可以怎么做 + 原始详情.
  *
  * An object that already carries Chinese `what`/`how` (a `TaskRun.error`, or a
@@ -362,16 +407,11 @@ export function explainError(input: unknown): HumanError {
   // #173 —— 停滞要排在「对象自带 what/how」前面：TaskRun.error 的 what 是兜底那句
   // 「这件事没有做完。」，真原因只在 detail 里。按它换成停滞专用的两句，她才知道
   // 是网络断了、做到哪儿了、文件没事；通用那句什么都没有说。
+  //
+  // 「做到哪儿了、文件怎么样」在出错页上单独一屏写（`stallFacts`），这里只给
+  // 发生了什么 + 她真能做的那一步，别再拼一份数字进来重复两遍。
   if (STALLED_MARKER.test(detail)) {
-    const steps = Number(/已经做到第 (\d+) 步/.exec(detail)?.[1] ?? 0);
-    return {
-      what: ERRORS.stallWhat,
-      how:
-        steps > 0
-          ? `已经做到第 ${steps} 步，原来的文件都还在。网络好了，点「再试一次」。`
-          : ERRORS.stallHow,
-      detail,
-    };
+    return { what: ERRORS.stallWhat, how: ERRORS.stallHow, detail };
   }
   if (input && typeof input === "object") {
     const record = input as Record<string, unknown>;
