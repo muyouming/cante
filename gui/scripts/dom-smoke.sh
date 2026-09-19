@@ -34,19 +34,51 @@
 # Outside Tauri the bridge is unavailable by design, so this also pins the
 # browser-preview fallback: the app must explain itself instead of going blank.
 #
-# Chrome is required, and the script finds it on any of the three platforms. It
-# is the LAST step of `scripts/e2e.sh`, so the local gate and CI (the Linux `gate`
-# job, which already has Chrome) run the exact same assertions — that is the
-# repository's rule: a local green that CI cannot reproduce is worthless.
+# Chrome is required — except on Windows, where this script deliberately does
+# nothing and exits 0 (why, in detail, below). Everywhere else it finds Chrome
+# itself. It is the LAST step of `scripts/e2e.sh`, so the local gate and CI (the
+# Linux `gate` job, which already has Chrome) run the exact same assertions —
+# that is the repository's rule: a local green that CI cannot reproduce is
+# worthless.
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP_DIR"
 
-# Chrome lives in a different place on every platform: an app bundle on macOS, a
-# package on Linux, an install directory on Windows. Probe the usual spots so the
-# same script works on a laptop and in CI, and keep CHROME= as the override for a
-# browser that lives somewhere else.
+# --- Platform: Windows is skipped on purpose, and says so ---------------------
+#
+# On macOS and Linux Chrome is a console-friendly binary and the dump below works.
+# On Windows it is a GUI-subsystem `.exe`: launched from Git Bash (the shell this
+# script and the CI `windows` job use) it does not behave like an ordinary
+# command. It really bit us: on windows-latest the very first invocation — a plain
+# `chrome.exe --version` — spawned Chrome and then neither returned nor wrote a
+# single byte, so step 9 of the gate hung with no output at all and the whole job
+# sat `in_progress` for over an hour until it was cancelled. That invocation runs
+# before this script's first echo, which is why the log was empty and only the
+# still-live `chrome` processes at teardown gave it away.
+#
+# We could try to make Windows work (probe `Program Files\…\chrome.exe`), but per
+# the repository's rule — before claiming a thing is verified, ask whether it is
+# the thing that really runs — we will not ship a Windows path we cannot verify
+# from a developer machine. It would prove nothing extra anyway: the Windows job
+# already opens the REAL runtime the product ships (WebView2) through
+# `tauri-driver`. So: skip, loudly, exit 0. See gui/VERIFICATION-MAP.md for the
+# "this does not cover Windows" line.
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW* | MSYS* | CYGWIN*)
+    echo "dom-smoke: SKIP — this is Windows ($(uname -s)). This check drives Google Chrome,"
+    echo "  and on Windows Chrome is a GUI-subsystem binary that Git Bash cannot reliably"
+    echo "  read output from (it hung the windows-latest runner). Windows is covered by the"
+    echo "  real WebView2 smoke (tauri-driver) in .github/workflows/gui.yml instead."
+    echo "  Not a pass and not a failure: nothing was checked here. See gui/VERIFICATION-MAP.md."
+    exit 0
+    ;;
+esac
+
+# Chrome lives in a different place on macOS and Linux: an app bundle on macOS, a
+# package on Linux. Probe the usual spots so the same script works on a laptop and
+# in CI, and keep CHROME= as the override for a browser that lives somewhere else.
+# (Windows never reaches here — the skip above returns first.)
 find_chrome() {
   if [ -n "${CHROME:-}" ]; then
     printf '%s' "$CHROME"
@@ -55,8 +87,6 @@ find_chrome() {
   local candidate found
   for candidate in \
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
-    "/c/Program Files/Google/Chrome/Application/chrome.exe" \
-    "${LOCALAPPDATA:-/c/Users/${USER:-me}/AppData/Local}/Google/Chrome/Application/chrome.exe" \
     google-chrome \
     google-chrome-stable \
     chromium \
@@ -75,6 +105,36 @@ find_chrome() {
   # abort the script silently).
   return 0
 }
+
+# Run a command with a hard ceiling and kill it if it overruns. `timeout(1)` is
+# not present on macOS by default, and the failure being guarded against is
+# exactly a Chrome that never returns — so no Chrome process is ever allowed to
+# block the gate indefinitely. Used for the version probe; the dump() helper below
+# carries its own deadline (DUMP_TIMEOUT) for the same reason.
+run_with_deadline() {
+  local seconds="$1"
+  shift
+  local out pid deadline rc=0
+  out="$(mktemp)"
+  "$@" >"$out" 2>/dev/null &
+  pid=$!
+  deadline=$((SECONDS + seconds))
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      kill -9 "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      cat "$out"
+      rm -f "$out"
+      return 124
+    fi
+    sleep 0.1
+  done
+  wait "$pid" 2>/dev/null || rc=$?
+  cat "$out"
+  rm -f "$out"
+  return "$rc"
+}
+
 CHROME="$(find_chrome)"
 # 0 = let the kernel pick a free port; serve.py writes the real one to
 # $WORK/port. The old fixed 8099 was shared by every worktree on a machine, so
@@ -103,10 +163,23 @@ trap cleanup EXIT
 
 if [ ! -x "$CHROME" ]; then
   echo "dom-smoke: no Chrome found (looked on PATH for google-chrome/chromium, plus the" >&2
-  echo "  macOS app bundle and the Windows install dirs). Set CHROME=… to point at one." >&2
+  echo "  macOS app bundle). Set CHROME=… to point at one." >&2
   exit 2
 fi
-"$CHROME" --version 2>/dev/null | sed 's/^/dom-smoke: /' || true
+# Prove the browser actually answers before building or serving anything — and
+# give it a ceiling, so a Chrome that never returns is a fast, named failure
+# ("this platform cannot run the check") instead of a hang. That is the lesson
+# from the empty windows-latest log above. CHROME_PROBE_TIMEOUT is overridable;
+# 10 seconds is the documented default.
+chrome_version="$(run_with_deadline "${CHROME_PROBE_TIMEOUT:-10}" "$CHROME" --version || true)"
+if [ -z "$chrome_version" ]; then
+  echo "dom-smoke: Chrome at $CHROME did not answer --version within ${CHROME_PROBE_TIMEOUT:-10}s." >&2
+  echo "  Treating this platform as one that cannot run the rendered-UI check: a browser" >&2
+  echo "  that never returns must not be allowed to hang the gate. Set CHROME=… to a" >&2
+  echo "  working browser, or run on macOS/Linux with Chrome installed." >&2
+  exit 2
+fi
+printf '%s\n' "$chrome_version" | sed 's/^/dom-smoke: /'
 
 echo "==> building web assets"
 bun run build:web >/dev/null
@@ -600,7 +673,16 @@ cat > "$WORK/layout.js" <<'JS'
         var keep = scroller.scrollTop;
         scrollTo(scroller, first, false);
         home.firstCardReachable = visibleInScroller(scroller, first);
-        scroller.scrollTop = scroller.scrollHeight;
+        // Align the last card's bottom to the list bottom, not to the raw maximum
+        // scroll. `scrollTop = scrollHeight` overshoots by the list's trailing
+        // padding (24px here), which pushes the card up out of the box — so it
+        // reported "unreachable" for a card she can plainly scroll to, and it did
+        // so only where the card was tall enough to meet the padding (macOS fonts
+        // made the cards 122px; the Linux CI run slid under it). The question is
+        // "can she bring the last card fully on screen", and stopping at its
+        // bottom answers it honestly. A card taller than the visible list still
+        // fails, which is the real defect this is meant to catch.
+        scrollTo(scroller, last, true);
         home.lastCardReachable = visibleInScroller(scroller, last);
         scroller.scrollTop = keep;
       } else {

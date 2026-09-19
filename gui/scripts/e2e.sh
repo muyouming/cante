@@ -52,6 +52,11 @@ step "cargo test (src-tauri)" env RUSTFLAGS="$CARGO_WARNINGS_DENIED" cargo test 
 # 本机 / 需装 Chrome 的 CI 更多），前面全是快的；而且它是唯一能看见「界面里到底
 # 长什么样」的检查，源码扫描证明不了（评审实测：把「先给我看一眼」套进会滚的盒子，
 # 源码扫描和旧的 dom-smoke 都是绿的 ✗）。放进门禁，本地与 CI 才判据一致。
-step "dom smoke (rendered UI in Chrome)" bash scripts/dom-smoke.sh
+#
+# 这一步只在 macOS / Linux 上跑（驱动的是 Google Chrome ✓）。在 Windows 上它**明确跳过**
+# （打印原因、退出码 0 ✓）——Chrome 在 Windows 上是 GUI 子系统程序，Git Bash 读不到它的输出，
+# 曾在 windows-latest 上把这一步挂死一个多小时 ✗；Windows 那边交给真 WebView2 的 tauri-driver 冒烟 ✓。
+# 另外：找不到 Chrome 时退出码 2（红 ✗）；Chrome 在但 10 秒不答 --version 也判「这个平台跑不了」（不再无限等 ✓）。
+step "dom smoke (rendered UI in Chrome; skipped on Windows)" bash scripts/dom-smoke.sh
 
 printf '\ne2e: OK (%d/%d steps passed)\n' "$current" "$total"
