@@ -720,9 +720,13 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
             overwrite consent (issues #41, #42, #63). */}
         {/* `keyed` 是安全上的事，不是排版：队列会连着把不同的活摆到这一页上
             （跳过、上一件做完）。换了一件就必须重新开一张确认页，否则上一件
-            勾过的"我同意直接改原来的文件"会跟到下一件上去。 */}
-        <Show when={step() === "confirm" ? currentRun() : null} keyed>
-          {(_staged) => (
+            勾过的"我同意直接改原来的文件"会跟到下一件上去。
+
+            按 **run.id** 认"换了一件"，不是按对象：队列换的是另一件（id 不同）；
+            而同一件里她在确认页上改文件（P0「不用这个」）会换掉 run 对象、id 不变，
+            那时这一页不该重开——重开会把"已经去掉的（加回来）"那块一起清掉。 */}
+        <Show when={step() === "confirm" ? currentRun()?.id : null} keyed>
+          {(_stagedId) => (
             <section class="mx-auto max-w-2xl">
               <ConfirmSheet store={props.store} />
             </section>

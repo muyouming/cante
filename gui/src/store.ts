@@ -162,6 +162,16 @@ export interface Store {
   /** The user pressed 开始. `allowOverwrite` only after the red checkbox. */
   confirmRun(allowOverwrite?: boolean): Promise<void>;
   /**
+   * P0 — 确认页上「不用这个」：把一份文件从**还没动手**的这次里去掉。
+   *
+   * 只改 `run.files`，绝不碰她的文件本身：去掉后 `composedInstruction` 不再把它
+   * 当输入，但那份文件在磁盘上一个字都没变。只对停在确认页（`preview`）的那次
+   * 生效——已经在动手的不能这样改。
+   */
+  removeRunFile(path: string): void;
+  /** 「加回来」：把一份文件放回还没动手的这次输入里（已有的不会重复）。 */
+  addRunFile(path: string): void;
+  /**
    * r20 — 这次到底把我的什么内容发出去了。真正发出去的那段文字 = 卡片里写好的
    * 提示词 + 她的那一句话，由 `instructionFor` 在**本机**拼出来，完全可展示。
    * 暴露它只为隐私面板如实展示；不改发送行为，也不读任何本地文件内容。
@@ -1243,6 +1253,44 @@ export function createStore(): Store {
     resetProgress();
   }
 
+  /**
+   * 停在确认页的这批文件变了：队里那一条也跟着变。
+   *
+   * 队列是按「同一批文件」配对的（`simple/queue.ts` 的 `jobFor`）。不跟着变的话，
+   * 她在确认页去掉一份后，手里这件就和队里那条配不上，跳过 / 先做这件会退回另一条
+   * 分支——那是另一个 bug。只动还没动手的那条。
+   */
+  function syncStagedFiles(files: string[]): void {
+    const id = stagedQueueId;
+    if (!id) return;
+    setQueue((list) => list.map((job) => (job.id === id ? { ...job, files: [...files] } : job)));
+  }
+
+  /**
+   * P0 — 确认页上把一份文件从这次输入里去掉。
+   *
+   * 这是**只改输入、不动文件**：`run.files` 去掉它之后，`composedInstruction`
+   * 拼出的【要处理的文件】里就没有它了；她磁盘上那份文件一直在原处。
+   */
+  function removeRunFile(path: string): void {
+    const run = currentRun();
+    if (!run || run.state !== "preview") return;
+    if (!run.files.includes(path)) return;
+    const files = run.files.filter((item) => item !== path);
+    setCurrentRun({ ...run, files });
+    syncStagedFiles(files);
+  }
+
+  /** 「加回来」：把一份文件放回还没动手的这次输入（已有的不会重复）。 */
+  function addRunFile(path: string): void {
+    const run = currentRun();
+    if (!run || run.state !== "preview") return;
+    if (!path || run.files.includes(path)) return;
+    const files = [...run.files, path];
+    setCurrentRun({ ...run, files });
+    syncStagedFiles(files);
+  }
+
   async function confirmRun(allowOverwrite = false): Promise<void> {
     const run = currentRun();
     if (!run || run.state !== "preview") return;
@@ -1626,6 +1674,8 @@ export function createStore(): Store {
     runs,
     startRun,
     confirmRun,
+    removeRunFile,
+    addRunFile,
     composedInstruction,
     dryRun,
     cancelRun,
