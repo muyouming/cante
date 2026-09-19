@@ -21,10 +21,13 @@ import { RESULTS } from "./copy-results.ts";
 // 两轮各自的文案模块都要（核对 + 复制成微信能贴的文字）。
 import { VERIFY } from "./copy-verify.ts";
 import { SHARE, shareReadFailed } from "./copy-share.ts";
+// 她做完之后的下一步通常是打印或发出去：这里给她「文件在哪 + 怎么打印」。
+import { LOCATION, PRINT } from "./copy-print.ts";
+import { placeOf } from "./location.ts";
 import { SCHEDULE } from "./copy-schedule.ts";
 import { checkNoteFromRows, lastAgentText } from "./evidence.ts";
 import { endedWithQuestion } from "./followup.ts";
-import { fileName, folderName, onlineHint, onlineLabel, type RunResultFile } from "./run.ts";
+import { fileName, onlineHint, onlineLabel, type RunResultFile } from "./run.ts";
 import { CHAT_MAX_WIDTH, chatTextSummary, isTablePath, tableToChatText, type TableRow } from "./share.ts";
 import { sheetCapability } from "./capabilities.ts";
 import { describe as describeSchedule, describeCadence, type Cadence, type Schedule } from "./schedule.ts";
@@ -481,9 +484,7 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
                     <p class="truncate text-base font-semibold text-slate-100" title={fileName(file.path)}>
                       {fileName(file.path)}
                     </p>
-                    <p class="truncate text-[16px] text-slate-500" title={folderName(file.path)}>
-                      位置：{folderName(file.path)}
-                    </p>
+                    <p class="text-[16px] text-slate-500">{LOCATION[placeOf(file.path)]}</p>
                     <p class="mt-1 text-[16px] text-slate-300">{file.summary}</p>
                   </div>
                   <div class="flex shrink-0 flex-wrap gap-3">
@@ -505,6 +506,10 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
                   {/* r17 — 告诉她这些结果以后还能从哪儿找回来，一次说完，不多嘴。 */}
                   <p class="w-full text-[16px] leading-relaxed text-slate-400 sm:basis-full">
                     {RESULTS.keepHint}
+                  </p>
+                  {/* 打印：她不一定会想到「先打开再按 Ctrl+P」，说一句就够了。 */}
+                  <p class="w-full text-[16px] leading-relaxed text-slate-400 sm:basis-full">
+                    {PRINT.hint}
                   </p>
                   {/* 表格类结果可以变成微信里能贴的文字。只是复制，不是发送。 */}
                   <Show when={isTablePath(file.path)}>
