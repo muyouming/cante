@@ -34,14 +34,108 @@
 # Outside Tauri the bridge is unavailable by design, so this also pins the
 # browser-preview fallback: the app must explain itself instead of going blank.
 #
-# Chrome is required and is deliberately NOT part of `scripts/e2e.sh` (CI has no
-# Chrome, and this is a developer/agent aid rather than a release gate).
+# Chrome is required — except on Windows, where this script deliberately does
+# nothing and exits 0 (why, in detail, below). Everywhere else it finds Chrome
+# itself. It is the LAST step of `scripts/e2e.sh`, so the local gate and CI (the
+# Linux `gate` job, which already has Chrome) run the exact same assertions —
+# that is the repository's rule: a local green that CI cannot reproduce is
+# worthless.
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$APP_DIR"
 
-CHROME="${CHROME:-/Applications/Google Chrome.app/Contents/MacOS/Google Chrome}"
+# --- Platform: Windows is skipped on purpose, and says so ---------------------
+#
+# On macOS and Linux Chrome is a console-friendly binary and the dump below works.
+# On Windows it is a GUI-subsystem `.exe`: launched from Git Bash (the shell this
+# script and the CI `windows` job use) it does not behave like an ordinary
+# command. It really bit us: on windows-latest the very first invocation — a plain
+# `chrome.exe --version` — spawned Chrome and then neither returned nor wrote a
+# single byte, so step 9 of the gate hung with no output at all and the whole job
+# sat `in_progress` for over an hour until it was cancelled. That invocation runs
+# before this script's first echo, which is why the log was empty and only the
+# still-live `chrome` processes at teardown gave it away.
+#
+# We could try to make Windows work (probe `Program Files\…\chrome.exe`), but per
+# the repository's rule — before claiming a thing is verified, ask whether it is
+# the thing that really runs — we will not ship a Windows path we cannot verify
+# from a developer machine. It would prove nothing extra anyway: the Windows job
+# already opens the REAL runtime the product ships (WebView2) through
+# `tauri-driver`. So: skip, loudly, exit 0. See gui/VERIFICATION-MAP.md for the
+# "this does not cover Windows" line.
+case "$(uname -s 2>/dev/null || echo unknown)" in
+  MINGW* | MSYS* | CYGWIN*)
+    echo "dom-smoke: SKIP — this is Windows ($(uname -s)). This check drives Google Chrome,"
+    echo "  and on Windows Chrome is a GUI-subsystem binary that Git Bash cannot reliably"
+    echo "  read output from (it hung the windows-latest runner). Windows is covered by the"
+    echo "  real WebView2 smoke (tauri-driver) in .github/workflows/gui.yml instead."
+    echo "  Not a pass and not a failure: nothing was checked here. See gui/VERIFICATION-MAP.md."
+    exit 0
+    ;;
+esac
+
+# Chrome lives in a different place on macOS and Linux: an app bundle on macOS, a
+# package on Linux. Probe the usual spots so the same script works on a laptop and
+# in CI, and keep CHROME= as the override for a browser that lives somewhere else.
+# (Windows never reaches here — the skip above returns first.)
+find_chrome() {
+  if [ -n "${CHROME:-}" ]; then
+    printf '%s' "$CHROME"
+    return
+  fi
+  local candidate found
+  for candidate in \
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+    google-chrome \
+    google-chrome-stable \
+    chromium \
+    chromium-browser; do
+    if [ -x "$candidate" ]; then
+      printf '%s' "$candidate"
+      return
+    fi
+    if found="$(command -v "$candidate" 2>/dev/null)" && [ -n "$found" ]; then
+      printf '%s' "$found"
+      return
+    fi
+  done
+  # Nothing found: print nothing and still succeed, so the -x check below is the
+  # only failure message (under `set -e`, the last failed probe would otherwise
+  # abort the script silently).
+  return 0
+}
+
+# Run a command with a hard ceiling and kill it if it overruns. `timeout(1)` is
+# not present on macOS by default, and the failure being guarded against is
+# exactly a Chrome that never returns — so no Chrome process is ever allowed to
+# block the gate indefinitely. Used for the version probe; the dump() helper below
+# carries its own deadline (DUMP_TIMEOUT) for the same reason.
+run_with_deadline() {
+  local seconds="$1"
+  shift
+  local out pid deadline rc=0
+  out="$(mktemp)"
+  "$@" >"$out" 2>/dev/null &
+  pid=$!
+  deadline=$((SECONDS + seconds))
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+      kill -9 "$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      cat "$out"
+      rm -f "$out"
+      return 124
+    fi
+    sleep 0.1
+  done
+  wait "$pid" 2>/dev/null || rc=$?
+  cat "$out"
+  rm -f "$out"
+  return "$rc"
+}
+
+CHROME="$(find_chrome)"
 # 0 = let the kernel pick a free port; serve.py writes the real one to
 # $WORK/port. The old fixed 8099 was shared by every worktree on a machine, so
 # two agents running the smoke at once silently attached to each other's server
@@ -68,9 +162,24 @@ cleanup() {
 trap cleanup EXIT
 
 if [ ! -x "$CHROME" ]; then
-  echo "dom-smoke: no Chrome at $CHROME (set CHROME=… to point at one)" >&2
+  echo "dom-smoke: no Chrome found (looked on PATH for google-chrome/chromium, plus the" >&2
+  echo "  macOS app bundle). Set CHROME=… to point at one." >&2
   exit 2
 fi
+# Prove the browser actually answers before building or serving anything — and
+# give it a ceiling, so a Chrome that never returns is a fast, named failure
+# ("this platform cannot run the check") instead of a hang. That is the lesson
+# from the empty windows-latest log above. CHROME_PROBE_TIMEOUT is overridable;
+# 10 seconds is the documented default.
+chrome_version="$(run_with_deadline "${CHROME_PROBE_TIMEOUT:-10}" "$CHROME" --version || true)"
+if [ -z "$chrome_version" ]; then
+  echo "dom-smoke: Chrome at $CHROME did not answer --version within ${CHROME_PROBE_TIMEOUT:-10}s." >&2
+  echo "  Treating this platform as one that cannot run the rendered-UI check: a browser" >&2
+  echo "  that never returns must not be allowed to hang the gate. Set CHROME=… to a" >&2
+  echo "  working browser, or run on macOS/Linux with Chrome installed." >&2
+  exit 2
+fi
+printf '%s\n' "$chrome_version" | sed 's/^/dom-smoke: /'
 
 echo "==> building web assets"
 bun run build:web >/dev/null
@@ -564,7 +673,16 @@ cat > "$WORK/layout.js" <<'JS'
         var keep = scroller.scrollTop;
         scrollTo(scroller, first, false);
         home.firstCardReachable = visibleInScroller(scroller, first);
-        scroller.scrollTop = scroller.scrollHeight;
+        // Align the last card's bottom to the list bottom, not to the raw maximum
+        // scroll. `scrollTop = scrollHeight` overshoots by the list's trailing
+        // padding (24px here), which pushes the card up out of the box — so it
+        // reported "unreachable" for a card she can plainly scroll to, and it did
+        // so only where the card was tall enough to meet the padding (macOS fonts
+        // made the cards 122px; the Linux CI run slid under it). The question is
+        // "can she bring the last card fully on screen", and stopping at its
+        // bottom answers it honestly. A card taller than the visible list still
+        // fails, which is the real defect this is meant to catch.
+        scrollTo(scroller, last, true);
         home.lastCardReachable = visibleInScroller(scroller, last);
         scroller.scrollTop = keep;
       } else {
@@ -873,7 +991,12 @@ cat > "$WORK/tryfirst.js" <<'JS'
     rect: null,
     inFooter: false,
     footerScrolls: null,
+    // 从「先给我看一眼」向上、直到 [role=dialog]，一路记下会滚的祖先。
+    // 只看最近的 <footer> 会被骗：把那一块套一层 overflow-y-auto 的盒子，footer
+    // 自己仍然不滚，可是那一块会随内容滚走（评审实测 ✓）。
+    ancestorScrolls: [],
     confirmScrolls: null,
+    actionInsideConfirmScroller: false,
     startRect: null,
     actionIsOutline: false,
     startIsFilled: false,
@@ -955,6 +1078,20 @@ cat > "$WORK/tryfirst.js" <<'JS'
       var footer = action.closest("footer");
       out.inFooter = !!footer;
       out.footerScrolls = footer ? getComputedStyle(footer).overflowY : null;
+      // 向上找到确认页的 [role=dialog]（含），把每个 overflow-y∈{auto,scroll} 的
+      // 祖先记下来。干净的树上它是空的；套一层会滚的盒子立刻非空。
+      var scrolls = [];
+      for (var p = action.parentElement; p; p = p.parentElement) {
+        var ps = getComputedStyle(p);
+        if (ps.overflowY === "auto" || ps.overflowY === "scroll") {
+          scrolls.push(
+            ((p.className || p.tagName) + "").toString().slice(0, 56) +
+              " [overflow-y:" + ps.overflowY + "]",
+          );
+        }
+        if (p.getAttribute && p.getAttribute("role") === "dialog") break;
+      }
+      out.ancestorScrolls = scrolls;
       var style = getComputedStyle(action);
       out.actionIsOutline = parseFloat(style.borderTopWidth) > 0;
       out.heading = (function () {
@@ -977,8 +1114,11 @@ cat > "$WORK/tryfirst.js" <<'JS'
       out.startRect = round(start.getBoundingClientRect());
       out.startIsFilled = getComputedStyle(start).backgroundColor !== "rgba(0, 0, 0, 0)";
     }
+    // 确认页正文本来就是可以滚的（计划可能很长）——记下它，顺便钉住「先给我
+    // 看一眼」不在它里面：一旦页脚被挪进正文滚区，这一块就会随正文滚走。
     var scroller = (layer || document).querySelector(".overflow-y-auto");
     out.confirmScrolls = scroller ? getComputedStyle(scroller).overflowY : null;
+    out.actionInsideConfirmScroller = !!(scroller && action && scroller.contains(action));
     out.focusLabel = document.activeElement
       ? (document.activeElement.textContent || "").trim().slice(0, 14)
       : null;
@@ -1496,6 +1636,16 @@ for index, path in enumerate(sys.argv[1:]):
         problems.append("「先给我看一眼」不在不可滚动的页脚里（会随正文滚，藏起来了）")
     if report.get("footerScrolls") not in (None, "visible"):
         problems.append(f"确认页的页脚自己会滚（overflow-y={report.get('footerScrolls')}），「先看一眼」会跟着滚走")
+    # r25：只看最近的 <footer> 会被骗。把那一块套一层会滚的盒子，footer 自己不滚，
+    # 可那一块会随内容滚走 ✗。所以向上一直查到 [role=dialog]，任一祖先会滚就算问题。
+    scrolled = report.get("ancestorScrolls") or []
+    if scrolled:
+        problems.append(
+            "「先给我看一眼」被套在会滚的祖先里（" + "；".join(scrolled)
+            + "），往下滚它就没了——不算第一眼就看得见"
+        )
+    if report.get("actionInsideConfirmScroller"):
+        problems.append("「先给我看一眼」落在确认页的正文滚区里（应该固定在不滚的页脚；正文一长它就被滚走）")
     if report.get("startRect") is None:
         problems.append("确认页上没有「开始」按钮")
     elif report.get("rect") and report.get("startRect"):
@@ -1519,6 +1669,11 @@ for index, path in enumerate(sys.argv[1:]):
         f"dom-smoke: {label}: 先给我看一眼 found={report.get('found')} visible={report.get('visible')} "
         f"inFooter={report.get('inFooter')} rect={rect} 开始={report.get('startRect')} "
         f"初始焦点={report.get('focusLabel')!r} 标题={report.get('heading')!r}"
+    )
+    print(
+        f"  | 向上到 [role=dialog] 会滚的祖先 {len(scrolled)} 个：{scrolled or '（无）'}；"
+        f"确认页正文滚区 overflow-y={report.get('confirmScrolls')!r}，"
+        f"「先看一眼」在正文滚区里 {report.get('actionInsideConfirmScroller')}"
     )
     if report.get("hint"):
         print(f"  | 说清了什么：{report['hint']}")
