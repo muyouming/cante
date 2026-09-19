@@ -49,7 +49,17 @@ $script:Here = $PSScriptRoot
 $script:GuiRoot = (Resolve-Path (Join-Path $script:Here '..\..')).Path
 $script:RepoRoot = (Resolve-Path (Join-Path $script:GuiRoot '..')).Path
 $script:Lines = New-Object System.Collections.Generic.List[string]
-function Say([string]$t) { Write-Output $t; [void]$script:Lines.Add($t) }
+<#
+ * 打一行字：**同时**进控制台（人看的）与 $script:Lines（最后写成报告文件）。
+ *
+ * 为什么用 `Write-Host` 而不是 `Write-Output`（这一轮踩到 ✗）：
+ * `Write-Output` 会把输出放进管道，而当函数被**赋值调用**时（`$round = Tab-Round …`、
+ * `$elements = Dump-And-Judge …`），它的输出**全被吞进变量**而不是打到屏幕上 ✗。
+ * 表现：报告文件（从 $script:Lines 写）是全的，而控制台里 **Tab 每一步、元素清单**都不见了 ——
+ * 看日志的人会以为那几个函数没跑。实测确认：同一段循环，`Write-Output` 在赋值上下文中
+ * 控制台一个字都不出，`Write-Host` 则正常打出来。
+ #>
+function Say([string]$t) { Write-Host $t; [void]$script:Lines.Add($t) }
 function SayLines([string]$t) {
     if ([string]::IsNullOrEmpty($t)) { return }
     foreach ($line in ($t -split "`r?`n")) { Say $line }
@@ -171,6 +181,19 @@ function Clear-StaleApp {
             try { Stop-Process -Id $_.Id -Force } catch {}
         }
     }
+    # **还要杀掉 WebView2 的子进程**，不能只杀主进程。
+    #
+    # 实测（这一轮踩到）：`cante-gui.exe` 被强杀后，它的 `msedgewebview2.exe` 子进程
+    # 会继续持有用户数据目录（`%LOCALAPPDATA%\dev.cante.gui\EBWebView\lockfile`）几秒；
+    # 这时马上启一个新的，新进程会**立刻退出（exit 1）**，而日志里什么都没有——
+    # 看起来像“应用起不来”，其实是上次没死干净。实测：等 2 秒依旧退；等 10 秒才正常。
+    # 所以这里主动收掉它们，并等 lockfile 真正可用。
+    for ($round = 0; $round -lt 10; $round++) {
+        $wv = @(Get-Process -Name 'msedgewebview2' -ErrorAction SilentlyContinue)
+        if ($wv.Count -eq 0) { break }
+        foreach ($p in $wv) { try { Stop-Process -Id $p.Id -Force } catch {} }
+        Start-Sleep -Milliseconds 400
+    }
     Start-Sleep -Seconds 2
 }
 
@@ -243,8 +266,7 @@ function Describe-El($el, [double]$scale) {
  *
  * 拿不到前台就**返回 false**，由调用方当成环境问题处理，绝不能拿这种读数下结论。
  #>
-function Ensure-Foreground([int]$tries = 12) {
-    for ($i = 0; $i -lt $tries; $i++) {
+function Ensure-Foreground([int]$tries = 12) {    for ($i = 0; $i -lt $tries; $i++) {
         if ([A11yWin]::GetForegroundWindow() -eq $script:appHwnd) { return $true }
         [void][A11yWin]::SetForegroundWindow($script:appHwnd)
         Start-Sleep -Milliseconds 200
@@ -257,9 +279,24 @@ function Ensure-Foreground([int]$tries = 12) {
  *
  * 按键之前先确保应用真的是前台（Ensure-Foreground）。拿不到就置 `$script:keysUnreliable`
  * —— 那说明这一轮的键盘读数不能用，最后要报**环境问题**，不能报产品问题。
+ *
+ * 为什么连续失败几次就**立刻放弃**（这一轮踩到）：别的程序（实测：一个提权的
+ * 「任务管理器」窗口）会把前台抢走，而 Ensure-Foreground 每次重试 12×200ms ≈ 2.4 秒；
+ * 220 步 × 2.4s ≈ 8.8 分钟，直接顶到“一条命令不超 10 分钟”的线 ✗。
+ * 抢不到就**别再硬等**：置 keysUnreliable 并抛异常，让上层把它当**环境问题**收场，
+ * 快得多，而且结论一样诚实（“这一轮读数不可信”）。
  #>
+$script:fgMissStreak = 0
 function Press-Tab([bool]$shift, [int]$settleMs = 320) {
-    if (-not (Ensure-Foreground)) { $script:keysUnreliable = $true }
+    if (-not (Ensure-Foreground 3)) {
+        $script:keysUnreliable = $true
+        $script:fgMissStreak++
+        if ($script:fgMissStreak -ge 3) {
+            throw 'ENV:拿不到前台焦点（连续 3 次）—— 键盘读数不可信，不再继续。'
+        }
+    } else {
+        $script:fgMissStreak = 0
+    }
     $VK_TAB = 0x09; $VK_SHIFT = 0x10; $KEYUP = 2
     if ($shift) { [A11yWin]::keybd_event($VK_SHIFT, 0, 0, [UIntPtr]::Zero) }
     [A11yWin]::keybd_event($VK_TAB, 0, 0, [UIntPtr]::Zero)
@@ -280,23 +317,32 @@ function Press-Esc([int]$settleMs = 500) {
 
 <# 当前焦点元素的身份（可读字符串）。读不到就是 "(无)"。 #>
 <#
- * 一个元素的**可比身份**：类型 + 名字 + 矩形。
+ * 一个元素的**可比身份**：优先 **runtimeId**，拿不到才退回 `类型|名字|矩形`。
  *
  * 为什么不能只用名字：结果面板里每一行的按钮 aria-label 都是同一句
  * （「打开这个结果文件」），用名字做身份会把不同行看成同一个元素 —— 那会把
- * “产品里按钮名字不够用”误判成“Tab 卡住了”（实跑踩到）。带上矩形就能把
- * 不同行区分开；与名字的差异本身记在报告的判据里。
+ * “产品里按钮名字不够用”误判成“Tab 卡住了”（实跑踩到）。
  *
- * 矩形拿不到时退回 (kind, name, runtimeId)。
+ * 为什么**矩形也不够**（这一轮实测发现）：结果面板那 47 行同名按钮，Tab 逐个走时
+ * 列表会**滚动**，多行会先后落在**同一个屏幕 y** 上 —— 实测 47 行只有 **6** 个不同矩形
+ * （`y = 410,638,493,721,493,721,493,721,…`）。所以 `名字+矩形` 仍会把不同行折叠成一个
+ * 身份 ✗。runtimeId 是 UIA 给每个元素的分身证：同一个元素稳定、不同元素不同，不受滚动影响。
+ *
+ * 记录用哪个来源（`$script:ridUsable` / `$script:ridFallback`），报告里能看见这一条
+ * 判据到底靠什么成立 —— 如果这台机器上 runtimeId 不可用，就得如实说“退回矩形”。
  #>
+$script:ridUsable = 0
+$script:ridFallback = 0
 function El-Identity($el) {
     if (-not $el) { return '(none)' }
     $k = Kind-Of $el
     $n = [string]$el.Current.Name
+    $rid = ''
+    try { $rid = ($el.GetRuntimeId() -join ',') } catch { $rid = '' }
+    if ($rid) { $script:ridUsable++; return ($k + '|' + $n + '|rid:' + $rid) }
+    $script:ridFallback++
     $r = $el.Current.BoundingRectangle
-    if ([double]::IsInfinity($r.Left) -or [double]::IsNaN($r.Left)) {
-        try { return ($k + '|' + $n + '|rid:' + ($el.GetRuntimeId() -join ',')) } catch { return ($k + '|' + $n + '|norect') }
-    }
+    if ([double]::IsInfinity($r.Left) -or [double]::IsNaN($r.Left)) { return ($k + '|' + $n + '|norect') }
     return ($k + '|' + $n + '|' + [int]$r.Left + ',' + [int]$r.Top)
 }
 
@@ -392,20 +438,26 @@ function Tab-Round($root, [int]$maxSteps, [double]$scale) {
     $start = El-Identity $startEl
     $stuck = 0
     for ($i = 1; $i -le $maxSteps; $i++) {
-        Press-Tab $false
+        try { Press-Tab $false }
+        catch {
+            # 拿不到前台（别的程序抢焦点）：**停在这里**，把已经走到的部分原样交回去，
+            # 让上层报“环境问题、读数不可信”。不能把它当成“Tab 卡住了” ✗。
+            Say ('    （Tab 第 ' + $i + ' 步放弃：' + $_.Exception.Message + '）')
+            return [pscustomobject]@{ steps = ($i - 1); looped = $false; visited = $seen; stuck = $stuck; start = $start; elements = $visited; aborted = $true }
+        }
         $fel = $AE::FocusedElement
         $now = El-Identity $fel
         if ($fel) { $visited.Add((Describe-El $fel $scale)) | Out-Null }
         if ($now -eq $start -and $i -gt 1) {
             Say ("    Tab 第 $i 步回到起点：" + (Focus-Id))
-            return [pscustomobject]@{ steps = $i; looped = $true; visited = $seen; stuck = $stuck; start = $start; elements = $visited }
+            return [pscustomobject]@{ steps = $i; looped = $true; visited = $seen; stuck = $stuck; start = $start; elements = $visited; aborted = $false }
         }
-        # 卡住 = 连着两次**同一个元素**（带上矩形判定）都没动。
+        # 卡住 = 连着两次**同一个元素**（身份带上 runtimeId/矩形）都没动。
         if ($seen.Count -gt 0 -and $seen[$seen.Count - 1] -eq $now) { $stuck++ }
         $seen.Add($now)
         Say ("    Tab $i -> " + (Focus-Id))
     }
-    return [pscustomobject]@{ steps = $maxSteps; looped = $false; visited = $seen; stuck = $stuck; start = $start; elements = $visited }
+    return [pscustomobject]@{ steps = $maxSteps; looped = $false; visited = $seen; stuck = $stuck; start = $start; elements = $visited; aborted = $false }
 }
 
 <#
@@ -419,7 +471,19 @@ function Tab-Round($root, [int]$maxSteps, [double]$scale) {
  * 所以“真实可点区域到底多大”从 UIA 这一层**量不到** —— 报告里如实这么写。
  #>
 function Judge-Visited($round, [string]$scenario, [string]$outFile) {
-    $els = @($round.elements)
+    # 把 $round.elements 变成真正可枚举的数组。
+    #
+    # 不能写 `@($round.elements)`：$round.elements 是 `List[object]`，
+    # 而 PS 5.1 的 `@(<List[object]>)` 会抛「参数类型不匹配」✗（实测）。
+    # 用 `@(... | ForEach-Object { $_ })`（强制枚举管道）或 `$round.elements.ToArray()` 都行，
+    # 这里用后者（读起来最直白）。
+    $els = @()
+    if ($round.elements) {
+        if ($round.elements -is [System.Collections.IEnumerable] -and -not ($round.elements -is [array])) {
+            foreach ($item in $round.elements) { $els += $item }
+        } elseif ($round.elements -is [array]) { $els = $round.elements }
+        else { $els = @($round.elements) }
+    }
     $els | ConvertTo-Json -Depth 5 | Set-Content -Path $outFile -Encoding UTF8
     Say ''
     Say "=== Tab 真到得了的元素（$scenario）: 名字 / 类型 / 逻辑高 / 在屏上 ==="
@@ -446,6 +510,45 @@ function Judge-Visited($round, [string]$scenario, [string]$outFile) {
         Say  '      —— UIA 量的是这个原生控件自己的框；它外面包的 <label> 在 UIA 里不单独成节点，'
         Say  '         所以“她真实可点的区域多大”从这一层量不到（记在报告的「没验到什么」里）。'
     }
+
+    # -----------------------------------------------------------------------
+    # 判据：读屏能不能分清这些按钮（不同名字的个数）
+    #
+    # 为什么单独立这一条：前几条只说「有名字」「够高」，名字**够不够区分**它们
+    # 是另一件事。结果面板每行的两个按钮共用同一句 aria-label，读屏把 92 个按钮
+    # 念成同样两个句子，她分不清是哪一份结果。实测：92 个可 Tab 按钮只有 3 个
+    # 不同名字（含「回到首页」），47 行的按钮**全叫同一个名字**。
+    #
+    # 阈值取 **M < N/4**（任务给的）：不是硬门槛（名字本来就该重复 —— 每行都有
+    # 「打开文件」是正常的），但当**绝大多数**按钮名字都一样时它一定是设计问题，
+    # 所以要显眼地报出来。这里只在 N 够大（>= 8）时才下这条判据：按钮本来就
+    # 没几个时 M<N/4 是噪声。
+    # -----------------------------------------------------------------------
+    $names = @($buttons | ForEach-Object { $_.name })
+    $distinct = @($names | Sort-Object -Unique)
+    $N = $buttons.Count
+    $M = $distinct.Count
+    Say ''
+    Say ("=== 读屏分辨度（$scenario）：可 Tab 按钮 $N 个 / 不同名字 $M 个 ===")
+    # 身份来源：这一条判据到底靠什么成立的（runtimeId 还是退回的矩形）。
+    Say ("  （身份来源：runtimeId 可用 $($script:ridUsable) 次 / 退回矩形 $($script:ridFallback) 次）")
+    if ($N -gt 0) {
+        $grouped = $names | Group-Object | Sort-Object Count -Descending
+        foreach ($g in $grouped) {
+            Say ('  ' + $g.Count + ' × 「' + $g.Name + '」')
+        }
+    }
+    if ($N -ge 8) {
+        $thin = ($M -lt ($N / 4))
+        Add-Verdict $scenario 'distinct-button-names' (-not $thin) $(if ($thin) { "$N 个可 Tab 按钮只有 $M 个不同名字（M < N/4）" } else { '' })
+        if ($thin) {
+            Say ("  ✗✗ 读屏分不清：$N 个可 Tab 按钮只有 $M 个不同名字（M < N/4）—— 她听到的是同一句话重复 $($grouped[0].Count) 次。")
+        } else {
+            Say ("  ✓ $N 个可 Tab 按钮有 $M 个不同名字（不算 M < N/4）。")
+        }
+    } else {
+        Say ("  （可 Tab 按钮只有 $N 个（< 8），这一条不下判据，只报数字。）")
+    }
 }
 
 # ---------------------------------------------------------------------------
@@ -459,6 +562,16 @@ $proc = Start-Process -FilePath $exePath -PassThru
 Say ("pid=" + $proc.Id)
 Start-Sleep -Seconds $StartupSecs
 $proc.Refresh()
+if ($proc.HasExited) {
+    # 退得更可能是“上次没死干净”（见 Clear-StaleApp 的注释）：再等一轮、再试一次，
+    # 并在报告里说清这是第二次尝试 —— 不把一次启动失败当成产品结论。
+    Say ("应用退出了（exit " + $proc.ExitCode + "）—— 可能是上一次的 WebView2 还没退干净；清一遍重启再试一次。")
+    Clear-StaleApp
+    $proc = Start-Process -FilePath $exePath -PassThru
+    Say ("第二次 pid=" + $proc.Id)
+    Start-Sleep -Seconds $StartupSecs
+    $proc.Refresh()
+}
 if ($proc.HasExited) { Say ("环境问题：应用退出了（exit " + $proc.ExitCode + '）'); exit 2 }
 
 $hwnd = $proc.MainWindowHandle
@@ -585,6 +698,7 @@ switch ($Scenario) {
         Say ''
         Say '=== 首页：Tab 顺序（盲按，读回焦点）==='
         $round = Tab-Round $root 60 $scale
+        if ($round.aborted) { Add-EnvBlocked 'home' "盲按 Tab 时拿不到前台（走到第 $($round.steps) 步就放弃了）—— 读数不可信" }
         Add-Verdict 'home' 'tab-loops' ([bool]$round.looped) $(if ($round.looped) { '' } else { "按了 $($round.steps) 步没回到起点" })
         Add-Verdict 'home' 'tab-not-stuck' ($round.stuck -eq 0) $(if ($round.stuck -eq 0) { '' } else { "有 $($round.stuck) 次停在同一个元素上" })
         if ($script:fgLost) { Add-Verdict 'home' 'no-focus-steal' $false '盲按时焦点跑到别的窗口了（测试污染，结果不可信）' }
@@ -730,6 +844,9 @@ switch ($Scenario) {
         break }
         $elements = Dump-And-Judge $root 'results' (Join-Path $WorkDir 'elements-results.json')
         $round = Tab-Round $root 220 $scale
+        if ($round.aborted) {
+            Add-EnvBlocked 'results' "盲按 Tab 时拿不到前台（走到第 $($round.steps) 步就放弃了）—— 读数不可信"
+        }
         Add-Verdict 'results' 'tab-loops' ([bool]$round.looped) $(if ($round.looped) { '' } else { "按了 $($round.steps) 步没回到起点" })
         Add-Verdict 'results' 'tab-not-stuck' ($round.stuck -eq 0) $(if ($round.stuck -eq 0) { '' } else { "有 $($round.stuck) 次停在同一个元素上" })
         if ($script:fgLost) { Add-Verdict 'results' 'no-focus-steal' $false '盲按时焦点跑到别的窗口了（测试污染，结果不可信）' }
