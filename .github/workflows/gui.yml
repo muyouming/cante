@@ -59,6 +59,9 @@ jobs:
 
       # --- The rendered-UI smoke, in the job that can actually run a browser ----
       #
+
+      - name: Run the app's e2e gate
+        run: bash gui/scripts/e2e.sh
       # `scripts/dom-smoke.sh` is the only check in this repository that really
       # renders the interface and asserts on what a person would see. It used to
       # run on no machine but a developer's laptop, which is how a real defect
@@ -102,9 +105,6 @@ jobs:
       # before `cargo test` slipped through once. The dom-smoke step above is
       # redundant with step 9 on purpose (like the duplicated secret scan): a
       # failure there names itself instead of hiding inside `e2e.sh`.
-      - name: Run the app's e2e gate
-        run: bash gui/scripts/e2e.sh
-
       - run: bash gui/scripts/license-inventory.sh --check
 
   windows:
