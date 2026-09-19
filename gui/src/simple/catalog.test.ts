@@ -5,7 +5,7 @@
 //   bun test src
 import { describe, expect, test } from "bun:test";
 
-import { IMAGE_TYPES, availabilityHint, groupTasks, searchTasks } from "./catalog.ts";
+import { IMAGE_TYPES, availabilityHint, groupTasks, searchTasks, suggestTasks } from "./catalog.ts";
 import { LIBRARY } from "./copy-library.ts";
 import { TASKS, type TaskDef, type TaskGroup } from "./tasks/index.ts";
 
@@ -137,6 +137,84 @@ describe("按「想做的事」搜索", () => {
     expect(hits.length).toBeGreaterThan(0);
     expect(hits.every((task) => task.group === "表格")).toBe(true);
     expect(searchTasks("微信", sheets)).toEqual([]);
+  });
+});
+
+describe("她说一句话，最像哪几张卡（r25）", () => {
+  test("她嘴里的说法能认到对应的卡片（她不会搜，只会说）", () => {
+    const cases: Array<[string, string]> = [
+      ["我有两个表要比一下", "excel.diff"],
+      ["帮我把这两张表合并一下", "excel.merge"],
+      ["帮我看看这两张表哪里不一样", "excel.diff"],
+      ["把这张表里华东区三月的记录挑出来", "excel.filter"],
+      ["帮我把这些发票整理成一张台账", "invoice.ledger"],
+      ["把这个文件夹里的照片按月份分好", "files.by-date"],
+      ["写个五一放假的通知", "doc.notice"],
+      ["帮我把这份年度报告总结一下", "doc.summary"],
+      ["群里接龙谁还没报名", "wechat.missing"],
+      ["帮我查一下出差住宿费报销标准", "research.brief"],
+      ["把这张表的照片变成 Excel", "vision.table"],
+      ["把几个 PDF 合成一个", "pdf.merge"],
+      ["帮我把这些照片复制一份改成新名字", "files.rename"],
+      ["帮我找出重复的文件", "files.dupes"],
+      ["把这张表按部门汇总一下金额", "excel.group"],
+      ["核对一下这张表的合计对不对", "check.totals"],
+      ["把这份 PDF 拆成每一页一个文件", "pdf.split"],
+      ["把这张表整理一下，去掉空行", "excel.tidy"],
+      ["把考勤表和花名册按人合起来", "admin.byperson"],
+      ["帮我看看有没有重复的发票", "invoice.dupes"],
+      ["把合同里快到期的挑出来", "admin.expiry"],
+      ["把微信聊天记录做成表格", "wechat.table"],
+      ["帮我想几条回复", "wechat.draft"],
+    ];
+    for (const [query, id] of cases) {
+      expect(ids(suggestTasks(query))).toContain(id);
+    }
+  });
+
+  test("最多只给三张，而且每一张都在结果里", () => {
+    for (const query of ["把这两张表合并一下", "帮我整理一下这些文件", "写一份通知"]) {
+      const hits = suggestTasks(query);
+      expect(hits.length).toBeLessThanOrEqual(3);
+      expect(new Set(hits.map((task) => task.id)).size).toBe(hits.length);
+    }
+  });
+
+  test("认不出来就返回空数组：不硬凑一张不相干的卡给她", () => {
+    for (const query of ["怎么养一只会写代码的猫", "今天天气怎么样", "这道题怎么做", ""]) {
+      expect(suggestTasks(query)).toEqual([]);
+    }
+  });
+
+  test("判据只用卡自己的标题和示例：组名和计划文字不算数", () => {
+    // 「合并」这种词只出现在某张卡的**计划步骤**里，不在标题/示例里时，那张卡
+    // 不该被推给她——否则每张表都能被推出来。
+    const planOnly = fakeTask({
+      id: "plan.only",
+      title: "完全不相关的一件事",
+      example: "也完全不相干",
+      plan: ["把重复的行合并起来"],
+      summaryHints: ["合并了多少"],
+    });
+    expect(ids(suggestTasks("帮我合并一下", [planOnly]))).toEqual([]);
+    // 同一张卡，把词放进标题里就该被认出来。
+    const titled = fakeTask({ id: "titled", title: "把两张表合并起来", example: "不相干" });
+    expect(ids(suggestTasks("帮我合并一下", [titled]))).toEqual(["titled"]);
+  });
+
+  test("命中标题的排在只命中示例的前面，同分时保持目录原顺序", () => {
+    // excel.diff 的标题就有「不同」，admin.changes 只在示例里出现「变更/走了」；
+    // 同一句话里两者都被认到时，标题那张在前面。
+    const title = fakeTask({ id: "title.hit", title: "找出两张表的不同", example: "不相干" });
+    const example = fakeTask({ id: "example.hit", title: "别的名字", example: "比较两张表的不同" });
+    expect(ids(suggestTasks("帮我看看哪里不一样", [example, title]))).toEqual(["title.hit", "example.hit"]);
+  });
+
+  test("可以只在给定的卡片里认（首页会把被关掉的卡排除掉）", () => {
+    const sheets = TASKS.filter((task) => task.group === "表格");
+    const hits = suggestTasks("把这张表按部门汇总一下金额", sheets);
+    expect(hits.length).toBeGreaterThan(0);
+    expect(hits.every((task) => task.group === "表格")).toBe(true);
   });
 });
 

@@ -48,12 +48,12 @@ export const IMAGE_TYPES: ReadonlySet<string> = new Set([
 const SYNONYMS: readonly (readonly string[])[] = [
   ["合并", "汇总", "合起来", "合成", "合成一张", "拼成", "拼起来", "并成一张"],
   ["去重", "重复", "重了", "重复行"],
-  ["对账", "核对", "比对", "对比", "差异", "查差异", "不同"],
+  ["对账", "核对", "比对", "对比", "差异", "查差异", "不同", "比一下", "对一下", "不一样"],
   ["筛选", "挑出", "选出", "找出", "只要"],
   ["拆分", "分开", "拆成", "拆开", "分列", "拆列"],
   ["改名", "重命名", "换个名字"],
   ["归档", "整理", "分类", "按月份", "分组"],
-  ["微信", "群", "聊天", "聊天记录", "导出"],
+  ["微信", "群", "聊天", "聊天记录", "回复", "导出"],
   ["pdf", "扫描件", "扫描"],
   ["图片", "照片", "截图", "相片"],
   ["总结", "摘要", "提炼", "要点", "概括"],
@@ -105,6 +105,46 @@ function scoreTask(task: TaskDef, terms: readonly string[]): number {
   const rest = [...task.plan, ...task.summaryHints];
   if (rest.some((line) => hits(line, terms))) return 1;
   return 0;
+}
+
+/**
+ * 「你说的这件事，最像哪几张卡」。
+ *
+ * 和 `searchTasks` 的区别是**判据更窄**：只认卡自己的标题和示例（不认组名、
+ * 计划步骤、结果提示）。她只是说了一句话、还没点任何卡，这时我们要报「你是想
+ * 做这个吗」，猜错的代价比搜不到大——组名或计划里偶然出现的词（例如「整理」）
+ * 会把一堆不相干的卡推到她面前，那就是在替她乱猜。所以：
+ *
+ *   * 一张卡命中的同义词组越多，越像她想做的事；同样多时，命中标题的排前面；
+ *   * 一张都命不中时返回空数组，调用方据此如实说「我没看懂」，不硬凑；
+ *   * 最多 `limit` 张（默认 3 张），同分时保持目录原顺序（常用在前）。
+ *
+ * 判据全是**已有的真实事实**：卡标题、卡示例，以及 `SYNONYMS` 里现成的说法。
+ * 它不是一个独立的相似度引擎，所以每一条判据都能在测试里写出来。
+ */
+export function suggestTasks(query: string, tasks: TaskDef[] = TASKS, limit = 3): TaskDef[] {
+  const q = normalize(query);
+  if (!q) return [];
+  const touched = SYNONYMS.filter((group) => group.some((word) => q.includes(normalize(word))));
+  if (touched.length === 0) return [];
+  return tasks
+    .map((task, index) => {
+      let groups = 0;
+      let titleHits = 0;
+      for (const group of touched) {
+        if (hits(task.title, group)) {
+          groups += 1;
+          titleHits += 1;
+        } else if (hits(task.example, group)) {
+          groups += 1;
+        }
+      }
+      return { task, index, groups, titleHits };
+    })
+    .filter((entry) => entry.groups > 0)
+    .sort((a, b) => b.groups - a.groups || b.titleHits - a.titleHits || a.index - b.index)
+    .slice(0, limit)
+    .map((entry) => entry.task);
 }
 
 /**
