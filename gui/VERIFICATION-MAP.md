@@ -36,6 +36,7 @@ Guest Agent 还要装 virtio-serial ✓）。
 | **「服务方真的断了」的四种错法**（`wire` 真防火墙挡出站 / `proxy407` / `dead` / `cut` ✓） | `gui\scripts\windows\run-offline.ps1 -Scenario wire`（或 proxy407 / dead / cut） | **反向判据** ✓：同一条连接「加规则前 CONNECTED (exit 0) / 加规则后 REFUSED (exit 1)」= 现场真被按住 ✓；她看到的**屏幕原文** ✓；原文件 sha256 一致 ✓；**开跑前先清残留 + 跑完删规则 + 删后 `ABSENT` 复查** ✓ | 真把网卡禁用 ✗；真企业代理 ✗（这台机器上没有 ✓）|
 | **结果页/「我做的结果」的最终文案** | `gui\scripts\windows\run-accept-drive.ps1` + `read-result-page.ps1` | **从屏幕读回文字**逐条对照 `copy-print.ts` / `location.ts` ✓（5/5 命中 ✓）；两屏**都没有机器路径** ✓；#215 的「表里是什么样」**真读出来** ✓ | 「空历史」时的面板那一面 ✗；#215「读不出表格」的回退路径 ✗（没在真机单独造 ✓）|
 | **结果找不到时说不说「不在了」** | `gui\scripts\windows\run-results-audit.ps1` | 四种现场（normal/deleted/renamed/moved ✓）：三种「找不到」都**如实说不在了** ✓（无一种显示成还在、无一种空白 ✓）；点「打开所在文件夹」**真的开出文件夹** ✓（证据是 **Shell 里数到的窗口** ✓，不是 DOM 自述 ✓）；原文件 sha256 一致 ✓ | 同名文件歧义 ✗；企业预置那台机器 ✗；真实鼠标体感 ✗。**注意**：`renamed`/`moved` **没跑任务**（用已登记在册的现有结果当靶子 ✓）——报告里分开写了 ✓ |
+| **真实 Windows 缩放下的版面** | `gui\scripts\windows\scale\read-display-config.ps1`（只读 ✓）+ `scroll-reach.ps1` | 当前 DPI / 分辨率 / 每个 source 的缩放档位 ✓（`rc=87` = 这个适配器不支持调缩放 ✓）；滚动前后每个动作按钮的矩形 ✓，**并真点一次**确认能走到 ✓ | **125%/150% 下的版面（这台机器改不了缩放 ✗）**；缩放≠100% 时「物理像素 ÷ 缩放」的换算 ✗（只建模过 ✓）|
 | 纯取证（**不进门禁** ✗） | `capture-window.ps1` / `collect-environment.ps1` / `probe-installed-app.ps1` / `dump-window-text.ps1` | 截图、环境事实、窗口文字 | **它们只产出证据、不做断言** ✓（`dump-window-text.ps1` 被上面的脚本复用 ✓）|
 
 ## 三、CI（另一台机器上的双平台 ✓）
