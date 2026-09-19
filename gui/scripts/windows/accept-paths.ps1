@@ -476,8 +476,18 @@ function Invoke-Round([pscustomobject]$Round) {
 
 $exitCode = 1
 try {
+    # -Only r1,r3 从命令行传进来时 PowerShell **不拆**，它是字面量 'r1,r3' ✗
+    # -> 对不上任何 id -> 一轮都不跑，而旧代码把「0 轮」汇总成 0 = 全通过 ✗✗
+    # （AGENTS.md §3.3：把「没验证」写成「通过」）。这里显式拆开。
+    $onlyIds = @()
+    foreach ($piece in $Only) {
+        foreach ($part in ($piece -split '[,;\s]+')) {
+            if ($part.Trim()) { $onlyIds += $part.Trim() }
+        }
+    }
+    $onlyIds = @($onlyIds | Select-Object -Unique)
     foreach ($round in $rounds) {
-        if ($Only -notcontains $round.id) {
+        if ($onlyIds -notcontains $round.id) {
             Say ''
             Say ('（跳过 ' + $round.id + '：不在 -Only 里）')
             continue
@@ -520,10 +530,17 @@ foreach ($r in $roundResults) {
 }
 Say ("  通过 $passed / $total")
 
-$exitCode = 0
-if ($productFail -gt 0) { $exitCode = 3 }
-elseif ($envFail -gt 0) { $exitCode = 2 }
-Say ('accept-paths: 结论 = ' + $exitCode + '（0=全通过 / 2=环境问题 / 3=产品问题）')
+if ($total -eq 0) {
+    Say '  !! 一轮都没跑：-Only 没匹配上任何一轮 → 这条不算通过 ✗'
+    Say ('     你给的 -Only = ' + (($Only | ForEach-Object { $_.ToString() }) -join '|'))
+    Say ('     可选轮次 id = ' + (($rounds | ForEach-Object { $_.id }) -join ','))
+    $exitCode = 1
+} else {
+    $exitCode = 0
+    if ($productFail -gt 0) { $exitCode = 3 }
+    elseif ($envFail -gt 0) { $exitCode = 2 }
+}
+Say ('accept-paths: 结论 = ' + $exitCode + '（0=全通过 / 1=脚本自身出错・一轮都没跑 / 2=环境问题 / 3=产品问题）')
 
 if ($Cleanup) {
     Say ''
