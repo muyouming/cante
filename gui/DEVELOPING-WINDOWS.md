@@ -331,6 +331,14 @@ Windows 11 + WSL（Ubuntu）上确认过能起来。
 
 | 项 | 值 |
 | --- | --- |
+> **清理计划任务时的坑（我踩过一次）**：那台机器上攒了 20+ 个一次性探针任务，
+> 我用「名字匹配 `Cante*` 且不在保留列表里就删」批量清 —— 结果把 `CanteWeeklySweep`
+> **一起删了** ✗（它在保留列表里，但先被别的匹配吃掉了）。任务删掉**不会**有提示，
+> 下周日才不会跑，你要等一整周才发现。
+> 两个规矩：① 批量删之前**先把 `schtasks /query` 的完整列表打出来数一遍**，
+> 删完**再数一遍**、确认只少了你要删的那些；② 删完**立刻重建**你要保留的
+> （这条命令在下面「怎么建」一节里，照抄即可）。
+
 | 计划任务名 | `CanteWeeklySweep` |
 | 触发 | 每周日 03:30（`-Weekly -DaysOfWeek Sunday -At 03:30`）+ `StartWhenAvailable`（错过就补跑） |
 | 动作 | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\cante\gui\scripts\windows\weekly-sweep.ps1` |
