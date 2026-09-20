@@ -12,6 +12,70 @@ $ErrorActionPreference = 'Continue'
 
 function Section($title) { Write-Output ''; Write-Output ("=== " + $title + " ===") }
 
+# --- 把 wsl.exe 的输出按正确编码读回来 ---------------------------------------
+# wsl.exe 自己打的字（发行版列表、安装提示）是 **UTF-16LE**；WSL 里命令的输出是
+# UTF-8。用默认代码页捕获会花屏，所以按实际字节认编码（r18 修的）。
+# Start-Process 原样重定向到文件，再读字节：有 UTF-16 BOM 或含 NUL → UTF-16LE，
+# 否则 UTF-8；空文件/失败路径也不炸。
+function Read-WslStreamFile([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return '' }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -eq 0) { return '' }
+    if ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
+        return [System.Text.Encoding]::Unicode.GetString($bytes, 2, $bytes.Length - 2)
+    }
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        return [System.Text.Encoding]::UTF8.GetString($bytes, 3, $bytes.Length - 3)
+    }
+    foreach ($b in $bytes) {
+        if ($b -eq 0) { return [System.Text.Encoding]::Unicode.GetString($bytes) }
+    }
+    return [System.Text.Encoding]::UTF8.GetString($bytes)
+}
+
+function Invoke-WslCapture {
+    param(
+        [Parameter(Mandatory = $true)][string]$WslPath,
+        [Parameter(Mandatory = $true)][string[]]$WslArguments,
+        [string]$StandardInput
+    )
+    $outFile = [System.IO.Path]::GetTempFileName()
+    $errFile = [System.IO.Path]::GetTempFileName()
+    $inFile = ''
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $startArgs = @{
+            FilePath               = $WslPath
+            ArgumentList           = $WslArguments
+            RedirectStandardOutput = $outFile
+            RedirectStandardError  = $errFile
+            NoNewWindow            = $true
+            Wait                   = $true
+            PassThru               = $true
+        }
+        if ($PSBoundParameters.ContainsKey('StandardInput')) {
+            $inFile = [System.IO.Path]::GetTempFileName()
+            [System.IO.File]::WriteAllText($inFile, [string]$StandardInput, (New-Object System.Text.UTF8Encoding($false)))
+            $startArgs['RedirectStandardInput'] = $inFile
+        }
+        $proc = Start-Process @startArgs
+        $code = -1
+        if ($null -ne $proc) { $code = $proc.ExitCode }
+        $text = (Read-WslStreamFile $outFile) + (Read-WslStreamFile $errFile)
+        return [pscustomobject]@{ ExitCode = $code; Text = $text.Trim() }
+    } catch {
+        return [pscustomobject]@{ ExitCode = -1; Text = "$($_.Exception.Message)" }
+    } finally {
+        $ErrorActionPreference = $saved
+        foreach ($f in @($outFile, $errFile, $inFile)) {
+            if ($f -and (Test-Path -LiteralPath $f)) {
+                Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
 Section '操作系统'
 $os = Get-CimInstance Win32_OperatingSystem
 [pscustomobject]@{
@@ -98,10 +162,10 @@ $canteCmd = Get-Command cante -ErrorAction SilentlyContinue
 Write-Output ("PATH 里的 cante  = " + $(if ($canteCmd) { $canteCmd.Source } else { '<未找到>' }))
 $anteCmd = Get-Command ante -ErrorAction SilentlyContinue
 Write-Output ("PATH 里的 ante   = " + $(if ($anteCmd) { $anteCmd.Source } else { '<未找到>'} ))
-Write-Output 'WSL 发行版（wsl.exe 输出是 UTF-16，这里去掉空字节再打）：'
+Write-Output 'WSL 发行版（wsl.exe 的输出可能是 UTF-16LE，按实际字节解码）：'
 try {
-    $wsl = (wsl.exe -l -v 2>&1 | Out-String)
-    ($wsl -replace "`0", '') -split "`r?`n" | Where-Object { $_.Trim() -ne '' } | ForEach-Object { Write-Output ('  ' + $_.Trim()) }
+    $wslCapture = Invoke-WslCapture -WslPath 'wsl.exe' -WslArguments @('-l', '-v')
+    $wslCapture.Text -split "`r?`n" | Where-Object { $_.Trim() -ne '' } | ForEach-Object { Write-Output ('  ' + $_.Trim()) }
 } catch { Write-Output ('wsl 不可用：' + $_.Exception.Message) }
 
 Section '取证工具'
