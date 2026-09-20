@@ -305,11 +305,12 @@ Error
 Goodbye
 ```
 
-除了上面这份事件清单，夹具还演出了三个**真实守护进程会出现、界面真的读**的状态，让没有守护进程的机器（CI 就是）也能把它们跑通：
+除了上面这份事件清单，夹具还演出了四个**真实守护进程会出现、界面真的读**的状态，让没有守护进程的机器（CI 就是）也能把它们跑通：
 
 * **一批多次审批**（`FAKE_CANTE_APPROVAL_BATCH=<n>`）：一次 `TurnPause` 的 `reason.Approval.tools` 里放 n 条调用（默认 1，最多 4）。审批卡就是按「一批」设计的，所以这是必须有的一条；`fixtures/fake-cante.test.ts` 断言两条都在、`store.test.ts` 断言审批卡一次列出两条并各自翻译成中文动作。
 * **审批被拒**：由 `ApprovalResponse` 里那一条自己的 `decision` 驱动——接受的那条以 `Completed` 收尾，拒绝的那条以 `Denied` 收尾，而且 `TurnResume` 之后**没有** `ToolStart`（被拒的调用从未真正开始）。这是输入驱动的，不是写死的第二条路径：同一批里可以一半接受一半拒绝。
 * **中途出错**（`FAKE_CANTE_TURN_ERROR=1`）：一条 `Error`（原始报错原话）后面跟一个非 `Completed` 的 `TurnEnd`（`status.Error` 带 `kind` / `headline` / `details`），也就是出错页与失败记录读的那个形状。
+* **服务方欠费停机**（`FAKE_CANTE_TURN_QUOTA=1`）：与上面同形，但吐的是 2026-09 网关欠费停机那次**一个字不改的真原文**（`503: {...insufficient credits...}`）。`src/simple/recovery.ts` 的 `SERVICE_BUSY` 正是从这条原文上认出 `insufficient credits` 与 `503`，所以夹具把原文"美化"成中文就不再能证明任何事；`store.test.ts` 端到端断言这条原文经产品那条路（`run.error.cause`）分到「服务方忙/用完了」这一条，而不是让她重选文件。
 
 「用量」这一条**没有补**：`UsageUpdate` 虽然夹具本来就在演，但 `store.ts` 的归约里根本没有它对应的分支（简单界面没有任何一处读 token 用量或上下文占用），补一条只有守卫在看的用量脚本就是死代码。真要看用量，唯一被读的是 `ContextReport`（上面「夹具没演的事件」里那一行）。
 

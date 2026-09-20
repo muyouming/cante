@@ -16,6 +16,7 @@
 // 选文件」，要文件夹就给「打开文件夹」，纯文字的就不硬塞一个选文件的按钮。
 import { RECOVERY, STALLED_MARKER } from "./copy-recovery.ts";
 import { DAEMON_RECOVERY } from "./copy-daemon.ts";
+import { SERVICE_RECOVERY } from "./copy-service.ts";
 
 export type RecoveryKind =
   | "retry"
@@ -159,6 +160,28 @@ const PROXY_BLOCK =
   /(?<![\w.\/-])407(?![\w.])|proxy[ -]?auth(entication)?|corporate proxy|company proxy|\b(blocked|denied|rejected|forbidden) by [^\n]{0,40}proxy\b|\bvia (a |an )?proxy\b|被(公司|企业)(的)?(网络|代理)/i;
 
 /**
+ * 服务方自己「忙不过来 / 这个月用完了」——不是她的网络，也不是她的文件。
+ *
+ * 为什么和 NETWORK 分开：两条都让她「等」，但等的东西不一样。NETWORK 的出路是
+ * 「先用浏览器看看别的网页能不能打开」——那对「网线掉了 / 公司挡住」是对的；而
+ * 服务方只是这一单收不了（欠费停机、限流、自己挂了），她查自己的网络永远查不出
+ * 问题，真该做的是等，以及一直这样时告诉管网络的同事。
+ *
+ * 边界（谁归谁，别让两类互相抢）：
+ *   * 401 / 403 = 这台电脑的账号没配好 → AUTH（找配置电脑的同事）✗ 不是这里；
+ *   * 402 / 429 / 502 / 503 / 504 = 服务方收不了这一单 → 这里；
+ *   * 400 = 这次请求本身的问题 → 不在这里硬猜，退回通用出口。
+ * 数字必须各自成词，且不许把文件名里的数字（`报表429.xlsx`）当状态码——
+ * 和 PROXY_BLOCK 里 407 那条用的是同一个判据。
+ *
+ * 这一条必须排在 NETWORK 前面：`rate limit` / `quota` / `50[234]` 在 NETWORK 里也
+ * 有，但两者都命中时，更具体的那条才是真的。**顺序在这里解决，不在对面删词** ——
+ * 动 NETWORK 会让既有断言（普通断网仍是「过一会儿再试」）回归。
+ */
+const SERVICE_BUSY =
+  /insufficient (credits|quota|balance|funds)|quota (exceeded|exhausted|reached)|exceeded (the )?quota|usage limit|rate[ -]?limit|too many requests|service (temporarily )?unavailable|bad gateway|gateway time-?out|overloaded|(?<![\w.\/-])(402|429|502|503|504)(?![\w.])|(服务方|服务器)[^\n]{0,20}(用完了?|用不了|限流|缓一缓|忙不过来)|用量[^\n]{0,8}(用完|到顶|已满)|余额不足/i;
+
+/**
  * 连不上网 / 服务方不可用。
  *
  * `connection error` 这一串是断网时真正会到这里的原文：动手的组件报的是
@@ -295,6 +318,14 @@ export function actionsFor(error: RecoveryError, context?: RecoveryContext): Rec
     // 公司不让连：等多久也不会通，她真能做的下一步是问公司网管。这里**只给这一条**，
     // 不再附「过一会儿再试」—— 那正是她照做也永远没用的一步。
     actions = [action("copy-detail", RECOVERY.askAdmin)];
+  } else if (SERVICE_BUSY.test(text)) {
+    // 服务方自己忙不过来 / 这个月用完了：等一等是真的有用（不是白等在公司那道墙
+    // 上），所以主路是「过一会儿再试」；一直这样，再请管网络的同事看原文。
+    // 这一条排在 NETWORK 前面（理由见上面 SERVICE_BUSY 的注释）。
+    actions = [
+      action("retry", SERVICE_RECOVERY.wait),
+      action("copy-detail", SERVICE_RECOVERY.admin),
+    ];
   } else if (NETWORK.test(text)) {
     actions = [action("retry", RECOVERY.retryLater)];
   } else if (AUTH.test(text)) {

@@ -25,6 +25,8 @@
 //                              cante pauses a whole batch at once; default 1).
 //   FAKE_CANTE_TURN_ERROR=1    make UserInput fail mid-turn: an Error event
 //                              followed by a non-Completed TurnEnd.
+//   FAKE_CANTE_TURN_QUOTA=1    same shape, but the failure is the real one the
+//                              gateway gave us on 2026-09 (503, out of credits).
 export {};
 
 let eventSeq = 0;
@@ -48,6 +50,16 @@ const SESSION = {
   skills: [],
   subagents: [],
 };
+
+/**
+ * 今天真实发生过的那条服务方失败（2026-09 欠费停机）。
+ *
+ * 原样保留，一个字不改：分流（`src/simple/recovery.ts` 的 `SERVICE_BUSY`）靠的
+ * 就是 `insufficient credits` 与 `503` 这些可核对的特征；把它「美化」成中文就
+ * 不再能证明夹具演的是现场，回归也就挡不住。测试拿它当锚点。
+ */
+const QUOTA_RAW =
+  '503: {"message":"[commandcode/deepseek/deepseek-v4.1-flash] [400]: You have insufficient credits to make this request. Please purchase more credits to continue  (reset after 15s)"}';
 
 /** A call the scripted turn parks on. `args` is echoed verbatim. */
 interface ParkedTool {
@@ -170,6 +182,30 @@ function handle(op: unknown, id: string): void {
                 kind: "rate_limited",
                 headline: "rate limited",
                 details: ["HTTP 429 Too Many Requests", "the gateway asked us to slow down"],
+              },
+            },
+            steps: 1,
+          },
+        },
+        id,
+      );
+      return;
+    }
+    // 服务方自己欠费停机：和上面同一个形状，但吐的是今天那条真原文。
+    if (process.env.FAKE_CANTE_TURN_QUOTA === "1") {
+      emit({ TurnStart: { turn_id } }, id);
+      emit({ MessageDelta: "starting the job" }, id);
+      emit({ AgentMessage: "starting the job" }, id);
+      emit({ Error: QUOTA_RAW }, id);
+      emit(
+        {
+          TurnEnd: {
+            turn_id,
+            status: {
+              Error: {
+                kind: "service_unavailable",
+                headline: "服务方暂时用不了",
+                details: [QUOTA_RAW, "the service is out of credits; try again later"],
               },
             },
             steps: 1,
