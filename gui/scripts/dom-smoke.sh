@@ -1226,9 +1226,26 @@ SCREENS = {
             "privacy entry": "隐私",
             # A first run lands on the wizard, which is the screen the product
             # promises a non-technical user: three plain steps.
+            #
+            # 注意：下面这三条只被**进度条上的三个标签**满足，而进度条在第 1 步就把
+            # 三个标签全画出来 —— 所以它们只能证明「向导画出来了」，**不能**证明第 2、
+            # 第 3 步真的渲染过。第 3 步由下面的 firstrun 探针真的驱动到并读回来；第 2
+            # 步的两个分支在纯浏览器里够不着（没有桌面桥）。要钉第 1 步**真正的正文**，
+            # 看下面那四条（见 gui/docs/FIRST-SCREEN.md §6）。
             "wizard step 1": "欢迎",
             "wizard step 2": "检查电脑",
             "wizard step 3": "开始使用",
+            # 第 1 步真正的正文（标题 / 那句话 / 唯一的按钮），逐字抄自渲染结果。
+            # 前三行是「向导画出来了」证明不了的：进度条能给出三个标签，但给不出标题、
+            # 正文和这个按钮。
+            "wizard step 1 title": "欢迎使用 Cante",
+            "wizard step 1 body": (
+                "我帮你把表格、文件这些麻烦事做完。原文件我不会乱动，动手前会先让你确认。"
+                "先检查一下你的电脑，好吗？"
+            ),
+            "wizard step 1 button": "开始检查",
+            # 头部第三个入口（历史 / 隐私之外的那个）。
+            "about entry": "关于",
             # The product promise itself — if this sentence ever disappears, the
             # safety story is gone with it.
             "no-touch promise": "原文件我不会乱动",
