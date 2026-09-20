@@ -12,6 +12,9 @@ import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { TRUST, TRY_FIRST, evidenceLine } from "./copy.ts";
+// 缺口补齐（走访）：动手前这一屏必须也回答「内容去哪了」——和隐私面板共用一份文案。
+import { EGRESS } from "./copy-privacy-audit.ts";
+import { DEFAULT_PRIVACY, egressLine } from "./privacy.ts";
 import HintText from "./HintText.tsx";
 import { PRE_ANSWER_COPY } from "./copy-preanswer.ts";
 import type { PreAnswerDecision } from "./copy-preanswer.ts";
@@ -69,6 +72,11 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   let cancelButton: HTMLButtonElement | undefined;
 
   const run = () => props.store.currentRun();
+  // 这次内容去哪了：以这次运行自己的 online 为准（她按「开始」时真会发生的那一个），
+  // 服务方名字取面板报出的同一个值；面板/卡片缺这一份时退回默认。
+  const privacy = () => props.store.privacy?.() ?? DEFAULT_PRIVACY;
+  const egress = (): string =>
+    egressLine({ online: run()?.online === true, provider: privacy().provider });
   const risks = () => planRisks(run()?.plan ?? []);
   const risky = () => hasActiveRisk(risks());
   const files = () => run()?.files ?? [];
@@ -244,6 +252,13 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
           </header>
 
           <div class="flex-1 overflow-y-auto px-6 py-5">
+            {/* 动手前最后一屏：先回答「这次内容去哪了」。只在本机 / 联网、发给谁，
+                和隐私面板读同一份状态、用同一批文案（copy-privacy-audit 的 EGRESS）。 */}
+            <div class="mb-4 rounded-2xl border border-slate-700 bg-slate-800/40 px-4 py-3">
+              <p class="text-[16px] font-semibold text-slate-200">{EGRESS.heading}</p>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-300">{egress()}</p>
+            </div>
+
             <h3 class="text-[20px] font-semibold text-slate-200">它打算这样做</h3>
             <ol class="mt-2 space-y-2">
               <For each={run()?.plan ?? []}>

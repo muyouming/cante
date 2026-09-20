@@ -15,7 +15,7 @@
 //     store.composedInstruction(run))` — the same text the store actually sends
 //     (including the dry-run / overwrite suffix), so what she reads is exactly
 //     what went out — never a second, drifting copy.
-import { SENT } from "./copy-privacy-audit.ts";
+import { EGRESS, SENT } from "./copy-privacy-audit.ts";
 // 只取两个后缀常量（覆盖同意 / 试跑）与那个 run 类型；run.ts 是叶子模块，没有反向依赖，
 // 所以这一条不会成环（run.ts 里那条「保持独立于 privacy.ts」的注释仍然成立）。
 import { OVERWRITE_CONSENT, dryRunInstruction } from "./run.ts";
@@ -55,7 +55,7 @@ export function onlineLabel(online: boolean): string {
 /** The one-line explanation under the stamp. */
 export function onlineHint(online: boolean): string {
   return online
-    ? "整理时用到了联网，你的内容发给了帮你整理的服务方。"
+    ? "整理时用到了联网，内容发给了帮你整理的服务方。"
     : "这次全部在你自己的电脑上完成，内容没有发出去。";
 }
 
@@ -95,6 +95,23 @@ export function webSearchHint(localOnly: boolean): string {
   return localOnly
     ? "已关闭（跟着「只在本机处理」一起关）"
     : "已开：需要时会联网，关掉它就等于只在本机处理";
+}
+
+/**
+ * 确认页上「这次内容去哪了」那一句：面板那三句（文件不走 / 发出去的是这段文字 /
+ * 它在这台电脑上拼出来）在动手前那一屏的缩略版。
+ *
+ * 为什么需要它：确认页原来说了要做什么、会动哪些文件，却对「内容去哪了」一个字没提，
+ * 而产品律要求每个露出口都如实说明谁来处理。文案放 `copy-privacy-audit.ts` 的
+ * `EGRESS`，与面板共用同一批事实（online / provider）。
+ *
+ * `online` 用这次运行自己的值（`run.online`，她按「开始」时真正会发生的那一个），
+ * 不是面板那一刻的全局开关；provider 用面板报出的服务方名字。
+ */
+export function egressLine(state: { online: boolean; provider: string | null }): string {
+  if (!state.online) return EGRESS.local + EGRESS.filesStay;
+  const where = state.provider ? EGRESS.onlineNamed(state.provider) : EGRESS.online;
+  return where + EGRESS.filesStay;
 }
 
 // ---------------------------------------------------------------------------
