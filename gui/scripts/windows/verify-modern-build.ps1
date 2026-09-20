@@ -42,6 +42,52 @@ $exeTime = (Get-Item $exe).LastWriteTime
 $distFiles = Get-ChildItem (Join-Path $distDir "*.js") -ErrorAction SilentlyContinue
 $distTime = if ($distFiles) { ($distFiles | Sort-Object LastWriteTime -Descending)[0].LastWriteTime } else { $null }
 
+# ── 这一轮编出来的，还是装着的旧版本？（#261 的那半条锚点）────────────────────
+# 光有文件时间还不够：装着的旧版本和刚编出来的**长得一模一样**，名字都叫
+# cante-gui.exe。所以要**让应用自己报**它是哪一份——copy-build.ts 会在打包前端时
+# 注入一个标记串（明文在 dist 的 .js 里），这里把它读出来，与 dist / exe 的时间对。
+# 对不上，就是**你在验一个旧的产物**——这正是这个脚本该拦住的错（#247 那一轮量出
+# 0/12，量的是旧界面，结论作废）。
+#
+# 只查 dist（明文），不查 exe：前端资源在被 Tauri 打进 exe 之后是 brotli 压缩的，
+# 拿 exe 的明文去找界面文案**永远不命中**，已知正常（#261）。标记串的拼法必须和
+# copy-build.ts 里的 BUILD_STAMP_MARKER 一致（那边有测试盯着它只有一处定义）。
+$stampPattern = 'CANTE-BUILD\|(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\|([0-9A-Za-z][0-9A-Za-z.+-]*)'
+$stamps = @()
+foreach ($f in $distFiles) {
+    $content = [IO.File]::ReadAllText($f.FullName)
+    foreach ($m in [regex]::Matches($content, $stampPattern)) {
+        $t = [datetime]::ParseExact(
+            $m.Groups[1].Value, "yyyy-MM-dd HH:mm",
+            [Globalization.CultureInfo]::InvariantCulture)
+        $stamps += [pscustomobject]@{ time = $t; version = $m.Groups[2].Value; file = $f.Name }
+    }
+}
+$newest = if ($stamps.Count -gt 0) { $stamps | Sort-Object time -Descending | Select-Object -First 1 } else { $null }
+$appTime = if ($newest) { $newest.time } else { $null }
+$appVersion = if ($newest) { $newest.version } else { "" }
+# 给输出用的一行说明（PowerShell 的 if 是语句不是表达式，不能塞进括号里，所以先算好）。
+$appLabel = if ($appTime) { "$($appTime.ToString('yyyy-MM-dd HH:mm'))（版本 $appVersion）" } else { "（没读到）" }
+
+# 容差 30 分钟：前端打进 dist 再到 exe 落盘有先后，差几分钟正常；而「装着的旧版本」
+# 和「刚编出来的」差的是几小时（#261 实测 02:27 对 14:36），30 分钟拦得住。
+$toleranceMinutes = 30
+$freshness = "unknown"
+$freshnessNote = ""
+if ($null -eq $appTime) {
+    $freshnessNote = "核不出来：dist 里没有应用自报的构建时间。先确认这一轮真跑过 bun run build:web、构建注入在不在。"
+} else {
+    $distFar = ($null -ne $distTime) -and ([math]::Abs(($distTime - $appTime).TotalMinutes) -gt $toleranceMinutes)
+    $exeBehind = ($exeTime - $appTime).TotalMinutes -lt (0 - $toleranceMinutes)
+    if ($distFar -or $exeBehind) {
+        $freshness = "stale"
+        $freshnessNote = "你在验一个旧的产物。应用自报 $($appTime.ToString('yyyy-MM-dd HH:mm')) 做好的，与 dist / exe 的时间对不上。"
+    } else {
+        $freshness = "fresh"
+        $freshnessNote = "这一轮的产物：应用自报 $($appTime.ToString('yyyy-MM-dd HH:mm')) 做好的，与 dist / exe 对得上。"
+    }
+}
+
 $results = @()
 foreach ($needle in $Text) {
     $hits = @()
@@ -58,17 +104,35 @@ foreach ($needle in $Text) {
 
 if ($Json) {
     [pscustomobject]@{
-        exeTime  = $exeTime.ToString("s")
-        distTime = if ($distTime) { $distTime.ToString("s") } else { "" }
-        assets   = @($distFiles | ForEach-Object { $_.Name })
-        checks   = $results
+        exeTime       = $exeTime.ToString("s")
+        distTime      = if ($distTime) { $distTime.ToString("s") } else { "" }
+        appBuildTime  = if ($appTime) { $appTime.ToString("s") } else { "" }
+        appVersion    = $appVersion
+        freshness     = $freshness
+        freshnessNote = $freshnessNote
+        assets        = @($distFiles | ForEach-Object { $_.Name })
+        checks        = $results
     } | ConvertTo-Json -Depth 4
     return
 }
 
 "exe  时间 = $exeTime"
 "dist 时间 = $distTime"
+"应用自报 = $appLabel"
 "dist 资源 = " + (($distFiles | ForEach-Object { $_.Name }) -join ", ")
+""
+# 时间这条**排在文案之前**下结论：MISS 不能单独断定产物有问题（前端被 brotli 压进
+# exe，明文找不到是已知正常）；但「你验的是旧产物」必须先拦住——不然下面那些文案
+# 结论全是拿旧界面量出来的（#247 的 0/12 就是这么来的）。
+$freshnessNote
+if ($freshness -eq "stale") {
+    "结论：你在验一个旧的产物，下面的文案结论不要用。"
+    exit 3
+}
+if ($freshness -eq "unknown") {
+    "结论：核不出来（不算通过）。"
+    exit 2
+}
 ""
 $missing = 0
 foreach ($r in $results) {
@@ -84,4 +148,5 @@ if ($missing -gt 0) {
     "  ③ 它已经在当前 main 上了吗（还没合并就必然没有）？"
     exit 2
 }
+
 "全部命中。"

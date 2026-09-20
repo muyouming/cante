@@ -30,6 +30,7 @@ import type { JSX } from "solid-js";
 
 import { COMMON } from "./copy.ts";
 import { ABOUT } from "./copy-about.ts";
+import { BUILD_INFO, buildStamp } from "./copy-build.ts";
 import { useFocusLayer } from "./FocusLayer.tsx";
 import type { ThirdPartyNotice } from "./third-party-notices.ts";
 
@@ -211,6 +212,23 @@ export function AboutEntry(): JSX.Element {
             ← {COMMON.back}
           </button>
           <div class="min-h-0 flex-1 overflow-y-auto text-[16px] leading-relaxed text-slate-300">
+            {/*
+               #261：先说清「你手上的这一份」是哪一个程序 —— 版本号 + 哪一天做好的。
+              这一行必须**不管许可说明取没取回来都在**，所以她一打开「关于」就能核对
+              「我验的是不是刚编出来的那一份」。数据来自构建时注入的标记（copy-build.ts），
+              读不出来时照实说、给一条出路，不假装知道。
+            */}
+            <div class="mb-4 rounded-xl border border-slate-800 bg-[#0e141b] px-4 py-3">
+              <h2 class="text-[20px] font-semibold text-slate-200">{BUILD_INFO.heading}</h2>
+              <Show when={buildStamp()} fallback={<p class="mt-1 text-[16px] text-slate-400">{BUILD_INFO.unknown}</p>}>
+                {(stamp) => (
+                  <>
+                    <p class="mt-1 text-[16px] text-slate-200">{BUILD_INFO.madeLine(stamp().time)}</p>
+                    <p class="mt-1 text-[16px] text-slate-400">{BUILD_INFO.versionLine(stamp().version)}</p>
+                  </>
+                )}
+              </Show>
+            </div>
             <Show when={loading()}>
               <p class="text-[16px] leading-relaxed text-slate-400">{ABOUT.loading}</p>
             </Show>
