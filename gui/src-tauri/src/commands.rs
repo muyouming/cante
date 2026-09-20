@@ -366,6 +366,18 @@ fn split_sheet_stderr(stderr: &str) -> (String, Option<String>) {
     }
 }
 
+/// 读表的阻塞任务自己没能跑完（`spawn_blocking` 的 `JoinError`：任务 panic 了，
+/// 或者运行时正在关停）时的处理。
+///
+/// 它跟 [`read_sheet_rows`] 不是一条路：那条路是她能看懂的故障（文件坏了、工具不在），
+/// 这一条是**我们自己的代码**出了岔子——`JoinError` 的原文（`task … panicked`）是
+/// 英文，绝不能端到她面前。所以她看中文那句兜底，原文只进日志给技术同事，和
+/// `read_sheet_rows` 的分层一致（产品律 3）。`pub` 是为了让集成测试盯住这个契约。
+pub fn read_task_failed(error: &dyn std::fmt::Display) -> String {
+    eprintln!("cante read_result_sheet: 读表的任务没能跑完：{error}");
+    SHEET_READ_FAILED_WHY.to_string()
+}
+
 /// 界面上的「复制成微信能贴的文字」用它把结果表读出来。
 ///
 /// 读文件要走子进程，放到阻塞线程池里做，别卡住界面。
@@ -379,7 +391,7 @@ pub async fn read_result_sheet(
         read_sheet_rows(&tool, &path, sheet.as_deref())
     })
     .await
-    .map_err(|error| format!("读取表格时出了点问题：{error}"))??;
+    .map_err(|error| read_task_failed(&error))??;
     Ok(json!({ "rows": rows }))
 }
 
