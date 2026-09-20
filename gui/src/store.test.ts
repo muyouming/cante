@@ -57,6 +57,10 @@ let healthSession: unknown = null;
 let undoReply: { restored?: unknown; failed?: unknown } = { restored: [], failed: [] };
 let undoFails = false;
 let pickerFails = false;
+// 运行前后快照的条目。默认空（和以前 `{ok:true}` 的结果一样）；要造「上一轮真产出了
+// 一个结果文件」的现场时才填，让 begin_run / snapshot_paths 回真条目。
+let beforeEntries: unknown[] | null = null;
+let afterEntries: unknown[] | null = null;
 
 function emit(channel: string, payload: unknown): void {
   for (const handler of handlers.get(channel) ?? []) handler(payload);
@@ -69,6 +73,8 @@ function reset(): void {
   undoReply = { restored: [], failed: [] };
   undoFails = false;
   pickerFails = false;
+  beforeEntries = null;
+  afterEntries = null;
   hydration = { cursor: 0, truncated: false, events: [], state: { status: "idle", session: null, pending_approval: null } };
   clearStorage();
 }
@@ -125,6 +131,10 @@ mock.module("./tauri.ts", () => ({
       case "undo_run":
         if (undoFails) throw new Error("the file is locked");
         return { ok: true, ...undoReply };
+      case "begin_run":
+        return { entries: beforeEntries ?? [] };
+      case "snapshot_paths":
+        return { entries: afterEntries ?? [] };
       case "pick_files":
         if (pickerFails) throw new Error("no file dialog on this machine");
         return { paths: [] };
@@ -780,6 +790,28 @@ describe("replyToRun", () => {
     await Bun.sleep(20);
   }
 
+  /** 运行快照里的一条文件事实（Rust 的 wire 形状）。 */
+  function wireEntry(path: string): { path: string; size: number; mtime_ms: number } {
+    return { path, size: 12, mtime_ms: 1000 };
+  }
+
+  /**
+   * 一次「真做出了结果、最后又停在问题上」的运行。
+   *
+   * 结果文件不是我们自称的：它由 begin_run / snapshot_paths 两次快照 diff 出来
+   * （和真机同一条路），所以 `run.result.files` 里真有它。
+   */
+  async function stoppedRunWithResult(store: Store): Promise<string> {
+    beforeEntries = [wireEntry("/work/a.xlsx"), wireEntry("/work/b.xlsx")];
+    afterEntries = [...beforeEntries, wireEntry("/work/结果.xlsx")];
+    await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这两张表合成一张");
+    await store.confirmRun();
+    emit("event", event("AgentMessage", "第 2 步：结果里有一列拿不准，要不要一起改？"));
+    emit("event", event("TurnEnd", { status: "Completed", steps: 2 }));
+    await Bun.sleep(20);
+    return "/work/结果.xlsx";
+  }
+
   test("确认时发出的是卡片提示词，不只是用户那句话（这条线曾经断过）", async () => {
     const { store, dispose } = await setup();
     await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这两张表合成一张");
@@ -827,6 +859,68 @@ describe("replyToRun", () => {
     dispose();
   });
 
+  test("追问也是第二条「让助手干活」的入口：上一轮的结果 + 她的新问题一起发，不是只发她那句", async () => {
+    const { store, dispose } = await setup();
+    const result = await stoppedRunWithResult(store);
+    // 先确认真产出了结果文件——不然下面钉的「结果引用」就是假的。
+    expect(store.currentRun()?.result?.files.map((file) => file.path)).toContain(result);
+
+    await store.replyToRun("把金额列改成整数");
+
+    const sent = opCalls("send_input") as Array<{ text: string; mode: string }>;
+    const text = sent.at(-1)?.text ?? "";
+    // ② 她的新问题必须在。
+    expect(text).toContain("把金额列改成整数");
+    // ① 上一轮的结果文件也必须在——这一步是拿刚做好的那份继续。
+    expect(text).toContain(result);
+    // 卡片的规矩必须在：只发她那句，就是当年「卡片提示词从未发出」那个坑换个入口。
+    expect(text).toContain("原来的文件一张都不要改");
+    // 完整信封（要做的事 / 文件 / 规矩 / 原话）不可能只有一句话那么短。
+    expect(text.length).toBeGreaterThan(200);
+    dispose();
+  });
+
+  test("追问走的是 store.composedInstruction 同一条组装，不是另写一份", async () => {
+    const { store, dispose } = await setup();
+    const result = await stoppedRunWithResult(store);
+    const before = store.currentRun()!;
+    const files = (before.result?.files ?? []).map((file) => file.path);
+    // 生产路径真正会发的那段：同一张卡、同一批结果文件、同一句新话。
+    const expected = store.composedInstruction({
+      ...before,
+      files,
+      instruction: "把金额列改成整数",
+    });
+
+    await store.replyToRun("把金额列改成整数");
+
+    const sent = opCalls("send_input") as Array<{ text: string }>;
+    // 逐字一致：追问和确认页共用同一个组装，不是两条各拼一份的路。
+    expect(sent.at(-1)?.text).toBe(expected);
+    // 别让这条断言退化成「只发她那句」也成立：那段里必须有结果文件。
+    expect(expected).toContain(result);
+    dispose();
+  });
+
+  test("它干到一半停下来问她（还没有结果文件）：追问退回这次选进来的文件，规矩照样带全", async () => {
+    const { store, dispose } = await setup();
+    await stoppedRun(store);
+    // 这次没有结果文件——否则下面钉的「退回原文件」就不是这条分支。
+    expect(store.currentRun()?.result?.files ?? []).toHaveLength(0);
+
+    await store.replyToRun("金额（元）就是金额，填进金额那一列");
+
+    const sent = opCalls("send_input") as Array<{ text: string; mode: string }>;
+    const text = sent.at(-1)?.text ?? "";
+    expect(text).toContain("金额（元）就是金额，填进金额那一列");
+    // 没有结果可续，就退回这次选进来的两份，而不是列一个空的文件清单。
+    expect(text).toContain("/work/a.xlsx");
+    expect(text).toContain("/work/b.xlsx");
+    expect(text).toContain("原来的文件一张都不要改");
+    expect(text.length).toBeGreaterThan(200);
+    dispose();
+  });
+
   test("does nothing when there is no run", async () => {
     const { store, dispose } = await setup();
     await store.replyToRun("金额（元）就是金额");
@@ -859,8 +953,15 @@ describe("replyToRun", () => {
     expect(run?.error).toBeNull();
     // The original sentence stays clean; the reply is a separate turn.
     expect(run?.instruction).toBe("把这两张表合成一张");
-    const sent = opCalls("send_input");
-    expect(sent[sent.length - 1]).toEqual({ text: "金额（元）就是金额", mode: "prompt" });
+    const sent = opCalls("send_input") as Array<{ text: string; mode: string }>;
+    const last = sent[sent.length - 1]!;
+    expect(last.mode).toBe("prompt");
+    // 她这回说的话必须在。
+    expect(last.text).toContain("金额（元）就是金额");
+    // 卡片的规矩也必须在——追问走的是和确认页同一条组装，不是只发她那句
+    // （只发原话，就是当年「卡片提示词从未发出」那个坑换个入口）。
+    expect(last.text).toContain("原来的文件一张都不要改");
+    expect(last.text.length).toBeGreaterThan(200);
     // The cursor only moves forward: step 1 was already done when it asked.
     const steps = store.progress().steps;
     expect(steps[0]?.state).toBe("done");
