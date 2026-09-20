@@ -12,7 +12,13 @@
 import { batch, createSignal, onCleanup, type Accessor } from "solid-js";
 
 import type { Row, RowTone } from "./rows.ts";
-import { persistLocalOnly, readLocalOnly, type PrivacyState } from "./simple/privacy.ts";
+import {
+  normalizeSentTurns,
+  persistLocalOnly,
+  readLocalOnly,
+  type PrivacyState,
+  type SentTurn,
+} from "./simple/privacy.ts";
 import {
   initialProgress,
   onAssistantText,
@@ -181,6 +187,15 @@ export interface Store {
    * 暴露它只为隐私面板如实展示；不改发送行为，也不读任何本地文件内容。
    */
   composedInstruction(run: TaskRun): string;
+  /**
+   * r20 追加 — 这个运行**每一轮**真正发给助手的文字，按发生先后。
+   *
+   * 确认页那一次是一条，之后每次追问各一条：追问发出去的是一段新的组装文字
+   * （卡片规矩 + 上一轮的结果文件 + 她这回的话），不等于确认页那一段。隐私面板的
+   * 卖点是「给你看真正发出去的」，只留确认页那一次就是拿旧的冒充最近发生的。
+   * 旧任务（这个功能之前做的）没有记账，返回空表；面板会退回按 run 现在这份展示。
+   */
+  sentTurns(runId: string): SentTurn[];
   /** #42 "先试跑给我看": ask the assistant to explain, never to touch files. */
   dryRun(): Promise<void>;
   cancelRun(): void;
@@ -424,6 +439,10 @@ export function createStore(): Store {
   const [localOnly, setLocalOnlySignal] = createSignal<boolean>(readLocalOnly());
   const [currentRun, setCurrentRun] = createSignal<TaskRun | null>(null);
   const [runs, setRuns] = createSignal<TaskRun[]>([]);
+  // r20 追加 — 每一轮真正发出去的文字，按运行编号存（确认页一次 + 每次追问各一次）。
+  // 随运行记录一起写盘（见 persistRun）并在启动时读回（见 refreshRuns），所以重启后
+  // 隐私面板看到的还是当时真正发出去的那几段，而不是「大概是这样」。
+  const [sentLog, setSentLog] = createSignal<Record<string, SentTurn[]>>({});
   // #55 — 她定下的自动任务。启动时从本地读回来，坏数据当空。
   const [schedules, setSchedules] = createSignal<Schedule[]>(readSchedules());
 
@@ -1231,7 +1250,10 @@ export function createStore(): Store {
     // Show it in history immediately, even if the disk write fails.
     setRuns((list) => [run, ...list.filter((item) => item.id !== run.id)].slice(0, MAX_HISTORY_RUNS));
     try {
-      await invokeOp("save_run", { run: { ...run, undo } });
+      // `sent` 跟着运行记录一起写盘：她知道「刚才发出去的是哪几段」不该在关掉程序
+      // 之后就消失（面板的「最近一次」重启后也得还是最近那一次）。形状与 `undo` 一样，
+      // 是记录上的附加字段，不是 TaskRun 的一部分。
+      await invokeOp("save_run", { run: { ...run, undo, sent: sentTurns(run.id) } });
     } catch {
       // The record stays in memory for this launch; it just will not reload.
     }
@@ -1240,7 +1262,28 @@ export function createStore(): Store {
   async function refreshRuns(): Promise<void> {
     try {
       const response = (await invokeOp("run_log")) as { runs?: unknown };
-      setRuns(normalizeRuns(response?.runs));
+      const records = response?.runs;
+      setRuns(normalizeRuns(records));
+      // 磁盘上的运行记录里带着那几段发出去的文字（`save_run` 写了 `sent`）：重启后
+      // 面板照样能如实展示，而不是退回那段「大概是这样」。只保留这一次真正带回来的
+      // 记录（免得一个长会话里已经不存在的旧编号一直留在内存里）。
+      const keep = new Set<string>();
+      const merged: Record<string, SentTurn[]> = {};
+      for (const record of Array.isArray(records) ? records : []) {
+        if (!record || typeof record !== "object") continue;
+        const { id, sent } = record as { id?: unknown; sent?: unknown };
+        if (typeof id !== "string" || !id) continue;
+        const turns = normalizeSentTurns(sent);
+        if (turns.length === 0) continue;
+        keep.add(id);
+        merged[id] = turns;
+      }
+      // 手上正在看的那两件不能被扫掉：写盘失败时它们不在 run_log 里，可是面板
+      // 此刻展示的正是它们（丢掉就会退回展示旧文字，正是这一轮要修的那种谎）。
+      for (const stillVisible of [currentRun()?.id, lastFinished()?.id]) {
+        if (stillVisible && sentLog()[stillVisible]) merged[stillVisible] = sentLog()[stillVisible]!;
+      }
+      setSentLog(merged);
     } catch {
       // Bridge unavailable: keep whatever is already in memory.
     }
@@ -1313,6 +1356,22 @@ export function createStore(): Store {
     syncStagedFiles(files);
   }
 
+  /**
+   * r20 追加 — 记下**这一轮真正发给助手的那段文字**（确认页一次，之后每次追问各一次）。
+   *
+   * 记的就是交给发送口的那串字符本身，不是重新拼的一份：面板展示时不再经过
+   * `composedInstruction` 重算，也就没有第二份可以漂移的拷贝。
+   */
+  function recordSent(runId: string, text: string): void {
+    if (!runId || !text) return;
+    setSentLog((log) => ({ ...log, [runId]: [...(log[runId] ?? []), { text, at: Date.now() }] }));
+  }
+
+  /** 这个运行每一轮真正发出去的文字，按发生先后；旧任务没记账时是空表。 */
+  function sentTurns(runId: string): SentTurn[] {
+    return sentLog()[runId] ?? [];
+  }
+
   async function confirmRun(allowOverwrite = false): Promise<void> {
     const run = currentRun();
     if (!run || run.state !== "preview") return;
@@ -1321,7 +1380,9 @@ export function createStore(): Store {
     markProgressRunning();
     await beginSnapshot(next);
     const instruction = composedInstruction(run);
-    await sendRunInstruction(allowOverwrite ? instruction + OVERWRITE_CONSENT : instruction);
+    const text = allowOverwrite ? instruction + OVERWRITE_CONSENT : instruction;
+    recordSent(run.id, text);
+    await sendRunInstruction(text);
   }
 
   async function dryRun(): Promise<void> {
@@ -1331,7 +1392,9 @@ export function createStore(): Store {
     setCurrentRun(next);
     markProgressRunning();
     await beginSnapshot(next);
-    await sendRunInstruction(dryRunInstruction(composedInstruction(run)));
+    const text = dryRunInstruction(composedInstruction(run));
+    recordSent(run.id, text);
+    await sendRunInstruction(text);
   }
 
   function cancelRun(): void {
@@ -1391,9 +1454,9 @@ export function createStore(): Store {
    * 继续，比如「把金额列改成整数」）；没有结果（它活干到一半停下来问她）就退回这次
    * 选进来的那几份。
    *
-   * 已知的残留：隐私面板（`SentContentSection`）读的是 `composedInstruction(run)`，
-   * 同一个 run 只展示确认页那一次发的文字，**看不到追问这一段的原文**。这不是本轮
-   * 修的范围（要动 PrivacyPanel.tsx / 给 run 加字段），但先记在这里。
+   * 每一轮都在 `recordSent` 里记账（隐私面板靠它如实展示「最近一次发出去的是什么」）。
+   * 从前的残留——面板只展示确认页那一次发的文字，追问这一段的原文看不到——就是这条
+   * 记账线接上之后修掉的（见 store.sentTurns / privacy.sentHistoryView）。
    */
   async function replyToRun(text: string): Promise<void> {
     const trimmed = text.trim();
@@ -1408,7 +1471,9 @@ export function createStore(): Store {
       .map((file) => file.path)
       .filter((path) => path.trim().length > 0);
     const files = results.length > 0 ? results : run.files;
-    await sendRunInstruction(composedInstruction({ ...run, files, instruction: trimmed }));
+    const outgoing = composedInstruction({ ...run, files, instruction: trimmed });
+    recordSent(run.id, outgoing);
+    await sendRunInstruction(outgoing);
   }
 
   /**
@@ -1725,6 +1790,7 @@ export function createStore(): Store {
     removeRunFile,
     addRunFile,
     composedInstruction,
+    sentTurns,
     dryRun,
     cancelRun,
     dismissRun,

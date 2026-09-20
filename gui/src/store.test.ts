@@ -32,6 +32,8 @@ import { PICK_KINDS, UNDO_KINDS, noticeView, visibleNotice } from "./simple/copy
 // r16 — 出错后的分流：服务方自己忙/用完了，和断网不是一回事。
 import { SERVICE_RECOVERY } from "./simple/copy-service.ts";
 import { actionsFor, causeOf } from "./simple/recovery.ts";
+// r20 — 隐私面板「最近一次发出去的是什么」：拿 store 真记下来的那几轮来对。
+import { sentHistoryView } from "./simple/privacy.ts";
 
 // ---------------------------------------------------------------------------
 // Fake bridge — must be installed before store.ts is imported.
@@ -61,6 +63,8 @@ let pickerFails = false;
 // 一个结果文件」的现场时才填，让 begin_run / snapshot_paths 回真条目。
 let beforeEntries: unknown[] | null = null;
 let afterEntries: unknown[] | null = null;
+// `run_log` 回来的历史记录；默认空。要测「重启后从磁盘读回记账」时填。
+let runLogRuns: unknown[] = [];
 
 function emit(channel: string, payload: unknown): void {
   for (const handler of handlers.get(channel) ?? []) handler(payload);
@@ -75,6 +79,7 @@ function reset(): void {
   pickerFails = false;
   beforeEntries = null;
   afterEntries = null;
+  runLogRuns = [];
   hydration = { cursor: 0, truncated: false, events: [], state: { status: "idle", session: null, pending_approval: null } };
   clearStorage();
 }
@@ -141,6 +146,8 @@ mock.module("./tauri.ts", () => ({
       case "pick_folder":
         if (pickerFails) throw new Error("no file dialog on this machine");
         return { path: null };
+      case "run_log":
+        return { runs: runLogRuns };
       default:
         return { ok: true };
     }
@@ -899,6 +906,66 @@ describe("replyToRun", () => {
     expect(sent.at(-1)?.text).toBe(expected);
     // 别让这条断言退化成「只发她那句」也成立：那段里必须有结果文件。
     expect(expected).toContain(result);
+    dispose();
+  });
+
+  test("确认页一次 + 每次追问各记一条，顺序就是真正发出去的先后", async () => {
+    const { store, dispose } = await setup();
+    await stoppedRunWithResult(store);
+    const runId = store.currentRun()!.id;
+    const afterConfirm = (opCalls("send_input") as Array<{ text: string }>).map((call) => call.text);
+    expect(afterConfirm).toHaveLength(1);
+
+    await store.replyToRun("把金额列改成整数");
+
+    const sent = (opCalls("send_input") as Array<{ text: string }>).map((call) => call.text);
+    expect(sent).toHaveLength(2);
+    const turns = store.sentTurns(runId);
+    expect(turns).toHaveLength(2);
+    // 逐字：记的就是真正交给发送口的那两串，不是另拼的一份副本。
+    expect(turns.map((turn) => turn.text)).toEqual(sent);
+    // 顺序就是发出去的先后：确认页在前，追问在后。
+    expect(turns[0]!.at).toBeLessThanOrEqual(turns[1]!.at);
+    // 两段可区分：确认页那段是她的第一句原话，追问那段是追问那句（且不含第一句）。
+    expect(turns[0]!.text).toContain("把这两张表合成一张");
+    expect(turns[1]!.text).toContain("把金额列改成整数");
+    expect(turns[1]!.text).not.toContain("把这两张表合成一张");
+    dispose();
+  });
+
+  test("追问过之后，面板默认展示的是追问那一段，不是确认页那一段", async () => {
+    const { store, dispose } = await setup();
+    await stoppedRunWithResult(store);
+    await store.replyToRun("把金额列改成整数");
+    const runId = store.currentRun()!.id;
+    const turns = store.sentTurns(runId);
+
+    const view = sentHistoryView({ turns, online: true });
+    expect(view.state).toBe("sent");
+    // 默认视图 = 最近一次 = 追问那段：面板的卖点就是「给你看真正发出去的」。
+    expect(view.text).toBe(turns[1]!.text);
+    expect(view.text).toContain("把金额列改成整数");
+    expect(view.text).not.toContain("把这两张表合成一张");
+    // 展开能看到两段，顺序就是发出去的先后。
+    expect(view.earlierCount).toBe(1);
+    expect(view.turns.map((turn) => turn.text)).toEqual([turns[0]!.text, turns[1]!.text]);
+    dispose();
+  });
+
+  test("重启后从磁盘读回记账：面板还是当时真正发出去的那两段", async () => {
+    const { store, dispose } = await setup();
+    await stoppedRunWithResult(store);
+    await store.replyToRun("把金额列改成整数");
+    const runId = store.currentRun()!.id;
+    const recorded = store.sentTurns(runId).map((turn) => ({ ...turn }));
+    expect(recorded).toHaveLength(2);
+
+    // 模拟重启：`run_log` 带回这台机器当时真的发出去的那两段（写在运行记录上）。
+    runLogRuns = [{ id: runId, state: "running", createdAt: recorded[1]!.at, sent: recorded }];
+    const restarted = mountStore();
+    await restarted.store.refreshRuns();
+    expect(restarted.store.sentTurns(runId)).toEqual(recorded);
+    restarted.dispose();
     dispose();
   });
 

@@ -11,10 +11,11 @@
 //   - r5-trust's ResultCard reads `runIsOnline()` / `onlineLabel()` when it
 //     stamps a finished run — the store writes `run.online` from the same
 //     `PrivacyState`, so the panel and the card can never disagree.
-//   - r20's「这次发出去了什么」renders `sentContentView()` from `sentTextFor(run,
-//     store.composedInstruction(run))` — the same text the store actually sends
-//     (including the dry-run / overwrite suffix), so what she reads is exactly
-//     what went out — never a second, drifting copy.
+//   - r20's「这次发出去了什么」renders `sentHistoryView()` from the turns the store
+//     actually recorded (`store.sentTurns`) — the same text the store handed to the
+//     send port, turn by turn (including the dry-run / overwrite suffix), so what she
+//     reads is exactly what went out — never a second, drifting copy. Older records
+//     without a log fall back to `sentTextFor(run, composedInstruction(run))`.
 import { EGRESS, SENT } from "./copy-privacy-audit.ts";
 // 只取两个后缀常量（覆盖同意 / 试跑）与那个 run 类型；run.ts 是叶子模块，没有反向依赖，
 // 所以这一条不会成环（run.ts 里那条「保持独立于 privacy.ts」的注释仍然成立）。
@@ -208,6 +209,86 @@ export function sentContentView(facts: SentRunFacts | null): SentContentView {
     summary: SENT.summary(text.length, sentTextParts(text)),
     message: "",
   };
+}
+
+// ---------------------------------------------------------------------------
+// r20 追加 — 一个运行可以发很多轮（确认页一次 + 每次追问各一次）。
+//
+// 面板的卖点是「给你看真正发出去的」。只保留确认页那一次，她追问过一轮再看，面板
+// 说的就是一段**旧的**文字——那正是这一节存在的意义被推翻。所以 store 把每一轮真正
+// 发出去的文字按先后记在这个运行上（`store.sentTurns`），面板默认展示**最近一次**，
+// 并允许她把之前每一次都摊开对。
+// ---------------------------------------------------------------------------
+
+/** 真正交给助手的一轮文字（确认页那一次，或某一次追问）。 */
+export interface SentTurn {
+  /** 发给助手的那段文字，逐字（含试跑 / 覆盖同意那两段后缀）。 */
+  text: string;
+  /** 发出去的时刻，用来在历史里标先后。 */
+  at: number;
+}
+
+/** 运行记录从磁盘回来时过一遍：形状不可信，只留「有原文」的条目。 */
+export function normalizeSentTurns(value: unknown): SentTurn[] {
+  if (!Array.isArray(value)) return [];
+  const turns: SentTurn[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const turn = raw as { text?: unknown; at?: unknown };
+    if (typeof turn.text !== "string" || turn.text.length === 0) continue;
+    const at = typeof turn.at === "number" && Number.isFinite(turn.at) ? turn.at : 0;
+    turns.push({ text: turn.text, at });
+  }
+  return turns;
+}
+
+/**
+ * 面板要用的一串轮次。
+ *
+ * 优先用 store 真记下来的那几轮（逐字就是发给助手的那段）；旧记录（这个功能之前
+ * 做过的任务）没有记账，就退回按 run 现在这份拼出的那一段——和旧版面板显示的完全
+ * 一样，不漏、也不凭空多出一段。`recorded` 直接吃 `store.sentTurns` 的返回值。
+ */
+export function sentTurnsFor(
+  run: { createdAt: number; dryRun?: boolean; overwrite?: boolean } | null,
+  recorded: unknown,
+  composed: string | null,
+): SentTurn[] {
+  const turns = normalizeSentTurns(recorded);
+  if (turns.length > 0) return turns;
+  if (!run || composed === null) return [];
+  return [{ text: sentTextFor(run, composed), at: run.createdAt }];
+}
+
+/** 面板「这次发出去了什么」要的全部事实。 */
+export interface SentHistoryFacts {
+  /** 这个运行每一轮真正发出去的文字，按先后（旧记录可能为空）。 */
+  turns: readonly SentTurn[];
+  /** 那次允不允许联网（run.online）。 */
+  online: boolean;
+}
+
+/** `sentContentView` 加上「一共发过几轮」。 */
+export interface SentHistoryView extends SentContentView {
+  /** 全部轮次（含最近一次），按发出去的先后，最早在前；state 不是 sent 时为空。 */
+  turns: SentTurn[];
+  /** 「之前还发过 N 次」里的 N；0 表示只发过一次。 */
+  earlierCount: number;
+}
+
+/**
+ * 「最近一次发出去的是什么」+「之前一共还发过几次」。
+ *
+ * 默认视图必须是**最近一次**：追问之后真正发给助手的就是追问那一段，面板拿确认页
+ * 那一段顶上就是说了谎。顺序按发出去的先后（最早在前），面板展开时照这个顺序铺。
+ */
+export function sentHistoryView(facts: SentHistoryFacts): SentHistoryView {
+  const latest = facts.turns.length > 0 ? facts.turns[facts.turns.length - 1]! : null;
+  const base = sentContentView(latest === null ? null : { text: latest.text, online: facts.online });
+  if (base.state !== "sent") {
+    return { ...base, turns: [], earlierCount: 0 };
+  }
+  return { ...base, turns: [...facts.turns], earlierCount: facts.turns.length - 1 };
 }
 
 /**
