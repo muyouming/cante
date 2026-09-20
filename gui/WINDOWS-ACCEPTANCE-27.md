@@ -40,7 +40,7 @@
 
 - `cante-sheets.exe --version` → `cante-sheets 0.2.3`（退出码 0）✓
 - 注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Cante`：
-  `DisplayVersion = 0.2.3`、`InstallLocation = "C:\Users\cante\AppData\Local\Cante"` ✓
+  `DisplayVersion = 0.2.3`、`InstallLocation = "C:\Users\<用户名>\AppData\Local\Cante"` ✓
 - 安装目录共 **916 个条目**（5 个顶层文件 + `pi\` 整棵树）
 
 ## 3. 步骤 2/3 —— 静默覆盖装 + 装完逐条核
@@ -73,11 +73,11 @@
 
 | # | 判据 | 怎么跑 | 结论 |
 | --- | --- | --- | --- |
-| 1 | **产物闸门**（配置≠产物那条） | `bash gui/scripts/verify-bundle.sh --dir "C:\Users\cante\AppData\Local\Cante"` | **退出码 0 / OK** ✓ |
-| 2 | **第一屏**（UIA 读窗口真实文字，对照 `copy.ts`） | `gui\scripts\windows\accept-first-screen.ps1 -Exe "C:\Users\cante\AppData\Local\Cante\cante-gui.exe"` | **退出码 0**，10 条对上 10 条、对不上 0 条 ✓ |
-| 3 | **#287 固化的那套判据（GBK(936) 的 CSV 交进来）** | `gui\scripts\windows\accept-gbk-csv.ps1 -Exe "C:\Users\cante\AppData\Local\Cante\cante-sheets.exe"`（它本来就支持 `-Exe`，所以直接指到**装机版**那份，不是工作树产物 ✓） | **退出码 0**，通过 **10/10** ✓ |
-| 4 | **#286 那套话（服务方忙/用完）——真窗口** | `gui\scripts\windows\run-offline.ps1 -Scenario busy -Exe "C:\Users\cante\AppData\Local\Cante\cante-gui.exe"`（`busy` 是本轮新增的现场） | **退出码 0**，屏幕上逐条对上 `copy-service.ts` 的 4 句、零术语 6/6 ✓ |
-| 5 | **同一条判据，但走真服务方上那条真坏掉的路（`realbusy`）** | `gui\scripts\windows\run-offline.ps1 -Scenario realbusy -Exe "C:\Users\cante\AppData\Local\Cante\cante-gui.exe" -StallSecs 180 -TimeoutSec 270` | **退出码 0**，同上 4/4 + 零术语 6/6；且页面 DOM 里查得到**真网关回的原文**（证明请求真打到了那台网关）✓ |
+| 1 | **产物闸门**（配置≠产物那条） | `bash gui/scripts/verify-bundle.sh --dir "C:\Users\<用户名>\AppData\Local\Cante"` | **退出码 0 / OK** ✓ |
+| 2 | **第一屏**（UIA 读窗口真实文字，对照 `copy.ts`） | `gui\scripts\windows\accept-first-screen.ps1 -Exe "C:\Users\<用户名>\AppData\Local\Cante\cante-gui.exe"` | **退出码 0**，10 条对上 10 条、对不上 0 条 ✓ |
+| 3 | **#287 固化的那套判据（GBK(936) 的 CSV 交进来）** | `gui\scripts\windows\accept-gbk-csv.ps1 -Exe "C:\Users\<用户名>\AppData\Local\Cante\cante-sheets.exe"`（它本来就支持 `-Exe`，所以直接指到**装机版**那份，不是工作树产物 ✓） | **退出码 0**，通过 **10/10** ✓ |
+| 4 | **#286 那套话（服务方忙/用完）——真窗口** | `gui\scripts\windows\run-offline.ps1 -Scenario busy -Exe "C:\Users\<用户名>\AppData\Local\Cante\cante-gui.exe"`（`busy` 是本轮新增的现场） | **退出码 0**，屏幕上逐条对上 `copy-service.ts` 的 4 句、零术语 6/6 ✓ |
+| 5 | **同一条判据，但走真服务方上那条真坏掉的路（`realbusy`）** | `gui\scripts\windows\run-offline.ps1 -Scenario realbusy -Exe "C:\Users\<用户名>\AppData\Local\Cante\cante-gui.exe" -StallSecs 180 -TimeoutSec 270` | **退出码 0**，同上 4/4 + 零术语 6/6；且页面 DOM 里查得到**真网关回的原文**（证明请求真打到了那台网关）✓ |
 
 闸门（1）逐条：① `cante-gui` / `cante-sheets` / `cante-pdf` / `cante-bridge` 四个都在；
 ② 三个自带程序**在安装目录里跑得起来**、版本都打 `0.2.4`；③ 没有 `.d`、没有 0 字节文件、
@@ -90,7 +90,7 @@
 
 **这条对那台机器做了一件真事，必须说清**：`accept-first-screen.ps1` 为了让她看到的是「第一次打开」
 那一屏，**跑之前把应用档案删了**（报告里逐字打印了这两行：
-`C:\Users\cante\AppData\Local\dev.cante.gui（已删）`、`C:\Users\cante\AppData\Roaming\dev.cante.gui（已删）`）。
+`C:\Users\<用户名>\AppData\Local\dev.cante.gui（已删）`、`C:\Users\<用户名>\AppData\Roaming\dev.cante.gui（已删）`）。
 跑完现在那份档案是**新建的**（只剩 WebView2 的缓存/着色器文件），原来那台机器上的结果登记
 （`runs.json`）与历史**已经不在了** ✓ —— 这是脚本的既定行为（不是意外），但它意味着
 「她的档案/历史跨版本还在不在」这一条**在本机已经无法再补验**（见 §5 第 5 条）。
@@ -98,7 +98,7 @@
 ### 4.1 第 4 条（#286）屏幕上的原文
 
 场景：假服务方对每个请求都回 `503` + `insufficient credits`（#286 的真实原文形状）。
-应用是**装机版那份的隔离副本**（`C:\Users\cante\AppData\Local\Cante\cante-gui.exe`
+应用是**装机版那份的隔离副本**（`C:\Users\<用户名>\AppData\Local\Cante\cante-gui.exe`
 → `C:\cante-verify-17\busy\app-root\app\cante-gui.exe`）；跑完落盘的是真 WebView2 屏幕文字：
 
 ```
@@ -140,7 +140,7 @@
 「**真的**欠费停机时她会看到什么」（也是 #286 当初的现场）。先把网关探测结果记下：
 
 ```
-地址：http://192.168.3.10:20128/v1（来源 ~/.pi/agent/models.json 的 9router；apiKey 不打印）
+地址：http://<内网地址>:20128/v1（来源 ~/.pi/agent/models.json 的 9router；apiKey 不打印）
 --- model=work               → HTTP 503 ---
 {"error":{"message":"[commandcode/deepseek/deepseek-v4.1-flash] [400]: You have insufficient credits to make this request. Please purchase more credits to continue using the service. (reset after 30s)"}}
 --- model=ocg/deepseek-flash → HTTP 200 ---
@@ -241,7 +241,7 @@ C:\cante-verify-17\busy\relay-busy.log             假服务方日志（每个�
 
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File gui\scripts\windows\run-offline.ps1 ^
-  -Scenario busy -Exe "C:\Users\cante\AppData\Local\Cante\cante-gui.exe" ^
+  -Scenario busy -Exe "C:\Users\<用户名>\AppData\Local\Cante\cante-gui.exe" ^
   -WorkRoot "C:\cante-verify-17\busy" -TimeoutSec 900
 ```
 

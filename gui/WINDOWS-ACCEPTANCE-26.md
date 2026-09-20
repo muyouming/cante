@@ -88,8 +88,8 @@ cargo build --release --bin cante-gui --features tauri/custom-protocol   # 约 3
 === 真鼠标点击（第一行）===
   目标：复制 结果_挑出华东区-1.xlsx 的位置  矩形=592,558 106x49 -> 645,582
   点击前在前台：True
-  期望完整位置：C:\Users\cante\AppData\Local\Temp\cante-copy-location\seed\结果_挑出华东区-1.xlsx
-  剪贴板（逐字）：C:\Users\cante\AppData\Local\Temp\cante-copy-location\seed\结果_挑出华东区-1.xlsx
+  期望完整位置：C:\Users\<用户名>\AppData\Local\Temp\cante-copy-location\seed\结果_挑出华东区-1.xlsx
+  剪贴板（逐字）：C:\Users\<用户名>\AppData\Local\Temp\cante-copy-location\seed\结果_挑出华东区-1.xlsx
   与期望逐字相等：True
 ```
 
@@ -122,7 +122,7 @@ cargo build --release --bin cante-gui --features tauri/custom-protocol   # 约 3
 ### 4.5 独立复跑一次（早先那条脚本，第一行也真鼠标点过）
 
 ```
-  剪贴板（逐字）：C:\Users\cante\r16-seed\seed\结果_挑出华东区-1.xlsx
+  剪贴板（逐字）：C:\Users\<用户名>\r16-seed\seed\结果_挑出华东区-1.xlsx
   与期望逐字相等：True
   首字符：'C'   尾字符：'x'
   含反斜杠：True  含正斜杠：False
