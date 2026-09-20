@@ -604,3 +604,92 @@ in catalogue but NOT in sweep plan: doc.worksummary
   但 `src/App.tsx`（1 处）与 `src/simple` 下**非 copy 的 `.ts`**（13 文件命中）**不在扫描范围**。
 - 核查三：`CONTRACT.md` 的 `cante://state` 载荷少 3 个字段（含前端在读的 `pending_question`）；
   卡片数文档 32 / 代码 33；`VERIFICATION-MAP.md` 一处路径不存在、一处"四种"实为五种。
+
+---
+
+## 第 8 批订正（r8，2026-09-20）
+
+上面第 1–3 节的原始结论**不改**（它们是当时的证据）。这一节只记**订正动作**：
+每条都回代码 / 脚本重核过（不照抄上面），格式为 **原文 → 改成 → 依据（文件:行）**。
+
+### 8.1 `CONTRACT.md` 的 `cante://state` 载荷（第 3.1 条）——订正
+
+- **原文**（`gui/CONTRACT.md:95`）：
+  `| cante://state | { status: Status, session: SessionInfo | null, pending_approval: PendingApproval | null } |`
+- **改成**：载荷补齐 3 个真实字段 —— `pending_question: PendingQuestion | null, cante: string | null, cwd: string`，
+  并在下方补一段定义 `PendingQuestion` = `{ turn_id, tool_use_id, questions }`（r25 的
+  `TurnPause`/`reason.Question` 暂停；`Approval` 会清它；`TurnResume` 与 `TurnEnd` 都要清）、
+  说明 `cante` 是解析到的守护进程二进制 `--version` 首行、`cwd` 是 `set_cwd` 的目录，
+  以及 `events_since` 回复里的 `State` 就是同一个对象。
+- **依据（重核）**：
+  - 真实载荷发出处 `gui/src-tauri/src/protocol.rs:250-258`（`CanteState::to_value`，
+    `json!` 里 6 个键：`status`/`session`/`pending_approval`/`pending_question`/`cante`/`cwd`），
+    `cante://state` 与 `events_since` 的 `state` 共用它（`gui/src-tauri/src/daemon.rs:187,192`；
+    `lib.rs:29` 用 `app.emit("cante://state", state)`）。
+  - `pending_question` 的**真实类型与语义**：`protocol.rs:226-235` 定义字段 +
+    `question_payload`（`protocol.rs:371-379`）按 `{turn_id, tool_use_id, questions}`
+    （与 `src/protocol.ts:186-191` 的 `PendingQuestion` 一致）；置/清位置见
+    `reduce_state`（`protocol.rs:303` 置、`:269/:275/:317/:325/:334` 清）。
+  - 前端**真的在读**：`gui/src/store.ts:631-635` 从 `state.pending_question` 读出提问。
+  - **一条订正（比评审更保守）**：评审第 3.1 条写「代码那 3 个多出来的字段前端**真的在读**」。
+    我逐个核了：`pending_question` **确实**在读（上）；但 `cante` / `cwd` 在简单界面里**只被声明、
+    没有被消费**（`grep -rn "\.cante\b\|\.cwd\b" gui/src --include=*.ts --include=*.tsx` 去掉
+    `set_cwd` / 存储键 `cante:*` / 行标签后**无命中**；`store.applyState` 只取
+    `session`/`pending_approval`/`pending_question`）。所以文档里我按「载荷有这 3 个字段、
+    其中 `pending_question` 前端在读」写，没写成「3 个都在读」。
+
+### 8.2 任务卡数量（第 3.3 条）——订正，并加一道机器断言
+
+- **真实值**：`TASKS.length === 33`（`gui/src/simple/tasks/index.ts:86` 起 `TASKS` 由 13 个
+  数组拼成；实测 `bun -e 'import(...).then(m=>console.log(m.TASKS.length))'` → 33）。
+  **谁决定它**：`index.ts` 的 `TASKS` 数组本身；第 33 张 `doc.worksummary` 来自
+  `worksummary.ts:28`（#196 加）。
+- **原文 → 改成 → 依据**：
+  | 文件:行 | 原文 | 改成 | 依据 |
+  | --- | --- | --- | --- |
+  | `gui/CONTRACT.md:349` | 「简单界面只有 **32 张固定卡片**这一个入口，卡片来自 `src/simple/tasks/index.ts` 的静态表」 | 不写死数字：「只有 `src/simple/tasks/index.ts` 的静态卡片表（`TASKS`）这一个入口，张数由该数组决定（`docs-consistency.test.ts` 盯着）」 | `index.ts:86`；`TASKS.length === 33` |
+  | `gui/README.md:333` | 「for **32 cards** … **1,288 字符 / ~1,179 token** … **2,616 / ~2,101**」 | 「for **every card in `TASKS`** … **1,319 / ~1,209** … **2,647 / ~2,131**」（按当前 33 张重量的**每张卡平均**快照，并注明它会随目录变化） | `bun scripts/measure-prompts.ts`（确定性，跑两次逐字节相同）：33 张，无工具段均 1,319/1,209、带工具段均 2,647/2,131 |
+  | `gui/ROADMAP.md:135` | 「覆盖面只有 **20/32**」 | 「20/32（**0.2.1 当时的目录张数**；今天由 `TASKS` 决定）」 | 同上；0.2.1 时目录确实 32 张（此数保留为历史快照的限定） |
+  | `gui/ROADMAP.md:139` | 「普查覆盖率补到 **32/32**」 | 「补到**全部卡片**（当前张数见 `TASKS`）」 | 同上 |
+  | `gui/OPPORTUNITIES-5.md:75` | 「卡片库那 **32 张**她怎么扫」 | 「卡片库里那一堆卡她怎么扫」（不写死） | 同上 |
+  | `AGENTS.md:11` | 「**32 张任务卡**」 | **未改**——不在本轮允许改动的文件清单里（任务硬约束）。见 8.4 | — |
+- **新增断言（本轮那条「最划算的」）**：`gui/src/docs-consistency.test.ts`。
+  它读 `TASKS.length`，扫**现状类**文档（`gui/CONTRACT.md`、`gui/README.md`、`gui/ROADMAP.md`、
+  `gui/OPPORTUNITIES-*.md`、仓库根 `README.md`、`docs-site/**`）里的两种写法
+  （`N 张卡/卡片/固定卡片/任务卡`、`N cards`），**数字 ≠ `TASKS.length` 就红**，并点名
+  「文件:行 —— 写的数 ≠ TASKS 里是几」。自检用样例证明它抓得到、且不误伤中文数字
+  （「三张卡」）、「2–3 张她」和运行记录（「第一次跑完 26 张卡」）。
+  **初跑确实是红的**（抓出 `CONTRACT.md:349`、`README.md:333`、早期 `ROADMAP.md:112`），
+  改完转绿 —— 即它真能抓到这次的不一致，不是一条空断言。
+
+### 8.3 `run-offline.ps1` 的故障模式（第 3.4 条）——订正
+
+- **真实条数与各自名字**（读 `gui/scripts/windows/run-offline.ps1`）：
+  `ValidateSet('dead', 'cut', 'forbid', 'wire', 'proxy407')`（`:34`），脚本头第 6 行写「**五种现场**（-Scenario）」。
+  五种 = **`dead`**（端口不可达，`ps1:7`）/ **`cut`**（中途静音不发 FIN，`ps1:8`）/
+  **`forbid`**（代理回 403，`ps1:9`）/ **`wire`**（真防火墙挡出站，`ps1:10`）/
+  **`proxy407`**（代理回 407 要你先登录，`ps1:15`）。
+- **原文 → 改成 → 依据**：
+  | 文件:行 | 原文 | 改成 | 依据 |
+  | --- | --- | --- | --- |
+  | `gui/VERIFICATION-MAP.md:36` | 「**四种错法**（`wire` / `proxy407` / `dead` / `cut`）」（列名 4 个，缺 `forbid`） | 「**五种错法**（`wire` / `proxy407` / `dead` / `cut` / **`forbid`**）」；运行示例也补 `forbid` | `run-offline.ps1:34` 的 `ValidateSet` 有 5 个值、`:6` 写「五种现场」；`forbid` 有真机报告：`WINDOWS-ACCEPTANCE-13.md:61,88,149` |
+
+### 8.4 没改的 / 没核出来的（如实写）
+
+- **`AGENTS.md:11` 仍写「32 张任务卡」** ✗ —— 它不在本轮的允许改动清单里（只有
+  `gui/CONTRACT.md`、`gui/VERIFICATION-MAP.md`、`gui/ROADMAP.md`、`gui/README*`、
+  `docs-site/docs/**`、`gui/docs/REVIEW-round7.md` + 一个新测试）。所以我把 `AGENTS.md`
+  **排除**在新断言的扫描范围之外（否则测试会一直红）；集成者把那一行改成 33（或不写死）
+  之后，把 `AGENTS.md` 加进 `docs-consistency.test.ts` 的 `livingDocs()` 即可，测试会立刻接管它。
+- **记录类文件**（`gui/SWEEP-0.2.1*.md`、`gui/WINDOWS-ACCEPTANCE-*.md`、`CHANGELOG.md`、
+  `docs/DECISION-windows-runtime.md`）里的 32/26 等数**故意不改** —— 它们是某一次运行 /
+  某一天的快照（`AGENTS.md` §4「记录文件是证据」），当时目录确实可能不是 33；
+  改它们是把历史改成今天。新断言也把它们排除在外。
+- **`docs-site/` 里没有卡数**：grep `N 张卡` / `N cards` 在 `docs-site/docs` 与 `docs-site/i18n`
+  均无命中，所以那条「若也写了卡数」的改动**没有落地对象**（不是漏做）。新断言仍会覆盖
+  `docs-site/**`，将来有人写就会被抓到。
+- **`gui/ROADMAP.md:112`「第一次跑完 26 张卡」不改** —— 26 是那一次普查跑了多少张
+  （20 张卡 + 6 个补充场景），不是目录规模；新断言用「运行记录」上下文把它排除。
+- **本机没跑**（无 PowerShell）：`run-offline.ps1` 的五种现场**未在本机复跑**，
+  8.3 依据的是脚本 `ValidateSet` 与 `WINDOWS-ACCEPTANCE-13.md` 的记录 —— 属「读脚本 + 读报告核对」，
+  不是「真机重跑」。这一条要说清是前者。
