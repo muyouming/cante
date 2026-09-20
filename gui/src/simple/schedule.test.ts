@@ -3,12 +3,18 @@
 // 这里钉住三件事：下一次算得对（每周/每月/跨月/跨年/当天过没过/恰好等于）、
 // 到点的判定不会一次补出好几次、以及说给用户听的是地道中文。
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
+import { SCHEDULE } from "./copy-schedule.ts";
 import {
+  CATCH_UP_GRACE_MS,
   SCHEDULE_STORAGE_KEY,
+  catchUpScheduleFor,
   describeCadence,
   describe as describeSchedule,
   dueSchedules,
+  isCatchUp,
   newScheduleId,
   nextRunAfter,
   readSchedules,
@@ -16,6 +22,12 @@ import {
   writeSchedules,
   type Schedule,
 } from "./schedule.ts";
+
+const HERE = import.meta.dir;
+/** 首页的接线：只看它**真的渲染了哪个键**，不是只看常量存在。 */
+const HOME = readFileSync(join(HERE, "Home.tsx"), "utf8");
+/** 结果卡片是「以后自动做」的设置界面，本轮不许改它，但要验证它渲染的句子含前提。 */
+const RESULT_CARD = readFileSync(join(HERE, "ResultCard.tsx"), "utf8");
 
 /** `month` 用 0–11，和 `Date` 的构造函数一致。 */
 function at(year: number, month: number, day: number, hour = 0, minute = 0): number {
@@ -188,6 +200,110 @@ describe("dueSchedules", () => {
     const notYet = make({ id: "later", day: 1, hour: 9, createdAt: at(2026, 0, 12, 11) });
     const off = make({ id: "off", day: 1, hour: 9, enabled: false, createdAt: at(2026, 0, 1, 8) });
     expect(dueSchedules([due, notYet, off], now).map((item) => item.id)).toEqual(["due"]);
+  });
+});
+
+describe("以后自动做的前提只能在场，不能被瞒着", () => {
+  test("那句话本身是一句完整的中文，没有技术词", () => {
+    expect(SCHEDULE.mustBeOpen).toContain("开着");
+    expect(SCHEDULE.mustBeOpen).toContain("到点");
+    expect(SCHEDULE.mustBeOpen).toMatch(/[\u4e00-\u9fa5]/);
+    for (const word of ["模型", "token", "会话", "上下文", "路径"]) {
+      expect(SCHEDULE.mustBeOpen).not.toContain(word);
+    }
+  });
+
+  test("首页真的把它渲染出来（断言用到的键，不是只断言常量存在）", () => {
+    // 首页「下次什么时候做」旁边必须真的出现这一句。
+    expect(HOME).toContain("{SCHEDULE.mustBeOpen}");
+  });
+
+  test("设置界面（结果卡片）那句话也含前提：改的是它渲染的 intro", () => {
+    // 设置界面渲染的是 SCHEDULE.intro（见 ResultCard 的 `{SCHEDULE.intro}`），
+    // 所以前提必须真的落进 intro 里，而不是另起一个没人渲染的键。
+    expect(RESULT_CARD).toContain("{SCHEDULE.intro}");
+    expect(SCHEDULE.intro).toContain(SCHEDULE.mustBeOpen);
+  });
+
+  test("补上那一次的说法，首页在确认页上真的用到了它", () => {
+    expect(SCHEDULE.catchUp).toContain("错过的");
+    expect(HOME).toContain("SCHEDULE.catchUp");
+  });
+});
+
+describe("是不是「错过以后补上的」（isCatchUp）", () => {
+  test("正常到点：离钟点几十秒，不算补的", () => {
+    const schedule = make({ cadence: "weekly", day: 1, hour: 9 });
+    // 2026-01-05 是周一，09:00 整点；47 秒后算正常到点。
+    expect(isCatchUp(schedule, at(2026, 0, 5, 9, 0) + 47_000)).toBe(false);
+  });
+
+  test("关机一周回来：离上个钟点好几天，算补的", () => {
+    // 周一 09:00 该做，她周三 10:00 才开机——已经过去两天。
+    const schedule = make({ cadence: "weekly", day: 1, hour: 9 });
+    expect(isCatchUp(schedule, at(2026, 0, 7, 10))).toBe(true);
+  });
+
+  test("刚过宽限就算补的（边界）", () => {
+    const schedule = make({ cadence: "daily", hour: 9 });
+    const slot = at(2026, 0, 5, 9, 0);
+    expect(isCatchUp(schedule, slot + CATCH_UP_GRACE_MS)).toBe(false);
+    expect(isCatchUp(schedule, slot + CATCH_UP_GRACE_MS + 1)).toBe(true);
+  });
+
+  test("每天/每月也认得出补的那一次", () => {
+    expect(isCatchUp(make({ cadence: "daily", hour: 9 }), at(2026, 0, 5, 23))).toBe(true);
+    expect(isCatchUp(make({ cadence: "monthly", day: 5, hour: 9 }), at(2026, 0, 12, 9))).toBe(true);
+    expect(isCatchUp(make({ cadence: "monthly", day: 5, hour: 9 }), at(2026, 0, 5, 9, 0) + 5_000)).toBe(false);
+  });
+});
+
+describe("关机一周回来只补一次，而且认得出是补的", () => {
+  const now = at(2026, 0, 7, 10); // 周三 10:00 开机
+  const schedule = make({
+    cadence: "weekly",
+    day: 1,
+    hour: 9,
+    createdAt: at(2025, 11, 15, 8),
+  });
+
+  test("dueSchedules 只补一次，不会一次涌出多次", () => {
+    expect(dueSchedules([schedule], now)).toEqual([schedule]);
+  });
+
+  test("这一次被认成补上的：摆上确认页的那一刻就带这个事实", () => {
+    const run = { taskId: schedule.taskId, instruction: schedule.instruction, createdAt: now };
+    // runScheduled 摆上确认页时把 lastRunAt 记成同一时刻。
+    const staged: Schedule = { ...schedule, lastRunAt: now };
+    expect(catchUpScheduleFor([staged], run)).toEqual(staged);
+  });
+});
+
+describe("确认页上这件到底是不是自动补的（catchUpScheduleFor）", () => {
+  const now = at(2026, 0, 7, 10);
+  const base = make({ cadence: "weekly", day: 1, hour: 9, lastRunAt: now });
+  const run = { taskId: base.taskId, instruction: base.instruction, createdAt: now };
+
+  test("正常到点：离钟点很近，返回 null（不冤枉成补的）", () => {
+    const onTimeRun = { ...run, createdAt: at(2026, 0, 5, 9, 0) + 30_000 };
+    const staged = { ...base, lastRunAt: onTimeRun.createdAt };
+    expect(catchUpScheduleFor([staged], onTimeRun)).toBeNull();
+  });
+
+  test("她手动做同样一件事：对不上 lastRunAt，不算自动补的", () => {
+    const manual = { taskId: base.taskId, instruction: base.instruction, createdAt: now };
+    // 手动那次没有把 lastRunAt 记成现在。
+    expect(catchUpScheduleFor([make({ cadence: "weekly", day: 1, hour: 9 })], manual)).toBeNull();
+  });
+
+  test("不是同一句话或不是同一张卡，都不算", () => {
+    expect(catchUpScheduleFor([base], { ...run, instruction: "换个说法" })).toBeNull();
+    expect(catchUpScheduleFor([base], { ...run, taskId: "excel.other" })).toBeNull();
+  });
+
+  test("停掉的调度不参与", () => {
+    const off = make({ cadence: "weekly", day: 1, hour: 9, lastRunAt: now, enabled: false });
+    expect(catchUpScheduleFor([off], run)).toBeNull();
   });
 });
 

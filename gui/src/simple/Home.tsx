@@ -42,7 +42,7 @@ import { LIBRARY } from "./copy-library.ts";
 // r25 — 她说了一句话之后，先用「你是想做这个吗」把最像的几张卡摆出来。
 import { SUGGEST } from "./copy-suggest.ts";
 import { suggestTasks } from "./catalog.ts";
-import { describe as describeSchedule } from "./schedule.ts";
+import { catchUpScheduleFor, describe as describeSchedule } from "./schedule.ts";
 // r17 — 结果文件散在原文件旁边，「上次那张表在哪」需要在首页有个答案。
 import { RESULTS } from "./copy-results.ts";
 import { resultCount } from "./results.ts";
@@ -116,6 +116,8 @@ export default function Home(props: HomeProps): JSX.Element {
     if (!run) return;
     props.onPickTask(taskById(run.taskId) ?? freeTask(run.instruction));
   };
+  // r7 — 停在确认页的这一件，是不是"错过以后补上的"（判据在 `schedule.ts` 里单测）。
+  const pendingCatchUp = (): boolean => { const run = pendingRun(); return run !== null && catchUpScheduleFor(props.store.schedules(), run) !== null; };
 
   // r13 — 排好的活。首页上要能看见三件事：还有几件、手上这件在等什么、
   // 下一件是什么。看的就是这份账，和界面上的说法来自同一个纯逻辑。
@@ -343,7 +345,7 @@ export default function Home(props: HomeProps): JSX.Element {
           <Show when={pendingRun() && !stagedFromQueue()}>
             <section class="mt-5 rounded-2xl border-2 border-sky-600 bg-sky-950/40 px-5 py-4">
               <h2 class="text-[20px] font-semibold text-sky-100">{SCHEDULE.pendingTitle}</h2>
-              <p class="mt-1 text-[16px] leading-relaxed text-slate-300">{SCHEDULE.pendingBody}</p>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-300">{pendingCatchUp() ? SCHEDULE.pendingBody + SCHEDULE.catchUp : SCHEDULE.pendingBody}</p>
               <button
                 type="button"
                 onClick={openPending}
@@ -405,7 +407,8 @@ export default function Home(props: HomeProps): JSX.Element {
                   )}
                 </For>
               </ul>
-              <p class="mt-3 text-[16px] leading-relaxed text-slate-400">{SCHEDULE.confirmNote}</p>
+              <p class="mt-3 text-[16px] leading-relaxed text-slate-400">{SCHEDULE.mustBeOpen}</p>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-400">{SCHEDULE.confirmNote}</p>
             </section>
           </Show>
 
