@@ -27,6 +27,9 @@ import { SHEET_PEEK } from "./copy-sheet-peek.ts";
 import { readSheetPeek, type SheetPeekResult } from "./sheet-peek.ts";
 // 她做完之后的下一步通常是打印或发出去：这里给她「文件在哪 + 怎么打印」。
 import { LOCATION, PRINT } from "./copy-print.ts";
+// r11 — 结果**文件本身**的出口：怎么把这张表交给别人（只引导，绝不替她发送）。
+import { HANDOFF } from "./copy-handoff.ts";
+import { handoffFor, type HandoffStep } from "./handoff.ts";
 import { placeOf } from "./location.ts";
 import { SCHEDULE } from "./copy-schedule.ts";
 import { checkNoteFromRows, lastAgentText } from "./evidence.ts";
@@ -58,6 +61,16 @@ const STATE_TITLE: Record<string, string> = {
   done: "做好了",
   failed: "这件事没有做完",
   cancelled: "已经停下",
+};
+
+/**
+ * 「怎么发」每一步的句子。步骤键由 handoff.ts 给出，句子在这里从 copy 模块取——
+ * 判断与文案各在一处，界面只负责按顺序把句子摆出来。
+ */
+const HANDOFF_STEP: Record<HandoffStep, string> = {
+  howOpen: HANDOFF.howOpen,
+  howDrag: HANDOFF.howDrag,
+  howWechat: HANDOFF.howWechat,
 };
 
 /**
@@ -102,6 +115,9 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
   const state = () => run()?.state ?? "done";
   const show = () => state() === "done" || state() === "failed" || state() === "cancelled";
   const files = () => run()?.result?.files ?? [];
+  // r11 — 这次的结果**文件**能不能交给她自己发出去。试跑 / 失败 / 停下 / 没产出都不出，
+  // 免得把半成品当成能交出去的东西。判断是纯的（handoff.ts），这里只拿结果。
+  const handoff = createMemo(() => handoffFor(run()));
   const changed = () => {
     const impact = run()?.impact;
     if (!impact) return false;
@@ -686,6 +702,32 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
             </For>
           </ul>
         </Show>
+
+        {/* r11 — 结果文件本身的出口。和上面「复制成微信能贴的文字」并列，但说的是两件事：
+            那条送的是**文字**（贴进聊天框），这条说的是把**文件本身**发出去（对方打开还是
+            表格）。只给引导——文件是哪个、在哪儿、怎么拖进微信；微信那边绝不自动发送。 */}
+        <Show when={handoff()}>{(plan) => (
+          <section class="rounded-2xl border-2 border-emerald-700 bg-emerald-950/30 px-4 py-4">
+            <h3 class="text-[20px] font-bold text-emerald-100">{HANDOFF.heading}</h3>
+            <p class="mt-1 text-[16px] leading-relaxed text-emerald-100/90">{HANDOFF.intro}</p>
+            <ul class="mt-3 flex flex-col gap-1">
+              <For each={plan().files}>
+                {(file) => (
+                  <li class="text-[16px] leading-relaxed text-slate-200">
+                    <span class="font-semibold text-slate-100">{HANDOFF.what(file.name)}</span>
+                    <span class="ml-2 text-slate-400">{LOCATION[file.place]}</span>
+                  </li>
+                )}
+              </For>
+            </ul>
+            <For each={plan().steps}>
+              {(step) => (
+                <p class="mt-1 text-[16px] leading-relaxed text-slate-200">{HANDOFF_STEP[step]}</p>
+              )}
+            </For>
+            <p class="mt-3 text-[16px] leading-relaxed text-amber-200">{HANDOFF.notSent}</p>
+          </section>
+        )}</Show>
 
         <Show when={files().length === 0 && state() !== "failed" && state() !== "cancelled"}>
           <p class="rounded-2xl border border-slate-700 bg-slate-800/40 px-4 py-3 text-[16px] text-slate-300">
