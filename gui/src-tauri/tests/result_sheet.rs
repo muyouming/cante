@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cante_gui_lib::commands::read_sheet_rows;
+use cante_gui_lib::commands::{read_sheet_rows, read_task_failed};
 use cante_gui_lib::sheets::write_xlsx;
 
 /// 本 worktree 刚编出来的 cante-sheets。
@@ -114,4 +114,20 @@ fn a_missing_tool_is_an_error_not_an_empty_table() {
         .expect_err("工具不在必须报错，不能返回空表");
     assert!(!error.contains("路径"), "黑名单词不能进用户文案：{error}");
     assert!(!error.is_empty());
+}
+
+/// 读图阻塞任务自己 panic / 运行时关停时，交给她看的只能是中文兜底那句；
+/// `JoinError` 的英文原文（`task … panicked`）只进日志。
+///
+/// 这一条和 `read_sheet_rows` 不是一条路：那条是她能看懂的故障，这一条是我们自己的
+/// 代码出了岔子——更容易被当成“内部错误、无所谓”，所以用测试把它钉住。
+#[test]
+fn a_failed_read_task_shows_her_chinese_only() {
+    // 真 JoinError 的 Display 长这样（这里用手写字符串替身，不真去制造 panic）。
+    let raw = "task 42 panicked at src/commands.rs:380:9: index out of bounds";
+    let shown = read_task_failed(&raw);
+    assert!(shown.contains("没能读出来"), "她应该看到中文的兜底说明：{shown}");
+    for leak in ["panicked", "task", "index", "bounds", raw] {
+        assert!(!shown.to_lowercase().contains(&leak.to_lowercase()), "漏了英文 {leak:?}：{shown}");
+    }
 }
