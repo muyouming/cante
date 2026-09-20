@@ -26,6 +26,12 @@ param(
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 
+# powershell.exe -File 传数组参数时会把它们**用逗号拼成一个字符串**（实测），
+# 所以这里两种都接受：真数组，或者一个逗号分隔的字符串。这样从计划任务里传也好使。
+if ($Text.Count -eq 1 -and $Text[0] -like "*,*") {
+    $Text = $Text[0].Split(",") | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+}
+
 $exe = Join-Path $WorkTree "gui\src-tauri\target\release\cante-gui.exe"
 $distDir = Join-Path $WorkTree "gui\dist\assets"
 
