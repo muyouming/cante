@@ -3,8 +3,13 @@
 // 结果文件不搬家（规矩是留在原文件旁边），所以这里只做一件事：把散在桌面、微信
 // 下载和各种文件夹里的结果汇总成一份能搜的清单，并且如实标出它现在还在不在。
 //
-// 三件事分别归三个地方，互不越界：
+// r30 — 除了搜索（要她先想起文件名里有什么），再按时间分组：「今天 / 这周 / 更早」。
+// 她记的是「我那天做的月报」，所以不搜的时候分组显示，每组一个真标题；一搜索就把
+// 结果摊平（来的是哪一份本来就没几条，再切小组反而碍事）。
+//
+// 几件事分别归几个地方，互不越界：
 //   * 排序、搜索、四种现状的判断在 results.ts（纯逻辑，有单测）；
+//   * 今天/这周/更早的边界在 results-when.ts（纯逻辑，有单测）；
 //   * 面向用户的中文在 copy-results.ts；
 //   * 这个文件只负责渲染，以及从本机问一次 file_facts。
 import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
@@ -14,6 +19,7 @@ import type { Store } from "../store.ts";
 import { RESULTS } from "./copy-results.ts";
 import { useFocusLayer } from "./FocusLayer.tsx";
 import { canOpen, collectResults, resultPaths, searchResults, type ResultEntry } from "./results.ts";
+import { groupResults } from "./results-when.ts";
 import { formatSize, formatWhen } from "./run.ts";
 import { fetchFileFacts, normalizeFacts, type FileFact } from "./verify.ts";
 
@@ -46,6 +52,69 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
   const entries = createMemo(() => collectResults(props.store.runs(), facts()));
   const shown = createMemo(() => searchResults(entries(), query()));
   const searching = () => query().trim().length > 0;
+  // 分组看的是「今天/这周」，以打开这个面板的那一刻算一次；面板开着的时候跨过
+  // 午夜也不重算，免得一份结果在她眼皮底下突然换组。
+  const openedAt = Date.now();
+
+  // 一行结果文件的全部样子。搜索时和分好组时都走这里——同一条结果在两种排法下
+  // 长得必须一模一样，否则她换个方式看会以为换了一份东西。
+  function row(entry: ResultEntry): JSX.Element {
+    return (
+      <li class="rounded-2xl border border-slate-700 bg-slate-900 p-4">
+        {/* 这一份的名字是**真的标题**（h3）：读屏能按标题跳到「下一份」，也才知道
+            自己现在在第几份。视觉不变 —— Tailwind 的 preflight 把 h1-h6 的字号与
+            字重重置成 inherit、外边距归零，所以这里的类与原来的 <p> 逐字一致。 */}
+        <h3 class="truncate text-[20px] font-semibold text-slate-100" title={entry.name}>
+          {entry.name}
+        </h3>
+        <p
+          class="mt-1 truncate text-[16px] leading-relaxed text-slate-400"
+          title={entry.instruction}
+        >
+          {RESULTS.from(entry.title, entry.instruction)}
+        </p>
+        <p class="mt-1 text-[16px] text-slate-500">
+          {RESULTS.when(formatWhen(entry.createdAt))}
+          <Show when={entry.presence === "present" || entry.presence === "unreadable"}>
+            <Show when={entry.size !== null}>
+              {" · "}
+              {RESULTS.size(formatSize(entry.size ?? 0))}
+            </Show>
+          </Show>
+        </p>
+
+        {/* 现在还在不在：本机说什么就说什么，核对没做成也照实说。 */}
+        <p class={`mt-2 text-[16px] leading-relaxed ${presenceClass(entry)}`}>
+          {RESULTS.presence[entry.presence]}
+        </p>
+        <Show when={!canOpen(entry)}>
+          <p class="mt-1 text-[16px] leading-relaxed text-slate-400">
+            {RESULTS.actions.goneDisabled}
+          </p>
+        </Show>
+
+        <div class="mt-3 flex flex-wrap gap-3">
+          <button
+            type="button"
+            disabled={!canOpen(entry)}
+            onClick={() => void props.store.openPath(entry.path)}
+            aria-label={RESULTS.actions.ariaOpen(entry.name)}
+            class="min-h-[48px] rounded-xl bg-sky-500 px-5 text-[16px] font-bold text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+          >
+            {RESULTS.actions.open}
+          </button>
+          <button
+            type="button"
+            onClick={() => void props.store.revealPath(entry.path)}
+            aria-label={RESULTS.actions.ariaOpenFolder(entry.name)}
+            class="min-h-[48px] rounded-xl border border-slate-600 px-5 text-[16px] font-semibold text-slate-100 hover:bg-slate-800"
+          >
+            {RESULTS.actions.openFolder}
+          </button>
+        </div>
+      </li>
+    );
+  }
 
   // 打开就落在搜索框上：这个面板的意义就是「用一句话把上次那张表找回来」；一个结果
   // 都还没有的时候落在「关掉」上（那时屏幕上只有它）。焦点进得来、Tab 在这一层里
@@ -172,62 +241,36 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
                 </p>
               </Show>
 
-              <ul class="mt-4 flex flex-col gap-3">
-                <For each={shown()}>
-                  {(entry) => (
-                    <li class="rounded-2xl border border-slate-700 bg-slate-900 p-4">
-                      <p class="truncate text-[20px] font-semibold text-slate-100" title={entry.name}>
-                        {entry.name}
-                      </p>
-                      <p
-                        class="mt-1 truncate text-[16px] leading-relaxed text-slate-400"
-                        title={entry.instruction}
-                      >
-                        {RESULTS.from(entry.title, entry.instruction)}
-                      </p>
-                      <p class="mt-1 text-[16px] text-slate-500">
-                        {RESULTS.when(formatWhen(entry.createdAt))}
-                        <Show when={entry.presence === "present" || entry.presence === "unreadable"}>
-                          <Show when={entry.size !== null}>
-                            {" · "}
-                            {RESULTS.size(formatSize(entry.size ?? 0))}
-                          </Show>
-                        </Show>
-                      </p>
-
-                      {/* 现在还在不在：本机说什么就说什么，核对没做成也照实说。 */}
-                      <p class={`mt-2 text-[16px] leading-relaxed ${presenceClass(entry)}`}>
-                        {RESULTS.presence[entry.presence]}
-                      </p>
-                      <Show when={!canOpen(entry)}>
-                        <p class="mt-1 text-[16px] leading-relaxed text-slate-400">
-                          {RESULTS.actions.goneDisabled}
-                        </p>
-                      </Show>
-
-                      <div class="mt-3 flex flex-wrap gap-3">
-                        <button
-                          type="button"
-                          disabled={!canOpen(entry)}
-                          onClick={() => void props.store.openPath(entry.path)}
-                          aria-label={RESULTS.actions.ariaOpen}
-                          class="min-h-[48px] rounded-xl bg-sky-500 px-5 text-[16px] font-bold text-slate-950 hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+              {/* 搜索时把结果摊平：她在找**那一份**，来的结果没有几条，再按时间
+                  切成一堆小组反而要多跳几次标题。不搜的时候才按时间分组（每组
+                  一个三级标题，读屏可以靠它一组一组跳过去）。 */}
+              <Show
+                when={searching()}
+                fallback={
+                  <For each={groupResults(shown(), openedAt)}>
+                    {(group) => (
+                      <section class="mt-6">
+                        <h3 class="text-[20px] font-semibold text-slate-200">
+                          {RESULTS.group[group.bucket]}
+                        </h3>
+                        <ul
+                          class="mt-3 flex flex-col gap-3"
+                          aria-label={RESULTS.list.ariaLabel(group.entries.length)}
                         >
-                          {RESULTS.actions.open}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void props.store.revealPath(entry.path)}
-                          aria-label={RESULTS.actions.ariaOpenFolder}
-                          class="min-h-[48px] rounded-xl border border-slate-600 px-5 text-[16px] font-semibold text-slate-100 hover:bg-slate-800"
-                        >
-                          {RESULTS.actions.openFolder}
-                        </button>
-                      </div>
-                    </li>
-                  )}
-                </For>
-              </ul>
+                          <For each={group.entries}>{(entry) => row(entry)}</For>
+                        </ul>
+                      </section>
+                    )}
+                  </For>
+                }
+              >
+                <ul
+                  class="mt-4 flex flex-col gap-3"
+                  aria-label={RESULTS.list.ariaLabel(shown().length)}
+                >
+                  <For each={shown()}>{(entry) => row(entry)}</For>
+                </ul>
+              </Show>
             </Show>
           </Show>
         </div>

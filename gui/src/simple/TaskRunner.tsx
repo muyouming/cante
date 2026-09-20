@@ -184,6 +184,10 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
           return "running";
         case "done":
           return "result";
+        // 她点了「停下来」：也停在结果那一步，把停下的结果说完整（不是默默回到
+        // 选文件那一步）。这条以前漏了，于是停完之后屏幕上什么都不说。
+        case "cancelled":
+          return "result";
         case "failed":
           return "error";
         default:
@@ -338,9 +342,10 @@ export default function TaskRunner(props: TaskRunnerProps): JSX.Element {
 
   function cancel(): void {
     store.cancelRun?.();
-    setDismissed(true);
     setLocalError(null);
-    setPhase(pickable() ? "pick" : "say");
+    // 不 dismiss：dismiss 会把这次运行整个从屏幕上拿掉，于是「停下之后到底怎么样
+    // 了」没地方说。停下之后停在结果那一步，把做到哪儿、原文件动没动、还能怎么做
+    // 说完整（见 stop.ts / copy-stop.ts 与下面的 step 分支）。
   }
 
   function restart(): void {

@@ -17,6 +17,8 @@ import { visionAvailable } from "./capabilities.ts";
 import { availabilityHint, groupTasks, searchTasks } from "./catalog.ts";
 import { LIBRARY } from "./copy-library.ts";
 import { useFocusLayer } from "./FocusLayer.tsx";
+import { HintChip } from "./HintText.tsx";
+import { hintsIn } from "./hints.ts";
 import type { TaskDef } from "./tasks/index.ts";
 
 export interface TaskLibraryProps {
@@ -39,6 +41,8 @@ function ResultCard(props: {
   const [expanded, setExpanded] = createSignal(false);
   const risks = () => props.task.risks ?? [];
   const visibleRisks = () => (expanded() ? risks() : risks().slice(0, 1));
+  // 标题/例子里她不认识的词，各给一个问号入口；入口在主按钮外面（按钮不能套按钮）。
+  const words = () => hintsIn(`${props.task.title}\n${props.task.example}`);
   // 能不能看图取决于当前模型：看不了才标「做不到」，别把能做的事实说成做不到。
   const hint = () => availabilityHint(props.task, props.canSeeImages);
   const needsText = () => LIBRARY.needs[props.task.needs];
@@ -56,6 +60,14 @@ function ResultCard(props: {
           {LIBRARY.needsLabel}：{needsText()}
         </span>
       </button>
+
+      <Show when={words().length > 0}>
+        <div class="flex flex-wrap items-center gap-2 px-5 pb-3">
+          <For each={words()}>
+            {(matched) => <HintChip hint={matched.hint} term={matched.term} />}
+          </For>
+        </div>
+      </Show>
 
       {/* 诚实的边界：不是错误，所以用中性的蓝灰提示，不用红色。 */}
       <Show when={hint()}>

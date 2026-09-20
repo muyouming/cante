@@ -202,6 +202,11 @@ const PASSIVE_ALLOW: readonly PassiveAllowance[] = [
     why: "结果文件找不到了，原因不明，只能如实说它被移动过。",
   },
   {
+    file: "copy-stop.ts",
+    contains: "没有被改动",
+    why: "停下来之后那句「原来的文件没有被改动」是产品对文件的承诺原话（产品律 2）；改成主动会丢掉「我们没动它」这层保证。",
+  },
+  {
     file: "copy-results.ts",
     contains: "可能被别的程序占着",
     why: "占用者未知，说出来也没用；她要的是「关掉别的程序再试」。",
