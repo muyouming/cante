@@ -207,7 +207,7 @@ export function PrivacySummary(props: PrivacyPanelProps): JSX.Element {
   const state = (): PrivacyState => props.store.privacy?.() ?? DEFAULT_PRIVACY;
   const who = (): string => {
     if (state().localOnly) return "内容不会离开这台电脑";
-    if (state().provider) return `联网时发给：${state().provider}`;
+    if (state().provider) return `联网时内容会发给：${state().provider}`;
     return "联网时内容会发给帮你整理的服务方";
   };
   return (
