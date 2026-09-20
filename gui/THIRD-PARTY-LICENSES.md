@@ -23,16 +23,16 @@
 
 | 许可类别 | Rust | npm | 合计 |
 | --- | --- | --- | --- |
-| MIT | 491 | 13 | 504 |
+| MIT | 492 | 13 | 505 |
 | Apache-2.0 | 5 | 2 | 7 |
 | ISC | 1 | 0 | 1 |
 | BSD-* | 2 | 0 | 2 |
 | 其他 / 未知 | 29 | 0 | 29 |
-| **合计** | **528** | **15** | **543** |
+| **合计** | **529** | **15** | **544** |
 
 ## 许可原文
 
-- 附带原文的包：**543** 个；按内容去重后 **230** 份不同文本（去重前 4618.5 KB，去重后 2010.8 KB）。原文已随前端产物分发：`gui/src/simple/third-party-notices.ts`。
+- 附带原文的包：**544** 个；按内容去重后 **231** 份不同文本（去重前 4630.3 KB，去重后 2022.6 KB）。原文已随前端产物分发：`gui/src/simple/third-party-notices.ts`。
 - 其中 **43** 个是**补回**的（发布到 registry 时没把 LICENSE 打进包，原文照下一节的链接取回，不是脚本编的）。
 - 未附带原文的包：**0** 个（脚本不替它们编原文）。
 
@@ -445,6 +445,7 @@
 - tauri-plugin-dialog 2.7.3 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
 - tauri-plugin-fs 2.5.2 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
 - tauri-plugin-opener 2.5.5 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
+- tauri-plugin-single-instance 2.4.5 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
 - tauri-plugin-window-state 2.4.1 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
 - tauri-runtime 2.11.3 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
 - tauri-runtime-wry 2.11.4 — Apache-2.0 OR MIT — Tauri Programme within The Commons Conservancy
