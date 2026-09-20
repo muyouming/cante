@@ -348,9 +348,9 @@ pub fn extract_text(path: &Path, selection: Option<&PageSelection>) -> Result<St
         return Err(PdfError::NoText(path.display().to_string()));
     }
 
-    let text = document.extract_text(&numbers).map_err(|error| {
-        PdfError::Broken(format!("{}（读文字的时候出错：{}）", path.display(), error))
-    })?;
+    let text = document
+        .extract_text(&numbers)
+        .map_err(|_| broken_with(path, "读里面文字的时候出了点问题"))?;
 
     if text.trim().is_empty() {
         return Err(PdfError::NoText(path.display().to_string()));
@@ -370,6 +370,11 @@ fn load(path: &Path) -> Result<Document, PdfError> {
         }
     }
     Document::load(path).map_err(|_| PdfError::Broken(path.display().to_string()))
+}
+
+/// 库兜出来的错误说明是英文，不能端给她，所以只留中文的半句。
+fn broken_with(path: &Path, why: &str) -> PdfError {
+    PdfError::Broken(format!("{}（{why}）", path.display()))
 }
 
 // ---------------------------------------------------------------------------
@@ -429,9 +434,9 @@ pub fn merge(output: &Path, inputs: &[&Path]) -> Result<(), PdfError> {
     });
     document.trailer.set("Root", catalog_id);
 
-    document.save(output).map_err(|error| {
-        PdfError::Broken(format!("{}（写不进去：{}）", output.display(), error))
-    })?;
+    document
+        .save(output)
+        .map_err(|_| broken_with(output, "写不进去，可能磁盘满了，或者这里不让写"))?;
     Ok(())
 }
 
@@ -449,9 +454,9 @@ pub fn split(input: &Path, selection: &PageSelection, output: &Path) -> Result<(
         document.delete_pages(&remove);
     }
 
-    document.save(output).map_err(|error| {
-        PdfError::Broken(format!("{}（写不进去：{}）", output.display(), error))
-    })?;
+    document
+        .save(output)
+        .map_err(|_| broken_with(output, "写不进去，可能磁盘满了，或者这里不让写"))?;
     Ok(())
 }
 
@@ -961,6 +966,28 @@ end
         fs::write(&path, b"this is definitely not a PDF body").expect("write");
         assert!(matches!(page_count(&path), Err(PdfError::Broken(_))));
         assert!(page_count(&path).unwrap_err().to_string().contains("坏了"));
+    }
+
+    #[test]
+    fn a_failed_save_never_leaks_english() {
+        // 和 cante-sheets 的 GBK 那条同一类：库/系统兜出来的英文不得端给她。
+        // 这里让保存落在“一个文件下面”的路径上，逼出 save 失败。
+        let dir = TempDir::new("save-fail");
+        let input = dir.join("原件.pdf");
+        write_text_pdf(&input, &["hello"]);
+        let blocker = dir.join("挡住.pdf");
+        fs::write(&blocker, b"not a directory").expect("write blocker");
+        let output = blocker.join("子目录").join("结果.pdf");
+
+        let error = merge(&output, &[&input, &input]).expect_err("写不进去必须报错");
+        let message = error.to_string();
+        let leaked: String = message
+            .replace(&output.display().to_string(), "")
+            .chars()
+            .filter(|character| character.is_ascii_alphabetic())
+            .collect();
+        assert!(leaked.is_empty(), "错误消息里漏了英文：{message}");
+        assert!(message.contains("写不进去"), "要是中文说明：{message}");
     }
 
     #[test]

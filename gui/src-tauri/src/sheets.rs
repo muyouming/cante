@@ -54,10 +54,17 @@ pub enum SheetError {
     WpsFormat(String),
     /// 文件在，但打不开（坏了、加密了、表名对不上……）。
     Broken(String),
+    /// 这份表不是常见的文字格式（多半是拿别的方式存的），照直读会变成乱码，所以不
+    /// 硬读。真机上最常见的一脚：微信导出的、旧一点儿的 Excel 存的 CSV。
+    NotText(String),
+    /// 读的时候系统不让读（多半是它正被别的程序占着）。
+    ReadDenied(String),
     /// 目标文件已经存在。写结果只允许**新建**，绝不动已有的文件。
     AlreadyExists(String),
     /// 表名用不了（空的、太长、含 Excel 不允许的符号）。
     BadSheetName(String),
+    /// 结果文件名不是 .xlsx。名字与内容对不上，会产出一个自己也读不回去的“假”文件。
+    BadOutputName(String),
     /// 写的时候出的问题（目标是个文件夹、位置不可写……）。
     WriteFailed(String),
 }
@@ -72,6 +79,14 @@ impl fmt::Display for SheetError {
                 "这是 WPS 表格自己的格式（不是 Excel 格式），我读不了：{path}。在 WPS 里打开它，点「另存为」选 Excel 文件（.xlsx），再把新文件交给我就行。"
             ),
             SheetError::Broken(what) => write!(f, "这个文件像是坏了，读不开：{what}"),
+            SheetError::NotText(path) => write!(
+                f,
+                "这份表打不开：{path}。它存的方式和平时的不一样（微信导出来的、旧一点儿的 Excel 存的表常常这样），也可能是文件坏了。请用 Excel 或 WPS 打开这份表，点「另存为」选 Excel 文件（.xlsx），再把新文件交给我；要是连它也打不开，那就是文件坏了，请让对方重新发一份。"
+            ),
+            SheetError::ReadDenied(path) => write!(
+                f,
+                "读不了这个文件：{path}。它可能正被别的程序占着，先关掉打开它的程序（例如 Excel 或微信），再试一次。"
+            ),
             SheetError::AlreadyExists(path) => write!(
                 f,
                 "这个文件已经在了，我不敢覆盖它：{path}。换一个文件名再试，或者先把旧文件改名。"
@@ -84,6 +99,10 @@ impl fmt::Display for SheetError {
                     "这个表名用不了：「{shown}」。表名不能是空的、不能超过 31 个字，也不能带 \\ / ? * [ ] : 这些符号。换一个表名再试。"
                 )
             }
+            SheetError::BadOutputName(path) => write!(
+                f,
+                "结果文件的名字要用 .xlsx 结尾：{path}。请把它存成 Excel 文件（例如「汇总结果.xlsx」），再试一次。"
+            ),
             SheetError::WriteFailed(what) => write!(f, "写不进去：{what}"),
         }
     }
@@ -146,13 +165,9 @@ pub fn read_sheet(path: &Path, sheet: Option<&str>) -> Result<Vec<Vec<String>>, 
         },
     };
 
-    let range = workbook.worksheet_range(&target).map_err(|error| {
-        SheetError::Broken(format!(
-            "{}（读「{}」这张表的时候出错：{}）",
-            path.display(),
-            target,
-            error
-        ))
+    // 库里兜出来的错误说明是英文，不能端给她，所以只保留中文的半句。
+    let range = workbook.worksheet_range(&target).map_err(|_| {
+        SheetError::Broken(format!("{}（读「{}」这张表的时候出了点问题）", path.display(), target))
     })?;
 
     Ok(range.rows().map(|row| row.iter().map(cell_to_string).collect()).collect())
@@ -272,29 +287,26 @@ pub fn write_xlsx(path: &Path, rows: &[Vec<String>], sheet_name: &str) -> Result
                     continue;
                 }
                 if let Some((year, month, day)) = iso_date_literal(cell) {
-                    let value = XlsxDateTime::from_ymd(year as u16, month as u8, day as u8).map_err(|error| {
-                        SheetError::WriteFailed(format!("{}（日期写不进去：{}）", path.display(), error))
-                    })?;
+                    let value = XlsxDateTime::from_ymd(year as u16, month as u8, day as u8)
+                        .map_err(|_| write_failed(path, "这个日期写不进去"))?;
                     worksheet
                         .write_datetime_with_format(row, column, &value, &date_format)
-                        .map_err(|error| {
-                            SheetError::WriteFailed(format!("{}（写不进去：{}）", path.display(), error))
-                        })?;
+                        .map_err(|_| write_failed(path, "这个日期写不进去"))?;
                 } else if let Some(number) = number_literal(cell) {
-                    worksheet.write_number(row, column, number).map_err(|error| {
-                        SheetError::WriteFailed(format!("{}（写不进去：{}）", path.display(), error))
-                    })?;
+                    worksheet
+                        .write_number(row, column, number)
+                        .map_err(|_| write_failed(path, "有一格数字写不进去"))?;
                 } else {
-                    worksheet.write_string(row, column, cell).map_err(|error| {
-                        SheetError::WriteFailed(format!("{}（写不进去：{}）", path.display(), error))
-                    })?;
+                    worksheet
+                        .write_string(row, column, cell)
+                        .map_err(|_| write_failed(path, "有一格文字写不进去"))?;
                 }
             }
         }
     }
-    let bytes = workbook.save_to_buffer().map_err(|error| {
-        SheetError::WriteFailed(format!("{}（写不进去：{}）", path.display(), error))
-    })?;
+    let bytes = workbook
+        .save_to_buffer()
+        .map_err(|_| write_failed(path, "这份结果存不下来"))?;
 
     // `create_new(true)`：只有文件**不存在**时才创建；已经存在（哪怕是一瞬间前
     // 刚被别人建出来）就报 AlreadyExists，绝不截断、绝不覆盖。这就是“结果永不
@@ -307,15 +319,59 @@ pub fn write_xlsx(path: &Path, rows: &[Vec<String>], sheet_name: &str) -> Result
             std::io::ErrorKind::AlreadyExists => {
                 SheetError::AlreadyExists(path.display().to_string())
             }
-            _ => SheetError::WriteFailed(format!("{}（写不进去：{}）", path.display(), error)),
+            _ => write_failed(path, "这个地方写不进去，可能磁盘满了，或者这里不让写"),
         })?;
-    if let Err(error) = file.write_all(&bytes) {
+    if file.write_all(&bytes).is_err() {
         // 刚建出来的新文件没写全：删掉，不留一个打不开的空壳。
         drop(file);
         let _ = std::fs::remove_file(path);
-        return Err(SheetError::WriteFailed(format!("{}（写不进去：{}）", path.display(), error)));
+        return Err(write_failed(path, "有一半没写下去"));
     }
     Ok(())
+}
+
+/// 读一份要交给 [`write_xlsx`] 的 CSV 文本（命令行壳的 `write` 输入）。
+///
+/// 只按常见的文字格式读（UTF-8，开头的 BOM 无所谓）；**不猜编码**——猜错会把乱码
+/// 写进结果，而结果一旦错了她很难看出来。读不出来时，把系统兜出来的英文换成她照着
+/// 能做的一句话：真机上最常见的原因是这份表是别的方式存的（微信导出的、旧一点儿的
+/// Excel 存的 CSV 常常这样），并不是文件坏了。
+pub fn read_csv_input(path: &Path) -> Result<String, SheetError> {
+    match std::fs::read(path) {
+        Ok(bytes) => String::from_utf8(bytes)
+            .map_err(|_| SheetError::NotText(path.display().to_string())),
+        Err(error) => Err(match error.kind() {
+            std::io::ErrorKind::NotFound => SheetError::NotFound(path.display().to_string()),
+            std::io::ErrorKind::PermissionDenied => {
+                SheetError::ReadDenied(path.display().to_string())
+            }
+            _ => SheetError::Broken(path.display().to_string()),
+        }),
+    }
+}
+
+/// 结果文件名必须以 `.xlsx` 结尾，否则先停下来。
+///
+/// 真机上 `write out.csv in.csv` 会退出 0、却落盘一个**真正的 xlsx 却叫 .csv** 的
+/// 文件，紧接着 `read out.csv` 又因为扩展名不在白名单里读不回来——工具会产出一个
+/// 自己都读不回去的“假 .csv”。产品指令写死了结果一律 .xlsx，所以正常路径碰不到；
+/// 这道闸门是防着被误用的。
+pub fn check_output_name(path: &Path) -> Result<(), SheetError> {
+    let is_xlsx = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|extension| extension.eq_ignore_ascii_case("xlsx"))
+        .unwrap_or(false);
+    if is_xlsx {
+        Ok(())
+    } else {
+        Err(SheetError::BadOutputName(path.display().to_string()))
+    }
+}
+
+/// 写失败时统一拼一句中文原因，绝不把库或系统兜出来的英文端给她。
+fn write_failed(path: &Path, why: &str) -> SheetError {
+    SheetError::WriteFailed(format!("{}（{why}）", path.display()))
 }
 
 /// Excel 对表名的限制：不能是空的、最多 31 个字、不能含 `* ? : [ ] \ /`，也不能
