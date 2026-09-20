@@ -18,7 +18,7 @@ import type { JSX } from "solid-js";
 import type { Store } from "../store.ts";
 // 「把这批结果一次复制成微信能贴的文字」的话，和别的面向用户中文一样单放一个模块。
 import { BATCH } from "./copy-batch.ts";
-import { RESULTS } from "./copy-results.ts";
+import { RESULTS, pathForClipboard } from "./copy-results.ts";
 // 一段文字里读不出来的那份，用同一句「这次读不出来」的说法（单份复制也是这句）。
 import { shareReadFailed } from "./copy-share.ts";
 import { sheetCapability } from "./capabilities.ts";
@@ -107,6 +107,10 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
   const [batch, setBatch] = createSignal<{ note: string; skipped: number } | null>(null);
   const [batching, setBatching] = createSignal(false);
 
+  // 「复制位置」的现场：复制成了没有，以及是**哪一份**（一屏可能有好几行，不记着就
+  // 会在别人那行下面报喜）。和结果卡片上那份是同一个形状、同一句话。
+  const [locationNote, setLocationNote] = createSignal<{ path: string; note: string } | null>(null);
+
   const entries = createMemo(() => collectResults(props.store.runs(), facts()));
   const shown = createMemo(() => searchResults(entries(), query()));
   const searching = () => query().trim().length > 0;
@@ -169,7 +173,27 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
           >
             {RESULTS.actions.openFolder}
           </button>
+          {/* 事后从这儿找回来的时候，比刚做完那会儿更常需要把位置交给别人（微信上、
+              电话里）——那串位置又长又绕，念不清，所以给她一步能做完的动作：整条复制走。
+              和结果卡片上那个「复制位置」是同一件事、同一句话、同一个转换
+              （copy-results.ts 的 pathForClipboard），不另写一份。
+              复制不是发送：只放到她的剪贴板，粘到哪儿、发给谁，她自己定。 */}
+          <button
+            type="button"
+            onClick={() => void copyLocation(entry)}
+            aria-label={RESULTS.actions.ariaCopyLocation(entry.name)}
+            class="min-h-[48px] rounded-xl border border-slate-600 px-5 text-[16px] font-semibold text-slate-100 hover:bg-slate-800"
+          >
+            {RESULTS.actions.copyLocation}
+          </button>
         </div>
+        {/* 复制成没成一句话就够；它自己占一行（不塞进上面那排），因为这句话有二十
+            多个字，挤在按钮之间在窄窗口里会被压成一条竖缝。 */}
+        <Show when={locationNote()?.path === entry.path}>
+          <p class="mt-2 text-[16px] leading-relaxed text-slate-300" role="status">
+            {locationNote()?.note}
+          </p>
+        </Show>
       </li>
     );
   }
@@ -205,6 +229,17 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
       alive = false;
     };
   });
+
+  // 把这一份的完整位置放进她的剪贴板（写法和结果卡片上那份一样：完整位置、
+  // Windows 的反斜杠、成功/失败都是同一句话）。文件已经不在了也照样能复制——
+  // 那时候她更要把位置给别人，让人帮忙找。
+  async function copyLocation(entry: ResultEntry): Promise<void> {
+    const copied = await copyText(pathForClipboard(entry.path));
+    setLocationNote({
+      path: entry.path,
+      note: copied ? RESULTS.actions.copied : RESULTS.actions.copyFailed,
+    });
+  }
 
   function clearSearch(): void {
     setQuery("");
