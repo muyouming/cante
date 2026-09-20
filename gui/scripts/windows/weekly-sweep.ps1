@@ -60,6 +60,79 @@ function To-WslPath([string]$WindowsPath) {
     return "/mnt/$drive$rest"
 }
 
+# --- 把 wsl.exe 的输出按正确编码读回来 ---------------------------------------
+#
+# 为什么不能直接 `& wsl.exe ... | Out-String`：wsl.exe 自己打的字（比如"未安装
+# Linux 的 Windows 子系统…"那屏安装提示）是 **UTF-16LE** 字节，而 PowerShell 5.1
+# 按控制台代码页（这台机器上是 GBK）去解，就成了一串乱码，还会混进 NUL。子进程
+# （WSL 里 bash 那些东西）的输出倒是 UTF-8 —— 所以不能一律当 UTF-16 解。
+# 2026-09-20 起的每份报告里那段"原始输出"就是这么变垃圾的（r18 修的）。
+#
+# 可靠做法：让 Start-Process 把 stdout/stderr **原样**重定向到文件（PowerShell 不经手
+# 解码），再按实际字节认编码：有 UTF-16 BOM、或字节里含 NUL → UTF-16LE；否则 UTF-8。
+# WSL 彻底没了时失败路径也可能给个空文件，ReadAllBytes 返回空数组，这里照样不炸。
+function Read-WslStreamFile([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return '' }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -eq 0) { return '' }
+    if ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
+        return [System.Text.Encoding]::Unicode.GetString($bytes, 2, $bytes.Length - 2)
+    }
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        return [System.Text.Encoding]::UTF8.GetString($bytes, 3, $bytes.Length - 3)
+    }
+    foreach ($b in $bytes) {
+        if ($b -eq 0) { return [System.Text.Encoding]::Unicode.GetString($bytes) }
+    }
+    return [System.Text.Encoding]::UTF8.GetString($bytes)
+}
+
+# 跑一次 wsl.exe，把 stdout/stderr 读回来（可选经 stdin 喂脚本）。
+# 参数只传简单 token（例如 -e bash -s、-l -v），不要塞带空格/换行的长命令 ——
+# Start-Process 不会替我们做参数引号转义。
+function Invoke-WslCapture {
+    param(
+        [Parameter(Mandatory = $true)][string]$WslPath,
+        [Parameter(Mandatory = $true)][string[]]$WslArguments,
+        [string]$StandardInput
+    )
+    $outFile = [System.IO.Path]::GetTempFileName()
+    $errFile = [System.IO.Path]::GetTempFileName()
+    $inFile = ''
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $startArgs = @{
+            FilePath               = $WslPath
+            ArgumentList           = $WslArguments
+            RedirectStandardOutput = $outFile
+            RedirectStandardError  = $errFile
+            NoNewWindow            = $true
+            Wait                   = $true
+            PassThru               = $true
+        }
+        if ($PSBoundParameters.ContainsKey('StandardInput')) {
+            $inFile = [System.IO.Path]::GetTempFileName()
+            [System.IO.File]::WriteAllText($inFile, [string]$StandardInput, (New-Object System.Text.UTF8Encoding($false)))
+            $startArgs['RedirectStandardInput'] = $inFile
+        }
+        $proc = Start-Process @startArgs
+        $code = -1
+        if ($null -ne $proc) { $code = $proc.ExitCode }
+        $text = (Read-WslStreamFile $outFile) + (Read-WslStreamFile $errFile)
+        return [pscustomobject]@{ ExitCode = $code; Text = $text.Trim() }
+    } catch {
+        return [pscustomobject]@{ ExitCode = -1; Text = "$($_.Exception.Message)" }
+    } finally {
+        $ErrorActionPreference = $saved
+        foreach ($f in @($outFile, $errFile, $inFile)) {
+            if ($f -and (Test-Path -LiteralPath $f)) {
+                Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
 # --- -1) WSL 到底能不能用（不能用就当面说清，别留个空报告）------------------
 #
 # 为什么要有这一步（2026-09-20 实测的教训）：这台机器上的 WSL 一度被禁用
@@ -68,9 +141,11 @@ function To-WslPath([string]$WindowsPath) {
 # 而普查跑到最后留下一个 **5 字节**的报告 + 退出码 1 —— 从报告上**看不出**是
 # "WSL 没了"，下一个人只会以为"普查跑了、什么都没查出来"。
 # 所以先问一句：能不能真的在 WSL 里跑一条命令。不能就写清原因再退出。
+# 注意：不能直接 `& wsl.exe ... 2>&1 | Out-String` —— 那样会把 wsl.exe 的
+# UTF-16LE 输出按 GBK 解成乱码（见上面 Read-WslStreamFile 的注释）。走 Invoke-WslCapture。
 $wslProbe = $null
 try {
-    $wslProbe = & wsl.exe -e echo cante-wsl-ok 2>&1 | Out-String
+    $wslProbe = (Invoke-WslCapture -WslPath 'wsl.exe' -WslArguments @('-e', 'echo', 'cante-wsl-ok')).Text
 } catch {
     $wslProbe = "$_"
 }
@@ -234,6 +309,13 @@ Set-Content -LiteralPath $logPath -Value $header -Encoding UTF8
 # 会变成终止性错误（NativeCommandError），脚本会当场死掉 —— 而 wsl.exe 那边的子进程会
 # 继续跑完，于是看起来像"任务跑了但什么都没写"。任务第一次跑就栽在这里（报告出来了，
 # 但这行后面的日志/历史都没写），所以采集这一段必须活在 Stop 之外。
+#
+# 为什么这一段不走上面的 Invoke-WslCapture（UTF-16 自动识别）：这里拿的是 WSL 里
+# bash/普查**子进程**的 UTF-8 输出，而 $wslArgs 里有 `-e bash -lc <多行脚本>` 这种
+# 带空格换行的参数 —— Start-Process 的 -ArgumentList 不会替我们做引号转义，硬换会把
+# 命令拆坏。能走到这里说明上面的探针已确认 WSL 可用；wsl.exe 自己那屏 UTF-16 提示
+# 走的是探针那条路（已按字节解码）。已知限制：若 -d 指了不存在的发行版，wsl.exe
+# 自己的报错仍可能花屏 —— 留待有 WSL 的机器上再收口。
 $sweepCode = 1
 $previous = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'

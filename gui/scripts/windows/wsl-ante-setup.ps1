@@ -67,6 +67,74 @@ function Fail([string]$Text) {
     exit 1
 }
 
+# --- 把 wsl.exe 的输出按正确编码读回来 ---------------------------------------
+#
+# wsl.exe 自己打的字（例如"未安装 Linux 的 Windows 子系统…"那屏安装提示、发行版
+# 列表）是 **UTF-16LE** 字节；WSL 里 bash 的输出是 UTF-8。用默认代码页捕获就会
+# 花屏（报告里那段乱码就是这么来的，r18 修的），所以按实际字节认编码。
+#
+# 做法：Start-Process 原样重定向到临时文件（PowerShell 不经手解码），再读字节：
+# 有 UTF-16 BOM、或含 NUL 字节 → UTF-16LE；否则 UTF-8。失败路径给空文件也不炸。
+function Read-WslStreamFile([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return '' }
+    $bytes = [System.IO.File]::ReadAllBytes($Path)
+    if ($bytes.Length -eq 0) { return '' }
+    if ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
+        return [System.Text.Encoding]::Unicode.GetString($bytes, 2, $bytes.Length - 2)
+    }
+    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+        return [System.Text.Encoding]::UTF8.GetString($bytes, 3, $bytes.Length - 3)
+    }
+    foreach ($b in $bytes) {
+        if ($b -eq 0) { return [System.Text.Encoding]::Unicode.GetString($bytes) }
+    }
+    return [System.Text.Encoding]::UTF8.GetString($bytes)
+}
+
+# 跑一次 wsl.exe，把 stdout/stderr 读回来（可选经 stdin 喂脚本）。
+function Invoke-WslCapture {
+    param(
+        [Parameter(Mandatory = $true)][string]$WslPath,
+        [Parameter(Mandatory = $true)][string[]]$WslArguments,
+        [string]$StandardInput
+    )
+    $outFile = [System.IO.Path]::GetTempFileName()
+    $errFile = [System.IO.Path]::GetTempFileName()
+    $inFile = ''
+    $saved = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $startArgs = @{
+            FilePath               = $WslPath
+            ArgumentList           = $WslArguments
+            RedirectStandardOutput = $outFile
+            RedirectStandardError  = $errFile
+            NoNewWindow            = $true
+            Wait                   = $true
+            PassThru               = $true
+        }
+        if ($PSBoundParameters.ContainsKey('StandardInput')) {
+            $inFile = [System.IO.Path]::GetTempFileName()
+            [System.IO.File]::WriteAllText($inFile, [string]$StandardInput, (New-Object System.Text.UTF8Encoding($false)))
+            $startArgs['RedirectStandardInput'] = $inFile
+        }
+        $proc = Start-Process @startArgs
+        $code = -1
+        if ($null -ne $proc) { $code = $proc.ExitCode }
+        $text = (Read-WslStreamFile $outFile) + (Read-WslStreamFile $errFile)
+        return [pscustomobject]@{ ExitCode = $code; Text = $text.Trim() }
+    } catch {
+        return [pscustomobject]@{ ExitCode = -1; Text = "$($_.Exception.Message)" }
+    } finally {
+        $ErrorActionPreference = $saved
+        foreach ($f in @($outFile, $errFile, $inFile)) {
+            if ($f -and (Test-Path -LiteralPath $f)) {
+                Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+}
+
 # 把一段 bash 脚本从 stdin 交给 WSL 里的 bash 跑。
 #
 # 为什么不写成 wsl.exe -e bash -lc "……"：PowerShell 5.1 往原生程序传带引号的
@@ -77,23 +145,14 @@ function Invoke-WslScript {
         [Parameter(Mandatory = $true)][string]$Script,
         [string]$Label = "bash"
     )
-    $distroArgs = $script:DistroArgs
-    # PowerShell 5.1 的坑：$ErrorActionPreference = "Stop" 时，把原生程序的 stderr
-    # 重定向进来会直接抛 NativeCommandError。这里临时放松，只看退出码和文本。
-    $saved = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $lines = $Script | & $script:WslPath @distroArgs -e bash -s 2>&1
-        $code = $LASTEXITCODE
-    } finally {
-        $ErrorActionPreference = $saved
-    }
-    $text = ($lines | Out-String)
-    # wsl.exe 的一些输出是 UTF-16 漏出来的，NUL 去掉就还原成 UTF-8 文本。
-    $text = $text -replace "`0", ""
+    $distroArgs = @($script:DistroArgs) + @('-e', 'bash', '-s')
+    # 不能直接把原生程序的 stderr 2>&1 重定向进来（$ErrorActionPreference = 'Stop'
+    # 时会抛 NativeCommandError），也不能用默认代码页解 —— 交给 Invoke-WslCapture，
+    # 它按实际字节认 UTF-16LE / UTF-8。
+    $capture = Invoke-WslCapture -WslPath $script:WslPath -WslArguments $distroArgs -StandardInput $Script
     return [pscustomobject]@{
-        ExitCode = $code
-        Text     = $text.Trim()
+        ExitCode = $capture.ExitCode
+        Text     = $capture.Text
         Label    = $Label
     }
 }
