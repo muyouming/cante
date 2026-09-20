@@ -29,6 +29,9 @@ import {
 import { SCHEDULE_STORAGE_KEY } from "./simple/schedule.ts";
 // #140 — notice 的四个写方在界面上的说法（结果卡片 / 选文件那一步 / 出错页）。
 import { PICK_KINDS, UNDO_KINDS, noticeView, visibleNotice } from "./simple/copy-notice.ts";
+// r16 — 出错后的分流：服务方自己忙/用完了，和断网不是一回事。
+import { SERVICE_RECOVERY } from "./simple/copy-service.ts";
+import { actionsFor, causeOf } from "./simple/recovery.ts";
 
 // ---------------------------------------------------------------------------
 // Fake bridge — must be installed before store.ts is imported.
@@ -1785,6 +1788,44 @@ describe("夹具驱动的关键界面状态（没有守护进程也能跑）", (
       expect(error?.what).toBe("这件事没有做完。");
       expect(error?.what).not.toContain("429");
       expect(error?.how).toContain("原来的文件都还在");
+      assertInvariants(store);
+    } finally {
+      await fake.close();
+      dispose();
+    }
+  });
+
+  test("服务方欠费停机：真原文进 cause，出路是「过一会儿再试」，不是让她重选文件", async () => {
+    const { store, dispose } = await setup();
+    const fake = startFakeCante({ FAKE_CANTE_TURN_QUOTA: "1" });
+    try {
+      await fake.send({ StartSession: {} });
+      await store.startRun(
+        { id: "excel.merge", title: "把两张表合成一张", plan: ["打开这两张表", "合成一张新表"] },
+        ["/work/report.xlsx"],
+        "把这两张表合成一张",
+      );
+      await store.confirmRun();
+
+      await fake.send({ UserInput: "run the job" });
+      replay(store, await fake.until("TurnEnd"));
+      await Bun.sleep(30);
+
+      const error = store.currentRun()?.error as
+        | { what: string; how: string; detail: string; cause?: string }
+        | null;
+      // 现场那条真原文一个字不美化：留在 cause（判断用）与技术详情里。
+      expect(error?.cause).toContain("insufficient credits");
+      expect(error?.cause).toContain("503");
+      // 给她看的仍然是平实中文，没有英文码。
+      expect(error?.what).not.toContain("credits");
+      expect(error?.what).not.toContain("503");
+
+      // 真正给她的那条路：出错页拿 run.error + causeOf 去分流。
+      const actions = actionsFor({ ...explainError(error), cause: causeOf(error) });
+      expect(actions[0]?.why).toBe(SERVICE_RECOVERY.wait.why);
+      expect(actions.map((item) => item.kind)).toEqual(["retry", "copy-detail"]);
+      expect(actions.at(-1)?.label).toBe(SERVICE_RECOVERY.admin.label);
       assertInvariants(store);
     } finally {
       await fake.close();
