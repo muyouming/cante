@@ -29,14 +29,14 @@
 | 4 | 还原 `runs.json`（`seed-result-rows.ps1 -Mode restore`） | `RESTORE OK` ✓（没留假记录） |
 
 **夹具在 Windows 起得来**（此前没人试过）：`bun.exe` 实际在
-`C:\Users\cante\AppData\Local\Microsoft\WinGet\Links\bun.exe`（不是任务里写的 `tools\bun\`）✓，
+`C:\Users\<用户名>\AppData\Local\Microsoft\WinGet\Links\bun.exe`（不是任务里写的 `tools\bun\`）✓，
 `CANTE_BIN` 用 `"<bun> <script>"` 一段命令的写法即可 ✓。
 
 ---
 
-## 3. 逐字输出（全文见 `C:\Users\cante\r16-ui.txt`）
+## 3. 逐字输出（全文见 `C:\Users\<用户名>\r16-ui.txt`）
 
-界面文本逐字存于 **`C:\Users\cante\r16-ui.txt`**（含首页 + 结果面板两段）。关键两段照抄：
+界面文本逐字存于 **`C:\Users\<用户名>\r16-ui.txt`**（含首页 + 结果面板两段）。关键两段照抄：
 
 ### 3.1 首页（有 3 条结果）
 ```
@@ -104,7 +104,7 @@ ResultCard 上**，历史面板的每一行**没有**这个按钮。这会让"�
 
 - `runs.json`：**已还原**成跑之前那份（`seed-result-rows: RESTORE OK` ✓；`grep seedrun` = 0）。
 - 残留的 `cante-gui/cante-bridge` 进程：**已杀**（现在 `Get-Process cante-gui` 无输出 ✓）。
-- `C:\Users\cante\r16-seed\`（3 份 xlsx + input.csv）留着，方便下一轮继续用；清掉即可。
+- `C:\Users\<用户名>\r16-seed\`（3 份 xlsx + input.csv）留着，方便下一轮继续用；清掉即可。
 - 全程**没有 `cargo build`**、**没有改仓库任何文件** ✓。
 
 ## 8. 时限
