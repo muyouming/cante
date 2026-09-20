@@ -92,7 +92,7 @@ for f in \
 ; do if [ -e "$f" ]; then echo "EXISTS  $f"; else echo "MISSING $f"; fi; done
 ```
 
-输出（节选，只留非 EXISTS 与关键行——完整输出 37 行，仅 `verify-bundle.sh` 一行不达标）：
+输出（节选，只留非 EXISTS 与关键行——完整输出 39 行，仅 `verify-bundle.sh` 一行不达标）：
 
 ```
 EXISTS  gui/scripts/zoom/driver.py
