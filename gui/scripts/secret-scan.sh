@@ -6,8 +6,16 @@
 #
 #   bash gui/scripts/secret-scan.sh
 #
-# 只扫 git 跟踪的文件（git ls-files），所以构建产物、node_modules、target 天然不在范围里
-# —— 那些目录根本不该被跟踪，扫它们只会制造噪音。
+# 扫"会被提交的东西"：已跟踪的文件 **加上** 还没跟踪但没被 gitignore 的新文件。
+#
+# 为什么必须含未跟踪的那部分（这是一次真事故换来的）：
+#   起初只扫 `git ls-files`（＝只扫已跟踪）。于是**刚写出来、还没 git add 的新文件根本不在扫描范围里** ✗。
+#   一次 PR 里，agent 自己跑 `e2e.sh`（第一步就是这个扫描）得到 OK，因为那个测试文件当时**还没被跟踪**；
+#   等到 CI 上文件已提交，同一个扫描立刻抓到「本机家目录字面量」并红 ✗ ——
+#   本地绿、CI 红，差一点就这么合进 main。
+#   现在用 `--cached --others --exclude-standard`：已跟踪的 + 未跟踪但未被忽略的；
+#   构建产物 / node_modules / target 仍然不在范围里（它们被 gitignore 忽略），噪音不会回来。
+#   —— 扫的始终是"提交之后会被看到的东西"。
 #
 # 命中就红（退出码 1），并打印 `文件:行号: 命中了什么`。
 # 白名单是 gui/scripts/secret-scan.allow：每一行都必须有紧邻上方的 # 注释写原因，
@@ -182,7 +190,8 @@ emit_hit() { # 规则 标签 路径 行号 命中片段
 scan_bulk() {
   local rule="$1" label="$2" regex="$3" filter="${4:-}"
   local hits hit path line match rest
-  hits="$(git ls-files -z | xargs -0 grep -nIoHE -e "$regex" 2>/dev/null | sort -u || true)"
+  hits="$(git ls-files -z --cached --others --exclude-standard \
+    | xargs -0 grep -nIoHE -e "$regex" 2>/dev/null | sort -u || true)"
   [ -z "$hits" ] && return 0
   while IFS= read -r hit; do
     [ -z "$hit" ] && continue
