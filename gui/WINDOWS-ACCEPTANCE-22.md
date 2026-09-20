@@ -330,6 +330,16 @@ Tab 没落到面板里）。所以**这一条只能写"没抓到"** ✗ ——
    会被念 **25.6 秒**"。**Narrator 实际一次都没念它** —— `ListItem` **不可 Tab**
    （`focusable=False`），键盘走不到，读屏也就不念。**教训**：读屏念什么**取决于它怎么走**，
    不是"树里有什么"。**这一轮的 ETW 就是来纠这个的。**
+   > **同一个坑的另一面（另一位 agent 独立挖出来的，值得并在这里）**：UIA 有三个视图 ——
+   > `RawView`（一切节点）/ **`ControlView`（控件）** / `ContentView`（内容），
+   > **读屏念的是后两个**。用 `RawView` 数节点，会把 `IsControlElement=False` 的
+   > **布局节点也算进去**；据那位 agent 的报告，首页 `RawView` 146 个里 "74 个是布局节点"、
+   > `ControlView` 只有 72 个 ——
+   > **那个 146/74/72 是他们的数字，我没逐个数过**（我自己的对照跑出了同样的**机制**：
+   > RawView 里有大量 `IsControlElement=False`，ControlView 里为 0，但我那一次没走到首页，
+   > 所以**不把数字当我的**）。两人一致的是**机制**：同一句标题在 `RawView` 里数到两次、
+   > `ControlView` 里只一次 —— 那是**遍历视图的产物，不是产品缺陷**。
+   > 另一位那份报告专门验了它，**两份合起来才是完整的**。
 2. **路径少算一层 → 静默验了旧应用**：脚本在 `windows\a11y\`（比 `a11y-uia.ps1` 多一层），
    第一版 `..\..` 算成 `gui\scripts`，找不到现构建就**回退到装好的那份** ——
    于是看到的是**修复前**的按钮名，差一点写成"#230 没生效"✗。
@@ -402,6 +412,7 @@ Tab 没落到面板里）。所以**这一条只能写"没抓到"** ✗ ——
 | `gui/scripts/windows/a11y/probe-narrator-confirm.ps1` | **补的第三屏**：抓 Narrator 念**确认页**的 ETW（1992 事件 / 90 条 `SpokenText`，§2.4） |
 | `gui/scripts/windows/a11y/probe-confirm-speech-durations.ps1` | 量确认页那四条句子的时长（§2.4：复选框 45 字 / 11.1 秒） |
 | `gui/scripts/windows/a11y/probe-narrator-confirm-scanmode.ps1` | 试"扫描模式能不能念到计划正文" —— **没做成**（它打开了 Narrator 自己的窗口，§5 第 10 条） |
+| `gui/scripts/windows/a11y/probe-view-counts.ps1` | 自查用：同一棵树上走 **RawView** 与 **ControlView**，报 `IsControlElement=False` 的数量（解释为什么 UIA 清单会高估，§4 坑 1） |
 | `gui/scripts/windows/a11y/probe-narrator-any-app.ps1` | 同一抓法但可指定 exe（用来做"旧版 vs 新版"对照；本轮旧版那次**没抓到**，§3.1） |
 | `gui/scripts/windows/a11y/narrate-script.ps1` | **对照用**：只按 UIA 树算"会念什么"（本轮证明它**会高估**，坑 1） |
 | `gui/scripts/windows/a11y/probe-actual-speech-durations.ps1` | 把 **Narrator 实际要念的句子**交给本机中文语音，量时长（§3.3） |
@@ -415,18 +426,18 @@ Tab 没落到面板里）。所以**这一条只能写"没抓到"** ✗ ——
 > **⚠️ 归属说明（必须写清，免得下次读的人以为是同一个人干的）**：
 > `gui/scripts/windows/a11y/` 这个目录是**两个 agent 在同一个 worktree 里先后留下的**
 > （两边被派了同一件活，没有通气，各跑各的）。按**另一位 agent 自己的说明**与他/我那批文件的
-> 时间戳分，一共 **23 个脚本**：
+> 时间戳分，一共 **24 个脚本**：
 >
 > - **另一位写的（8 个）**：`probe-narrator.ps1`、`probe-narrator-logs.ps1`、
 >   `probe-narrator-elevated.ps1`、`probe-audio-etw.ps1`、`probe-focus-follow.ps1`、
 >   `extract-narrator-speech.mjs`、`probe-narrator-our-app.ps1`、`extract-narrator-our-app.mjs`；
-> - **本报告作者写的（15 个）**：`narrate-script.ps1`、`probe-wizard-flow.ps1`、
+> - **本报告作者写的（16 个）**：`narrate-script.ps1`、`probe-wizard-flow.ps1`、
 >   `probe-panel-structure.ps1`、`probe-narrator-and-tts.ps1`、`probe-narrator-why.ps1`、
 >   `probe-filename-speech.ps1`、`probe-jarring-parts.ps1`、`probe-tts-duration.ps1`、
 >   `probe-top3-speech.ps1`、`probe-narrator-any-app.ps1`、`probe-narrator-results.ps1`、
 >   `probe-actual-speech-durations.ps1`、**`probe-narrator-confirm.ps1`**、
->   **`probe-confirm-speech-durations.ps1`**、**`probe-narrator-confirm-scanmode.ps1`**
->   （后三个是补第三屏时新写的）。
+>   **`probe-confirm-speech-durations.ps1`**、**`probe-narrator-confirm-scanmode.ps1`**、
+>   **`probe-view-counts.ps1`**（后四个是补第三屏 / 核视图差异时新写的）。
 >
 > **§2 那一轮 ETW 的两份抓包（`results.etl/xml`、`our-app.etl/xml`）是本报告作者自己跑的**
 > （`probe-narrator-results.ps1`；首页那份是**复跑** `probe-narrator-our-app.ps1`，

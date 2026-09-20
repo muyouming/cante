@@ -88,7 +88,12 @@ public class NW {
 "@
 $AE = [System.Windows.Automation.AutomationElement]
 $TS = [System.Windows.Automation.TreeScope]
-# RawViewWalker：包含**所有**元素（含纯文本），是读屏走的那条；ControlView 会漏掉正文。
+# **读屏走 ControlView（和 ContentView），不是 RawView**。
+# 这里用 RawView 是因为本脚本只想**枚举出树里有哪些节点**（一份"可能被念的东西"清单）；
+# 但 **RawView 会把 `IsControlElement=False` 的布局节点也算进去**，而那些读屏**不念**。
+# 所以：**本脚本的输出会高估"会被念出来"的数量** —— 要看"真念什么"，以 ETW 抓的
+# `SpokenText` 为准（probe-narrator-*.ps1）。要用视图对比自查，跑 `probe-view-counts.ps1`
+# （它会同时走 RawView 与 ControlView 并报 `IsControlElement=False` 的数量）。
 $RAW = [System.Windows.Automation.TreeWalker]::RawViewWalker
 $CV = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 
