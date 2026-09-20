@@ -23,6 +23,7 @@ import Home from "./simple/Home.tsx";
 import Wizard, { shouldShowWizard } from "./simple/Wizard.tsx";
 import { freeTask, type TaskDef } from "./simple/tasks/index.ts";
 import { initCapabilities } from "./simple/capabilities.ts";
+import { PASTES_CONTENT_GROUP } from "./simple/copy-files.ts";
 import History from "./simple/History.tsx";
 import PrivacyPanel from "./simple/PrivacyPanel.tsx";
 import TaskRunner from "./simple/TaskRunner.tsx";
@@ -239,7 +240,7 @@ export default function App(): JSX.Element {
     <SimpleApp
       store={store}
       renderTask={(task, instruction, onExit) =>
-        task?.group === "微信" ? (
+        task?.group === PASTES_CONTENT_GROUP ? (
           <WechatImport store={store} />
         ) : (
           <TaskRunner
