@@ -25,8 +25,9 @@ const read = (name: string): string => readFileSync(join(HERE, name), "utf8");
 
 const TASK = "excel.merge";
 const OTHER = "pdf.merge";
-/** 带文件夹的一整串位置：用来证明界面上只出现文件名，不出现完整位置。 */
-const RESULT_PATH = "C:/Users/王姐/桌面/结果_合并.xlsx";
+// 带文件夹的一整串位置：用来证明界面上只出现文件名，不出现完整位置。
+// 用户名用文档占位写法（不是真机器），但前缀是真的 —— 真泄露了断言就会红。
+const RESULT_PATH = "C:/Users/用户名/桌面/结果_合并.xlsx";
 const WHEN_MS = 1_800_000_000_000;
 
 function result(path: string): RunResult {

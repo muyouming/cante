@@ -9,7 +9,7 @@
 | 验证 | 怎么跑 | 看什么当证据 | 什么**不**覆盖 ✗ |
 | --- | --- | --- | --- |
 | **完整本地门禁（9 步）** | `bash gui/scripts/e2e.sh` | 每步的原始输出；任一步红即停 | 真 Windows 才能验的东西（见第二节）✗ |
-| 秘密扫描（第 1 步） | `bash gui/scripts/secret-scan.sh` | 命中的 `文件:行` + 它打印的原因 ✓ | 未跟踪文件（扫描只扫 `git ls-files` 里的 ✓）|
+| 秘密扫描（第 1 步） | `bash gui/scripts/secret-scan.sh` | 命中的 `文件:行` + 它打印的原因 ✓ | **曾经**只扫已跟踪文件 ✗ —— 刚写出来、还没 `git add` 的新文件不在范围里 ✓，于是**本地绿、CI 红**（真发生过一次：agent 跑 `e2e.sh` 得 OK，CI 上文件已提交，同一个扫描立刻红 ✗）。已改成 `--cached --others --exclude-standard` ✓（未跟踪但未被忽略的也扫 ✓；`node_modules`/产物仍被 gitignore 挡住 ✓）|
 | 许可清单是否过期（第 3 步） | `bash gui/scripts/license-inventory.sh --check` | 变了哪几个组件（版本/许可/新增/删除）✓ | 许可**原文**是否齐全（那是生成物里的事 ✓）|
 | 界面三屏 + 键盘 + 两种窗口尺寸 + 确认页「先给我看一眼」 | `bash gui/scripts/dom-smoke.sh`（**也是 e2e 第 9 步** ✓，所以本地与 CI 都跑 ✓） | 每屏的可见文字、键盘走查、两个尺寸的版面数字、确认页上那一块**向上到 `[role=dialog]` 有没有会滚的祖先** ✓ | **Windows 上不跑** ✗（脚本检测到 Windows 会**打印原因并退出码 0** ✓，**不是通过校验** ✗）：驱动的是 Google Chrome，而 Chrome 在 Windows 上是 GUI 子系统程序，Git Bash 读不到它的输出（在 windows-latest 上把这一步挂死过 ✗）；Windows 那一面由下面的真 WebView2 冒烟覆盖 ✓。另：**显示缩放**（125%/150%）✗（下面那条单独量 ✓）、真 WebView2 ✗；Linux `gate` job 的 Chrome 与她的 Windows 上真跑的 WebView2 **不是同一个渲染器** ✗ |
 | **显示缩放（125%/150%）下的版面** | `python3 gui/scripts/zoom/driver.py`（先 `bun run build:web` ✓；`ZOOM_STUB_RUNS=N` 量「她已经做过一轮」那一面 ✓） | 逐场景的字号 ✓ / 按钮可点高度 ≥44 ✓ / 横向滚动 ✗ / **真的够不着**的控件数 ✓ / 底部固定输入区占比 ✓ | **真实 Windows 缩放的观感** ✗、**真 WebView2** ✗、非整数缩放的取整 ✗（都是建模 ✓，见脚本头注释 ✓）|
