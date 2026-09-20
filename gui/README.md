@@ -330,9 +330,13 @@ the real input is always larger than what the script reports. Use it to compare
 before/after, not to predict an invoice.
 
 Run it before and after a prompt change and put both numbers in the pull request.
-The numbers as of 2026-09, for 32 cards with one selected file: **1,288 characters
-/ ~1,179 tokens** per card with no capability sections, **2,616 / ~2,101** with
-them. The capability sections alone are 1,328 characters (≈51% of the
-instruction) and the cante-sheets manual (753) is the single largest block —
-larger than the card's own instructions (569). Both duplication scans come back
-empty: nothing is written twice inside an instruction.
+The numbers as of 2026-09, for every card in `TASKS` with one selected file:
+**1,319 characters / ~1,209 tokens** per card with no capability sections,
+**2,647 / ~2,131** with them. The capability sections alone are 1,328 characters
+(≈50% of the instruction) and the cante-sheets manual (753) is the single largest
+block — larger than the card's own instructions (582). Both duplication scans come
+back empty: nothing is written twice inside an instruction.
+
+(Those per-card figures move as the catalogue grows; read the live ones off the
+script. `src/docs-consistency.test.ts` keeps any hard-coded card count in this
+file and `CONTRACT.md` equal to `TASKS.length`.)
