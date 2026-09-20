@@ -133,8 +133,9 @@ describe("我做的结果：每一行的按钮名字都能分清是哪一份", (
   test("每个按钮一个不同的名字（行数越多，名字越多）", async () => {
     const names = await renderedButtonNames();
     const rows = FILE_NAMES.length;
-    // 每行两个按钮：打开文件、打开所在文件夹。
-    expect(names).toHaveLength(rows * 2);
+    // 每行三个按钮：打开文件、打开所在文件夹、复制位置（r16 加的第三步，见
+    // results-panel.test.ts）。数字仍然是等值断言：按钮多一个少一个都要人来看一眼。
+    expect(names).toHaveLength(rows * 3);
     const distinct = new Set(names);
     if (distinct.size !== names.length) {
       const repeated = [...distinct].filter((name) => names.filter((item) => item === name).length > 1);
@@ -182,12 +183,12 @@ describe("我做的结果：每一行的按钮名字都能分清是哪一份", (
     if (problems.length > 0) throw new Error([...new Set(problems)].join("\n"));
   });
 
-  test("同一行里两个按钮的名字也不一样（打开文件 vs 打开所在文件夹）", async () => {
+  test("同一行里三个按钮的名字两两都不一样（打开文件 / 打开所在文件夹 / 复制位置）", async () => {
     const names = await renderedButtonNames();
     for (let row = 0; row < FILE_NAMES.length; row += 1) {
-      const first = names[row * 2]!;
-      const second = names[row * 2 + 1]!;
-      expect(first).not.toBe(second);
+      const inRow = names.slice(row * 3, row * 3 + 3);
+      expect(inRow).toHaveLength(3);
+      expect(new Set(inRow).size).toBe(3);
     }
   });
 });
