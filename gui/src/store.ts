@@ -1086,23 +1086,41 @@ export function createStore(): Store {
     }
   }
 
+  // 她手快 / 会紧张：同一个按钮连点两次，不该开出两个窗口。
+  //
+  // 为什么要在 store 这一层防（而不是只 disabled 按钮）：这两个动作**天然是异步**的
+  // —— 第一次的 invoke 还没回来，第二次已经按下去了。按钮的 disabled 要等一次渲染，
+  // 中间那一瞬照样能点中。用「同一个 path 正在打开中就忽略」这一条挡住它。
+  //
+  // 为什么按 path 而不是一个全局的"忙"标志：她**不同**的两份结果各点一次是正常的
+  // 用法，不该被互相挡住。
+  const opening = new Set<string>();
+
   async function openPath(path: string): Promise<void> {
     if (!path) return;
+    if (opening.has(path)) return;
+    opening.add(path);
     try {
       await invokeOp("open_path", { path });
       setNotice(null);
     } catch (error) {
       setNotice(`打不开这个文件。你可以自己找到它再双击打开。${trustDetail(error)}`);
+    } finally {
+      opening.delete(path);
     }
   }
 
   async function revealPath(path: string): Promise<void> {
     if (!path) return;
+    if (opening.has(path)) return;
+    opening.add(path);
     try {
       await invokeOp("reveal_path", { path });
       setNotice(null);
     } catch (error) {
       setNotice(`打不开它所在的文件夹。${trustDetail(error)}`);
+    } finally {
+      opening.delete(path);
     }
   }
 

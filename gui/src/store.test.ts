@@ -1896,3 +1896,43 @@ describe("#140 notice 的四个写方在界面上都有话说", () => {
     }
   });
 });
+
+describe("她手快、连点两次：同一个文件不会开出两个窗口", () => {
+  // 这两个动作天然是异步的：第一次的 invoke 还没回来，第二次已经按下去了。
+  // 按钮的 disabled 要等一次渲染，中间那一瞬照样能点中 —— 所以在 store 这一层挡。
+  test("同一个 path 连点两次，只发一次（打开文件）", async () => {
+    const { store, dispose } = await setup();
+    try {
+      store.openPath("/work/结果.xlsx");
+      store.openPath("/work/结果.xlsx");
+      await Bun.sleep(10);
+      expect(opCalls("open_path")).toHaveLength(1);
+    } finally {
+      dispose();
+    }
+  });
+
+  test("不同 path 各点一次，两次都发（互相不该被挡住）", async () => {
+    const { store, dispose } = await setup();
+    try {
+      store.openPath("/work/一.xlsx");
+      store.openPath("/work/二.xlsx");
+      await Bun.sleep(10);
+      expect(opCalls("open_path")).toHaveLength(2);
+    } finally {
+      dispose();
+    }
+  });
+
+  test("同一个 path 连点两次，只发一次（打开所在文件夹）", async () => {
+    const { store, dispose } = await setup();
+    try {
+      store.revealPath("/work/结果.xlsx");
+      store.revealPath("/work/结果.xlsx");
+      await Bun.sleep(10);
+      expect(opCalls("reveal_path")).toHaveLength(1);
+    } finally {
+      dispose();
+    }
+  });
+});
