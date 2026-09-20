@@ -94,6 +94,11 @@ $TS = [System.Windows.Automation.TreeScope]
 # 所以：**本脚本的输出会高估"会被念出来"的数量** —— 要看"真念什么"，以 ETW 抓的
 # `SpokenText` 为准（probe-narrator-*.ps1）。要用视图对比自查，跑 `probe-view-counts.ps1`
 # （它会同时走 RawView 与 ControlView 并报 `IsControlElement=False` 的数量）。
+#
+# 两句要点（合起来才准）：① 读屏念的是 `ControlView`/`ContentView`，不是 `RawView`；
+# ② **念哪一个由焦点与事件决定，不是遍历整棵树** —— 实测对照：结果面板树里 **9 个**标题节点，
+# 而 ETW 里 Narrator **实际只宣告了 1 个**（9 → 1）。所以即使是 ControlView 的 72/146，
+# 也只是"候选集"，**都不等于她听到多少**。
 $RAW = [System.Windows.Automation.TreeWalker]::RawViewWalker
 $CV = [System.Windows.Automation.TreeWalker]::ControlViewWalker
 
