@@ -705,9 +705,12 @@ in catalogue but NOT in sweep plan: doc.worksummary
 ### 两次查错，各是什么
 1. **第一次（已记在 #247 里）**：拿 **exe 的文件时间**去判断新旧 —— 02:27 的构建，
    里面没有 #239 新加的文案。那一轮已作废 ✓。
-2. **第二次（本轮，我自己踩的）**：我看的是 **`cante-gui.exe` 的字节** ✗。**exe 里本来就没有界面文案**
-   ✗ —— 前端资源是**另外的 `dist/assets/*.js`** ✓，Tauri 在**构建时**把它们编进去，
-   查壳文件的字节查不到 ✓。用这条路我得到"全 False"✗，**差一点又把一个正常构建记成有问题** ✗。
+2. **第二次（本轮，我自己踩的）**：我看的是 **`cante-gui.exe` 的字节** ✗，去找界面文案。
+   **查不到** ✓，而且**永远查不到** ✓ —— 原因比"编在别的文件里"更具体 ✓（这是 Windows 侧
+   #261 那一轮给出的一手事实 ✓）：**前端资源是 brotli 压缩之后嵌进 exe 的** ✓，
+   所以按**明文**匹配必然不命中 ✓；**已知正常**的装机版同样不命中 ✓（这一点很关键：
+   它说明"不命中"**不能**用来证明产物有问题 ✗）。
+   用它我得到"全 False" ✗，**差一点又把一个正常构建记成有问题** ✗。
 
 ### 可复用的核对步骤（**先做这三步，再下任何结论**）
 ```powershell
@@ -715,6 +718,7 @@ in catalogue but NOT in sweep plan: doc.worksummary
 (Get-Item <工作树>\gui\src-tauri\target\release\cante-gui.exe).LastWriteTime
 
 # ② 前端资源编出来了，而且**含这一轮新加的文案**吗（查 dist，不查 exe）
+#    —— exe 里**永远**查不到：前端资源是 brotli 压缩后嵌进去的（#261 的一手事实）
 #    中文在 .ps1 里会踩编码坑，用码点拼出来，别把中文写进脚本
 $p = [string]::Join('', [char]0x4E00, [char]0x5171)          # 「一共」
 foreach ($f in (Get-ChildItem <工作树>\gui\dist\assets\*.js)) {
