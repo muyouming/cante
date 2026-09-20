@@ -254,6 +254,15 @@ Tab 没落到面板里）。所以**这一条只能写"没抓到"** ✗ ——
    `home` 1 次。没有做到"各 3 次一致"。
 6. **只有 WebView2 这一种宿主** ✗ —— 换宿主（macOS WKWebView 或将来换运行时）UIA/Narrator
    的行为可能不同，**没验**。
+7. **⚠️ 这个 worktree 同时有两个 agent 在跑（同一条任务）** ✗ —— 两边被派了同一件活且没通气，
+   在同一份 `a11y/` 目录里各写各的脚本，并且**共用这台机器上唯一那份应用与 WebView2 档案**
+   （我们各自会杀 `cante-gui`、清 `dev.cante.gui`）。
+   **风险（已发生，记录在案）**：我的脚本会**清掉对方正在用的应用档案**，对方的探针也会清我的；
+   §3.1 那次「旧版没抓到」就有可能是**对方的进程把我的焦点/窗口状态挤掉**所致 —— **我无法区分**，
+   所以那一条我写的是「没抓到」，**没有**下任何因果结论。
+   **谁受影响**：§2/§3 的读数如果出问题，首先怀疑这里；**但 §2 的关键结论有双份独立复现**
+   （台账见 §6 的归属说明），所以它站得住。
+   **属实的代价**：§5 第 4 条（`ListItem` 不被念）**只验过一次**，没有第二个人复核。
 7. **"扫描""输入法""窗口标题"那些噪音不该算产品问题，但我没法从 Cante 侧关掉它们** ✗ ——
    我只报告它们**挤进了朗读流**（§3.2），**没有**验"能不能在应用侧减少"。
 
@@ -275,9 +284,30 @@ Tab 没落到面板里）。所以**这一条只能写"没抓到"** ✗ ——
 （仓库的 `src/script-encoding.test.ts` 门槛扫过 —— 它当场抓出目录里一个**没带 BOM** 的
 `probe-focus-follow.ps1`，本轮已补上；`bun test src` 现在是 **1002 pass / 0 fail**）。
 
-> **说明**：`gui/scripts/windows/a11y/` 目录里一共 **20 个脚本**（含本轮更早的探路版本），
-> 上表只列了**读这份报告需要的**那几个。目录里其余的是同一调查过程的中间探针
-> （例如先用事件日志找 Narrator、先试提权建 ETW 会话等），都在同一个门槛下过了一遍。
+> **⚠️ 归属说明（必须写清，免得下次读的人以为是同一个人干的）**：
+> `gui/scripts/windows/a11y/` 这个目录是**两个 agent 在同一个 worktree 里先后留下的**
+> （两边被派了同一件活，没有通气，各跑各的）。按**另一位 agent 自己的说明**与他/我那批文件的
+> 时间戳分，一共 **20 个脚本**：
+>
+> - **另一位写的（8 个）**：`probe-narrator.ps1`、`probe-narrator-logs.ps1`、
+>   `probe-narrator-elevated.ps1`、`probe-audio-etw.ps1`、`probe-focus-follow.ps1`、
+>   `extract-narrator-speech.mjs`、`probe-narrator-our-app.ps1`、`extract-narrator-our-app.mjs`；
+> - **本报告作者写的（12 个）**：`narrate-script.ps1`、`probe-wizard-flow.ps1`、
+>   `probe-panel-structure.ps1`、`probe-narrator-and-tts.ps1`、`probe-narrator-why.ps1`、
+>   `probe-filename-speech.ps1`、`probe-jarring-parts.ps1`、`probe-tts-duration.ps1`、
+>   `probe-top3-speech.ps1`、`probe-narrator-any-app.ps1`、`probe-narrator-results.ps1`、
+>   `probe-actual-speech-durations.ps1`。
+>
+> **§2 那一轮 ETW 的两份抓包（`results.etl/xml`、`our-app.etl/xml`）是本报告作者自己跑的**
+> （`probe-narrator-results.ps1`；首页那份是**复跑** `probe-narrator-our-app.ps1`，
+> 1813 事件，比另一位那次更大）。
+> **⚠️ 一次被覆盖要记下来**：另一位在 **07:34** 先跑过一轮 `our-app.etl/xml`，
+> 我 07:47 复跑时**把它们同名覆盖了**（他/她的分析结果还在 `etw-summary.txt`）。
+> `narrator2.etl/xml`（07:23）是另一位先跑的、**没被动过**。
+> **两条路各自独立到达了同一方法**（provider 名字建 ETW 会话 → 读 `SpokenText`），
+> 而且两边抽到的首页句子**互相印证**（都是「历史/隐私/关于/打开我做的结果…, 按钮,」）——
+> 所以 §2 的结论有**双份独立复现** ✓，这一点本身是强度，不是重复劳动。
+> 下表的“作用”只描述**那份文件干什么**，不声明归属。
 
 **建议的下一步**：
 1. **接一台有声卡的机器**，把"真的出声"补上 —— 这是本轮的根本缺口（§5 第 1 条）。
