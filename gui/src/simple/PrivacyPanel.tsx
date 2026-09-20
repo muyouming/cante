@@ -14,17 +14,18 @@ import type { JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
 import { SENT, WHEN } from "./copy-privacy-audit.ts";
-import type { TaskRun } from "./run.ts";
+import { formatWhen, type TaskRun } from "./run.ts";
 import {
   DEFAULT_PRIVACY,
   latestSentRun,
   localOnlyHint,
   privacyAnswers,
-  sentContentView,
-  sentTextFor,
+  sentHistoryView,
+  sentTurnsFor,
   webSearchHint,
   type PrivacyState,
-  type SentContentView,
+  type SentHistoryView,
+  type SentTurn,
 } from "./privacy.ts";
 
 export interface PrivacyPanelProps {
@@ -91,27 +92,64 @@ export interface SentContentSectionProps {
 }
 
 /**
- * 「这次发出去了什么」。默认折叠：先给一句摘要，点开才是原文，免得一屏大字吓到她。
+ * 展开后的全部历史：每一轮真正发出去的文字，按发生先后的顺序（最早在前），
+ * 每一段自己带抬头（第几次、什么时候发的）。
  *
- * 这里显示的文字**逐字**取自 `store.composedInstruction(run)` 再加上这次真正会发生的那一段后缀
- * （见 `sentTextFor`：试跑 / 覆盖同意），也就是真正发出去的那一段；**不读任何本地文件内容**
- * ——展示的是「发出去的文字」，不是「文件里有什么」。ResultCard 也 import 这个组件，因为她
- * 刚做完一件事时最想问的就是「刚才发了什么」。
+ * 单独一个组件只为一件事：服务端渲染没有点击，测试要把「展开后到底铺出什么、
+ * 什么顺序」真的渲染一遍才看得见（见 privacy.test.ts）。生产路径也用它，所以
+ * 渲染出来的就是她点开看到的那一份，不是另做一份专供测试的。
+ */
+export function SentTurnsList(props: { turns: readonly SentTurn[] }): JSX.Element {
+  return (
+    <div class="flex flex-col gap-2">
+      <For each={props.turns}>
+        {(turn, index) => (
+          <div class="flex flex-col gap-1">
+            <span class="text-[16px] leading-6 text-slate-400">
+              {SENT.turnHeading(index() + 1, formatWhen(turn.at), index() === props.turns.length - 1)}
+            </span>
+            <pre class="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-slate-700 bg-[#0b0f14] px-3 py-2 text-[16px] leading-relaxed text-slate-200">
+              {turn.text}
+            </pre>
+          </div>
+        )}
+      </For>
+    </div>
+  );
+}
+
+/**
+ * 「这次发出去了什么」。默认折叠：先给一句摘要（问的是**最近一次**），点开才是那段原文，
+ * 免得一屏大字吓到她。追问过几轮之后，下面多一行「之前还发过 N 次」，点开是每一轮的原文。
+ *
+ * 这里显示的文字**逐字**来自 store 真正记下来的那几轮（`store.sentTurns`：确认页一次 +
+ * 每次追问各一次，含试跑 / 覆盖同意那两段后缀），也就是真正发出去的那一段一段；旧记录
+ * 没有记账时才退回 `composedInstruction` + `sentTextFor`（和旧版面板一模一样）。
+ * **不读任何本地文件内容**——展示的是「发出去的文字」，不是「文件里有什么」。ResultCard
+ * 也 import 这个组件，因为她刚做完一件事时最想问的就是「刚才发了什么」。
  */
 export function SentContentSection(props: SentContentSectionProps): JSX.Element {
   const [open, setOpen] = createSignal(false);
+  const [historyOpen, setHistoryOpen] = createSignal(false);
   const run = (): TaskRun | null => (props.run === undefined ? latestRun(props.store) : props.run);
-  const view = (): SentContentView => {
+  /**
+   * 这个运行每一轮真正发出去的文字。
+   *
+   * 优先用 store 记账的那串（见 `sentTurnsFor`）；`composedInstruction` 的 `?? null`
+   * 保持在原处：store 还没接上它时，这一段必须如实说「还没有做过任务」，而不是拿一段
+   * 空文字冒充「发出去的就是这个」。
+   */
+  const turns = (): SentTurn[] => {
     const current = run();
-    if (!current) return sentContentView(null);
-    // `?? null` 保持在原处：store 还没接上 `composedInstruction` 时，这一段必须如实说
-    // 「还没有做过任务」，而不是拿一段空文字冒充「发出去的就是这个」。
-    const composed = props.store.composedInstruction?.(current) ?? null;
-    return sentContentView({
-      text: composed === null ? null : sentTextFor(current, composed),
-      online: current.online,
-    });
+    if (!current) return [];
+    return sentTurnsFor(
+      current,
+      props.store.sentTurns?.(current.id),
+      props.store.composedInstruction?.(current) ?? null,
+    );
   };
+  const view = (): SentHistoryView =>
+    sentHistoryView({ turns: turns(), online: run()?.online ?? false });
   return (
     <section
       class="flex flex-col gap-2 rounded-lg border border-slate-800 bg-[#0e141b] p-3"
@@ -123,9 +161,14 @@ export function SentContentSection(props: SentContentSectionProps): JSX.Element 
         when={view().state === "sent"}
         fallback={<p class="text-[16px] leading-6 text-slate-200">{view().message}</p>}
       >
+        <Show when={view().earlierCount > 0}>
+          <p class="text-[16px] leading-6 text-slate-400">{SENT.textGoesLatest}</p>
+        </Show>
         <p class="text-[16px] leading-6 text-slate-400">{SENT.textGoes}</p>
         <p class="text-[16px] leading-6 text-slate-400">{SENT.textIsLocal}</p>
-        <p class="text-[16px] leading-6 text-slate-200">{view().summary}</p>
+        <p class="text-[16px] leading-6 text-slate-200">
+          {view().earlierCount > 0 ? SENT.latestSummary(view().summary) : view().summary}
+        </p>
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
@@ -137,6 +180,19 @@ export function SentContentSection(props: SentContentSectionProps): JSX.Element 
           <pre class="max-h-64 overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-slate-700 bg-[#0b0f14] px-3 py-2 text-[16px] leading-relaxed text-slate-200">
             {view().text}
           </pre>
+        </Show>
+        <Show when={view().earlierCount > 0}>
+          <p class="text-[16px] leading-6 text-slate-400">{SENT.earlier(view().earlierCount)}</p>
+          <button
+            type="button"
+            onClick={() => setHistoryOpen((value) => !value)}
+            class="min-h-[44px] self-start rounded-lg border border-slate-600 px-4 text-[16px] font-semibold text-slate-100 hover:bg-slate-800"
+          >
+            {historyOpen() ? SENT.historyHide : SENT.historyShow}
+          </button>
+          <Show when={historyOpen()}>
+            <SentTurnsList turns={view().turns} />
+          </Show>
         </Show>
       </Show>
     </section>

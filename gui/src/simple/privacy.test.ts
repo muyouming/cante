@@ -13,6 +13,7 @@ import {
   WECHAT_SAFETY_NOTICE,
   latestSentRun,
   localOnlyHint,
+  normalizeSentTurns,
   onlineHint,
   onlineLabel,
   persistLocalOnly,
@@ -20,16 +21,55 @@ import {
   readLocalOnly,
   runIsOnline,
   sentContentView,
+  sentHistoryView,
   sentTextFor,
   sentTextParts,
+  sentTurnsFor,
   webSearchHint,
   type PrivacyState,
 } from "./privacy.ts";
 import { SENT, WHEN } from "./copy-privacy-audit.ts";
-import { dryRunInstruction } from "./run.ts";
+import { dryRunInstruction, formatWhen } from "./run.ts";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createStore } from "../store.ts";
+
+// 面板「展开历史」那一段真的渲染一遍才看得见（服务端渲染没有点击）。bun 自带的 JSX
+// 会把 .tsx 转成 React（实测 tsconfig 的 jsxImportSource 不生效），所以和
+// path-for-her / results-names 一样挂一个 vite-plugin-solid 的 SSR 转译钩子。
+import { plugin } from "bun";
+import solidPlugin from "vite-plugin-solid";
+
+const transformTsx = (() => {
+  const pluginInstance = solidPlugin({ ssr: true, solid: { hydratable: false } }) as any;
+  return async (path: string): Promise<string> => {
+    const source = await Bun.file(path).text();
+    const context = {
+      environment: { config: { consumer: "server" } },
+      error: (error: unknown): never => {
+        throw error;
+      },
+      warn: (): void => {},
+      addWatchFile: (): void => {},
+      meta: {},
+    };
+    const result = await pluginInstance.transform.call(context, source, path, { ssr: true });
+    if (!result || typeof result.code !== "string") {
+      throw new Error(`vite-plugin-solid 没有把 ${path} 编出代码`);
+    }
+    return result.code;
+  };
+})();
+
+plugin({
+  name: "cante-privacy-turns-ssr",
+  setup(build) {
+    build.onLoad({ filter: /\.tsx$/ }, async (args) => ({
+      contents: await transformTsx(args.path),
+      loader: "ts",
+    }));
+  },
+});
 
 /** Words this audience does not know; none may appear in user-facing copy. */
 const FORBIDDEN = [
@@ -364,13 +404,124 @@ describe("发出去的那段文字：普通 / 试跑 / 覆盖同意", () => {
     }
   });
 
-  test("面板组件真的用了 sentTextFor，不是又回到只展示 composedInstruction", () => {
+  test("面板组件读的是 store 记下来的每一轮（sentTurns），不是又回到只展示确认页那段", () => {
     // 真机上验过面板 DOM == app→bridge 管道里的 UserInput == bridge→pi 的 prompt（三份
-    // sha256 相同）。但那条证据只覆盖「组件确实接上了」这一刻；组件若被改回只展示
-    // composedInstruction，那两条带后缀的路会重新开始少报。所以这里扫源码把接线钉住。
+    // sha256 相同）。但那条证据只覆盖「组件确实接上了」这一刻；组件若被改回只读
+    // composedInstruction，追问那一段（真正发出去的字节）会重新看不见。所以扫源码钉住：
+    // 默认视图取自 store 记下的轮次，记账为空（旧任务）时才退回 composedInstruction，
+    // 而退回那条路仍经 sentTurnsFor→sentTextFor 把试跑 / 覆盖同意那两段后缀算进去。
     const panel = readFileSync(join(import.meta.dir, "PrivacyPanel.tsx"), "utf8");
-    expect(panel).toContain("sentTextFor");
-    // sentContentView 收到的是 sentTextFor(...) 的结果，而不是 composedInstruction 的裸结果。
-    expect(panel).toMatch(/sentTextFor\(\s*current\s*,/);
+    expect(panel).toContain("sentTurnsFor");
+    expect(panel).toMatch(/sentTurns\?\.\(\s*current\.id\s*\)/);
+    expect(panel).toMatch(/composedInstruction\?\.\(\s*current\s*\)\s*\?\?\s*null/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// r20 追加 — 一个运行发过不止一轮（确认页一次 + 每次追问各一次）。
+//
+// 面板的卖点是「给你看真正发出去的」。只留确认页那一次，她追问过一轮再看，面板
+// 说的就是一段**旧的**文字。这一组钉住：默认视图取**最近一次**，历史按先后摊开。
+// 「store 真把那几轮记下来」由 store.test.ts 拿真 store 的发送口字节对。
+// ---------------------------------------------------------------------------
+
+describe("追问过之后：默认最近一次，历史按先后", () => {
+  const FIRST = "【要做的事】合成\n\n【用户的原话】\n把这两张表合成一张（确认页）";
+  const SECOND = "【要做的事】合成\n\n【用户的原话】\n把金额列改成整数（追问）";
+  const turns = [
+    { text: FIRST, at: 100 },
+    { text: SECOND, at: 200 },
+  ];
+
+  test("默认展示最近一次那段：是追问，不是确认页", () => {
+    const view = sentHistoryView({ turns, online: true });
+    expect(view.state).toBe("sent");
+    // 默认视图 = 最近一次发出去的 = 追问那段。
+    expect(view.text).toBe(SECOND);
+    expect(view.text).toContain("把金额列改成整数");
+    expect(view.text).not.toBe(FIRST);
+    // 「之前还发过 1 次」，历史两段按发出去的先后都在。
+    expect(view.earlierCount).toBe(1);
+    expect(view.turns.map((turn) => turn.text)).toEqual([FIRST, SECOND]);
+  });
+
+  test("只发过一次时没有历史那一块", () => {
+    const view = sentHistoryView({ turns: [turns[0]!], online: true });
+    expect(view.text).toBe(FIRST);
+    expect(view.earlierCount).toBe(0);
+    expect(view.turns).toHaveLength(1);
+  });
+
+  test("没联网 / 没有记账时如实退回，不编一段历史", () => {
+    const offline = sentHistoryView({ turns, online: false });
+    expect(offline.state).toBe("offline");
+    expect(offline.turns).toEqual([]);
+    expect(offline.earlierCount).toBe(0);
+    const none = sentHistoryView({ turns: [], online: true });
+    expect(none.state).toBe("none");
+    expect(none.turns).toEqual([]);
+  });
+
+  test("旧任务没有记账时退回按 run 现在这份展示（试跑 / 覆盖同意的后缀不能少报）", () => {
+    const composed = "【要做的事】合成\n\n【用户的原话】\n合成";
+    // 记账为空 -> 退回 sentTextFor，后缀照算。
+    expect(sentTurnsFor({ createdAt: 7, overwrite: true }, [], composed)).toEqual([
+      { text: sentTextFor({ overwrite: true }, composed), at: 7 },
+    ]);
+    expect(sentTurnsFor({ createdAt: 8, dryRun: true }, [], composed)[0]!.text).toBe(
+      dryRunInstruction(composed),
+    );
+    // 有记账就逐字用记账的，不重算。
+    const recorded = [{ text: "真正发出去的", at: 99 }];
+    expect(sentTurnsFor({ createdAt: 1 }, recorded, composed)).toEqual(recorded);
+    // 没有 run / 没有原文 -> 空，不拿空文字冒充「发出去的就是这个」。
+    expect(sentTurnsFor(null, [], composed)).toEqual([]);
+    expect(sentTurnsFor({ createdAt: 1 }, [], null)).toEqual([]);
+  });
+
+  test("从磁盘读回来的记账只留结构合法的条目", () => {
+    expect(normalizeSentTurns(undefined)).toEqual([]);
+    expect(normalizeSentTurns("nope")).toEqual([]);
+    expect(
+      normalizeSentTurns([null, 3, {}, { text: "" }, { text: "有", at: "x" }, { text: "好", at: 5 }]),
+    ).toEqual([
+      { text: "有", at: 0 },
+      { text: "好", at: 5 },
+    ]);
+  });
+
+  test("展开历史真的把两段都渲染出来，顺序是发出去的先后", async () => {
+    const { renderToString } = await import("solid-js/web");
+    const { SentTurnsList } = await import("./PrivacyPanel.tsx");
+    const html = renderToString(() => SentTurnsList({ turns }));
+    // 两段原文都在（不是只渲染最近那次）。
+    expect(html).toContain("把这两张表合成一张（确认页）");
+    expect(html).toContain("把金额列改成整数（追问）");
+    // 先确认页、后追问。
+    expect(html.indexOf("把这两张表合成一张（确认页）")).toBeLessThan(
+      html.indexOf("把金额列改成整数（追问）"),
+    );
+    // 抬头真的写了「第几次」，她分得清哪段是哪段。
+    expect(html).toContain(SENT.turnHeading(1, formatWhen(100), false));
+    expect(html).toContain(SENT.turnHeading(2, formatWhen(200), true));
+  });
+
+  test("面板默认（还没点开）就写明「这次是最近一次」并给出历史入口", async () => {
+    const { renderToString } = await import("solid-js/web");
+    const { SentContentSection } = await import("./PrivacyPanel.tsx");
+    const run = { id: "r1", createdAt: 5, online: true } as never;
+    const store = {
+      sentTurns: () => turns,
+      composedInstruction: () => FIRST,
+    } as never;
+    const html = renderToString(() => SentContentSection({ store, run }));
+    // 默认视图：先点明下面是最近一次，再照常有那句「发出去的就是这段文字」。
+    expect(html).toContain(SENT.textGoesLatest);
+    expect(html).toContain(SENT.textGoes);
+    // 「之前还发过 1 次」+ 展开全部历史的按钮。
+    expect(html).toContain(SENT.earlier(1));
+    expect(html).toContain(SENT.historyShow);
+    // 默认折叠：两段原文都还没铺出来（只有点开才看）。
+    expect(html).not.toContain("把金额列改成整数（追问）");
   });
 });
