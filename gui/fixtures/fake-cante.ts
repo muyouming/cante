@@ -27,6 +27,20 @@
 //                              followed by a non-Completed TurnEnd.
 //   FAKE_CANTE_TURN_QUOTA=1    same shape, but the failure is the real one the
 //                              gateway gave us on 2026-09 (503, out of credits).
+//   FAKE_CANTE_MAKE_FILE=1     during a normal turn, write one small real
+//                              result file to disk. The scripted events alone
+//                              never touch the filesystem, so the app's
+//                              before/after snapshot diff stays empty and the
+//                              finished ResultCard (with every button on it)
+//                              can never appear in automation. The file lands
+//                              in the folder of the first file the turn was
+//                              told to work on (the system temp directory when
+//                              the turn names no file), and is removed again
+//                              before this process exits.
+import { rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+
 export {};
 
 let eventSeq = 0;
@@ -40,6 +54,66 @@ function emit(event: unknown, parent: string | null = null): void {
   };
   process.stdout.write(JSON.stringify(frame) + "\n");
 }
+
+/** The result files this process made, removed again before it exits. */
+const madeFiles: string[] = [];
+let madeFileRun = 0;
+
+/** A short, table-looking name; the suffix only appears on the 2nd run on. */
+const MADE_FILE_BASE = "结果_上个月开销汇总";
+
+/**
+ * The folder a made-up result should land in: the folder of the first file the
+ * turn was asked to work on.
+ *
+ * The app snapshots the *folders* of the chosen files before and after a run
+ * (`files.rs::begin_run` / `snapshot_paths`, then `diffSnapshots`), so a result
+ * written anywhere else would be invisible to the ResultCard. Free-text runs
+ * name no file; they fall back to the system temp directory.
+ */
+function resultFolder(instruction: string): string {
+  const match = /【要处理的文件】[^\n]*\n\s*1\.\s*(.+)/.exec(instruction);
+  const first = match?.[1]?.trim();
+  return first && first.length > 0 ? dirname(first) : tmpdir();
+}
+
+/**
+ * FAKE_CANTE_MAKE_FILE=1: put one small, real file on disk during the turn.
+ *
+ * This is the fixture's only side effect on purpose. Everything else it does is
+ * a scripted event; without this the snapshot diff is always empty and the
+ * finished ResultCard is unreachable from an automated run. The numbering keeps
+ * a second run in the same folder a *created* file (the first run's file is
+ * still there while the process lives), which is what the diff needs to see.
+ */
+function makeResultFile(instruction: string): void {
+  if (process.env.FAKE_CANTE_MAKE_FILE !== "1") return;
+  const name = madeFileRun === 0 ? `${MADE_FILE_BASE}.csv` : `${MADE_FILE_BASE}-${madeFileRun + 1}.csv`;
+  madeFileRun += 1;
+  const path = join(resultFolder(instruction), name);
+  // A UTF-8 BOM so Excel and WPS open the Chinese header correctly.
+  const body =
+    "\uFEFF日期,事项,金额\n" +
+    "2026-08-03,办公用品,128.50\n" +
+    "2026-08-12,差旅费,860.00\n" +
+    "2026-08-25,打印纸,45.80\n";
+  writeFileSync(path, body, "utf8");
+  madeFiles.push(path);
+}
+
+/** Remove what this process made. Safe to call more than once. */
+function cleanMadeFiles(): void {
+  for (const path of madeFiles.splice(0)) {
+    try {
+      rmSync(path, { force: true });
+    } catch {
+      // A leftover file is better than a crash while exiting.
+    }
+  }
+}
+
+// `Shutdown` is the graceful path; this also covers an exit from anywhere else.
+process.on("exit", cleanMadeFiles);
 
 const SESSION = {
   model: { id: "fake-model", display_name: "Fake Model" },
@@ -144,6 +218,7 @@ function handle(op: unknown, id: string): void {
         emit({ TurnEnd: { turn_id: "turn_1", status: { Interrupted: { reason: "user" } }, steps: 1 } }, id);
         return;
       case "Shutdown":
+        cleanMadeFiles();
         emit("Goodbye", id);
         process.exit(0);
         return;
@@ -166,6 +241,7 @@ function handle(op: unknown, id: string): void {
   }
   if ("UserInput" in record) {
     const turn_id = "turn_1";
+    const instruction = typeof record.UserInput === "string" ? record.UserInput : "";
     // Mid-turn failure: real cante reports the cause once as `Error`, then
     // closes the turn with a non-Completed status the error page reads.
     if (process.env.FAKE_CANTE_TURN_ERROR === "1") {
@@ -215,6 +291,10 @@ function handle(op: unknown, id: string): void {
       );
       return;
     }
+    // The two failure paths above produced no result, so they returned already.
+    // A real result file, when asked for, is written before the turn is scripted
+    // to completion (see makeResultFile).
+    makeResultFile(instruction);
     // Slow mode splits the delta run across a tick so tests can prove the
     // bridge's quiet window coalesces it instead of returning token by token.
     if (process.env.FAKE_CANTE_SLOW_DELTAS === "1") {

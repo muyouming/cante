@@ -28,7 +28,8 @@
 // Collapsing both into one "only real hardware" list would be its own lie, so
 // the catalog keeps them apart and this test enforces both halves.
 
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 
 import { expect, test } from "bun:test";
@@ -289,6 +290,96 @@ test("the realities the fixture cannot establish are written down and named", ()
   for (const [key, why, where] of rows) {
     expect(why!.length, `CONTRACT.md: no explanation for ${key}`).toBeGreaterThan(0);
     expect(where!.length, `CONTRACT.md: no guard named for ${key}`).toBeGreaterThan(0);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// 夹具唯一一个真的落盘的动作：FAKE_CANTE_MAKE_FILE=1。
+//
+// 它现在能证明的：一轮正常跑动的时候，磁盘上真的多出一个小的结果文件，位置就在
+// 这一轮被交代的第一个文件所在的那层文件夹里（应用就是按“所选文件的文件夹”做运
+// 行前后快照的，结果写去别处 ResultCard 就看不到）；这一轮仍然按脚本的协议走完；
+// 进程退出前会把自己造的文件删掉。
+//
+// 它仍然证明不了的：文件里的字节不是模型产出的，也不是一张真的工作簿，所以应用
+// 读表格那一步仍然会说读不出来；这里的 Rust 快照/diff 代码一点没被跑到。
+// CONTRACT.md 的 real-filesystem 一行因此照旧留在“只能在真机上验”里。
+//
+// 之前用的环境变量（SEED / APPROVAL_BATCH / TURN_ERROR / TURN_QUOTA / SLOW_DELTAS）
+// 都不碰磁盘，所以只有事件形状被它们演到了；结果卡片那一屏（带它全部按钮）在自动化
+// 里一直够不到。这个动作就是补那一段覆盖面。
+// ---------------------------------------------------------------------------
+test("FAKE_CANTE_MAKE_FILE 真的造出一个结果文件，并在退出前删掉", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "cante-fixture-"));
+  const input = join(dir, "上个月的报销单.xlsx");
+  writeFileSync(input, "夹具只需要这个位置存在\n", "utf8");
+  const made = join(dir, "结果_上个月开销汇总.csv");
+  const proc = Bun.spawn([process.execPath, FIXTURE_TS], {
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, FAKE_CANTE_MAKE_FILE: "1" },
+  });
+  const reader = proc.stdout.getReader();
+  const decoder = new TextDecoder();
+  let pending = "";
+
+  async function send(op: unknown): Promise<void> {
+    proc.stdin.write(JSON.stringify({ op, id: "op_FIXTURE" }) + "\n");
+    await proc.stdin.flush();
+  }
+
+  /** Read frames up to and including `end`, returning every event name seen. */
+  async function until(end: string): Promise<string[]> {
+    const seen: string[] = [];
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) throw new Error(`fake-cante closed before ${end}`);
+      pending += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = pending.indexOf("\n")) >= 0) {
+        const line = pending.slice(0, nl).trim();
+        pending = pending.slice(nl + 1);
+        if (!line) continue;
+        const event = (JSON.parse(line) as { event: unknown }).event;
+        const name = typeof event === "string" ? event : (Object.keys(event as object)[0] ?? "");
+        seen.push(name);
+        if (name === end) return seen;
+      }
+    }
+  }
+
+  try {
+    await send({ StartSession: {} });
+    await send({
+      UserInput: `【要处理的文件】（只读，一共 1 个，按这个顺序）\n1. ${input}\n\n把这张表汇总一下`,
+    });
+    const paused = await until("TurnPause");
+    // The turn is still the normal scripted one, not a special branch.
+    expect(paused).toContain("TurnStart");
+    expect(paused).not.toContain("Error");
+    expect(existsSync(made), "夹具没有落盘结果文件").toBe(true);
+    const body = readFileSync(made, "utf8");
+    expect(body).toContain("日期");
+    expect(body.length).toBeGreaterThan(0);
+
+    await send({
+      ApprovalResponse: { turn_id: "turn_1", responses: [{ tool_use_id: "tool_1", decision: "Accept" }] },
+    });
+    const ended = await until("TurnEnd");
+    expect(ended).toContain("ToolEnd");
+    expect(existsSync(made), "结果文件应该在退出前一直留着").toBe(true);
+
+    await send("Shutdown");
+    await proc.exited;
+    expect(existsSync(made), "夹具必须把它自己造的文件删掉").toBe(false);
+  } finally {
+    try {
+      proc.kill();
+    } catch {
+      // already gone
+    }
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
