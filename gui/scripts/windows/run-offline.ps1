@@ -10,6 +10,11 @@
 #   busy     —— 服务方自己忙不过来/这个月用完了（#286）：每个请求都回 503 +
 #               「insufficient credits」。这一场要证的是她看到的既不是「你的文件有问题」、
 #               也不是「你没配好」，而是「等一会儿 → 一直这样再找管网络的同事」那套话。
+#   realbusy —— 同上，但**不用我们摆的假服务方**：走这台机器**真正的服务方**，
+#               而且默认指到那条**真的已经坏了**的路（`work` —— 实跑回 503 +
+#               「You have insufficient credits to make this request」）。
+#               为什么单开一场：假服务方只证明「我们的中继发 503 时她会看到什么」；
+#               这一场证明的是「真的欠费停机时她会看到什么」（也是 #286 当初的现场）。
 #   wire     —— **真把出站掐掉**（本轮新增）：**不是我们摆的假服务方**，而是用 Windows
 #               防火墙按远端端口把这个应用自己的 `pi\bun.exe` 挡住，让它够不到真正的服务方。
 #               这一场最接近「她的网线被拔了 / 公司网关把流量掐了」。
@@ -26,6 +31,7 @@
 #   ... -Scenario cut       -StallSecs 90
 #   ... -Scenario forbid
 #   ... -Scenario busy
+#   ... -Scenario realbusy   # 真服务方上那条真坏掉的路（默认 9router/work）
 #   ... -Scenario proxy407
 #   ... -Scenario wire      -Gateway "<主机>:<端口>"   # 不给就自动读这台机器默认服务方的地址
 #
@@ -35,7 +41,7 @@
 # 注意：本文件必须保存为 UTF-8 with BOM（Windows PowerShell 5.1 否则按 GBK 解析中文）。
 
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('dead', 'cut', 'forbid', 'wire', 'proxy407', 'busy')][string]$Scenario,
+    [Parameter(Mandatory = $true)][ValidateSet('dead', 'cut', 'forbid', 'wire', 'proxy407', 'busy', 'realbusy')][string]$Scenario,
     [string]$Exe = "",
     [string]$WorkRoot = "",
     # 停滞后判据（秒）。产品的默认是 600（10 分钟）；这里默认压到 120，
@@ -47,6 +53,9 @@ param(
     # wire 那一场要掐的服务方地址（"主机:端口"）。不给就自动读这台机器默认服务方的地址。
     # 报告里写 <网关地址>，不许出现真实内网地址。
     [string]$Gateway = "",
+    # realbusy 那一场：用哪个 provider/模型去找「真的坏掉的那条路」（默认真服务方的 work）。
+    [string]$RealProvider = "9router",
+    [string]$RealModel = "work",
     # WebDriver 端口。默认 0 = 每次自动挑一个**空闲**端口。
     # 为什么不能写死 4445：反复跑之后旧的连接会停在 TIME_WAIT，tauri-driver 绑不上，
     # 报「can not listen to address」＋「No matching capabilities found」——
@@ -346,6 +355,8 @@ if ($Scenario -eq 'wire') {
 # ---------------------------------------------------------------------------
 # 1) 造一个只属于这一轮的 pi 配置目录。
 #    * dead/cut/forbid/proxy407/busy：把服务方指向我们摆的本地中继。
+#    * wire / realbusy：把服务方指向**真的服务方**（这台机器默认那些）。realbusy 还把默认
+#      model 指到那条真的坏了的路。
 #    * wire：把服务方指向**真的服务方**（也就是这台机器默认那个），因为这一场要验的
 #      就是「真正的出站被系统级挡掉」——如果还指向本地中继，那就又变成我们摆的现场了。
 #    为什么用 PI_CODING_AGENT_DIR 而不是改 ~/.pi：那一份是这台机器真正在用的配置，
@@ -353,14 +364,21 @@ if ($Scenario -eq 'wire') {
 # ---------------------------------------------------------------------------
 $script:piConfig = Join-Path $WorkRoot 'pi-config'
 New-Item -ItemType Directory -Force -Path $script:piConfig | Out-Null
-if ($Scenario -eq 'wire') {
+if ($Scenario -eq 'wire' -or $Scenario -eq 'realbusy') {
     # 把这台机器默认服务方的配置**拷进**隔离目录：pi 会用真地址、真凭据，
     # 但配置目录仍是我们这一轮的（哨兵照样能查出「现场真的注入了吗」）。
     foreach ($name in @('models.json', 'settings.json')) {
         $from = Join-Path $HOME (".pi\agent\" + $name)
         if (Test-Path $from) { Copy-Item $from (Join-Path $script:piConfig $name) -Force }
     }
-    Say ("pi 配置目录：" + $script:piConfig + "（wire：沿用这台机器默认服务方的地址与凭据，配置目录是本轮的）")
+    if ($Scenario -eq 'realbusy') {
+        # 不能逼 pi 去猜默认走哪个 provider：显式把默认指到那条（真的）坏路。
+        [ordered]@{ defaultProvider = $RealProvider; defaultModel = $RealModel } |
+            ConvertTo-Json | Set-Content -Path (Join-Path $script:piConfig 'settings.json') -Encoding UTF8
+        Say ("pi 配置目录：" + $script:piConfig + "（realbusy：沿用这台机器的真地址与真凭据，默认 model = " + $RealProvider + "/" + $RealModel + "）")
+    } else {
+        Say ("pi 配置目录：" + $script:piConfig + "（wire：沿用这台机器默认服务方的地址与凭据，配置目录是本轮的）")
+    }
 } else {
     $baseUrl = "http://127.0.0.1:$RelayPort/v1"
     $models = [ordered]@{
@@ -410,6 +428,7 @@ Say ("输入 sha256（跑之前）：" + $hashBefore)
 # ---------------------------------------------------------------------------
 # 3) 摆现场。
 #    * dead/cut/forbid/proxy407/busy：起假服务方（dead 模式的 relay 会立即退出 —— 端口保持没人听）。
+#    * realbusy：既不起中继、也不打防火墙 —— 走的就是这台机器真正的服务方。
 #    * wire：**不起中继**，而是用 Windows 防火墙把这个应用自己的动手组件
 #      （`pi\bun.exe`）到真服务方的出站掐掉。这是本轮新增的那种「真拔网线」。
 # ---------------------------------------------------------------------------
@@ -417,7 +436,9 @@ $relayScript = Join-Path $script:Here 'offline-probe\relay.mjs'
 $relayLog = Join-Path $WorkRoot ("relay-" + $Scenario + ".log")
 $relayProc = $null
 
-if ($Scenario -eq 'wire') {
+if ($Scenario -eq 'realbusy') {
+    Say 'realbusy 现场：不打防火墙、不起假服务方 —— 让应用真的去连这台机器自己的服务方。'
+} elseif ($Scenario -eq 'wire') {
     $fwScript = Join-Path $script:Here 'offline-probe\fw-rule.ps1'
     if (-not (Test-Path $fwScript)) { Say ("环境问题：找不到 fw-rule.ps1（" + $fwScript + '）'); exit 2 }
 
@@ -481,8 +502,8 @@ if ($Scenario -eq 'wire') {
 }
 
 # 确认端口状态符合预期（dead = 没人听；cut/forbid/proxy407/busy = 在听）—— 记事实，不猜。
-# wire 没有本地中继端口（它挡的是到真服务方的出站），所以这一条跳过。
-if ($Scenario -ne 'wire') {
+# wire / realbusy 没有本地中继端口（一个挡真出站、一个走真服务方），所以跳过。
+if ($Scenario -ne 'wire' -and $Scenario -ne 'realbusy') {
     $probe = Test-NetConnection -ComputerName 127.0.0.1 -Port $RelayPort -WarningAction SilentlyContinue
     $listening = [bool]$probe.TcpTestSucceeded
     Say ("端口 " + $RelayPort + " 有人听 = " + $listening + "（dead 期望 False，其余期望 True）")
@@ -537,7 +558,7 @@ if (Test-Path $resultPath) {
 # 期望文案从**产品源码里取**（copy-service.ts），不手抄 —— 手抄会漂移。
 # ---------------------------------------------------------------------------
 $script:busyFailed = $false
-if ($Scenario -eq 'busy') {
+if ($Scenario -eq 'busy' -or $Scenario -eq 'realbusy') {
     $copySrc = Get-Content (Join-Path $script:Repo 'gui\src\simple\copy-service.ts') -Raw -Encoding UTF8
     $waitLabel = [regex]::Match($copySrc, 'wait:\s*\{\s*label:\s*"([^"]+)"').Groups[1].Value
     $waitWhy = [regex]::Match($copySrc, 'wait:\s*\{\s*label:\s*"[^"]+",\s*why:\s*"([^"]+)"').Groups[1].Value
@@ -631,9 +652,9 @@ if (-not $script:wireRuleRemoved -and $script:wireRuleApplied) {
 #     改用一个更硬的反向判据：**如果这一场真的被挡住了，就绝不可能出现「做好了」**。
 #     屏幕成功 = 阻断没咬到（现场没摆上）。再加一条由驱动层亲自报的 `wireBlocked`。
 $script:injected = $true
-if ($Scenario -eq 'wire') {
+if ($Scenario -eq 'wire' -or $Scenario -eq 'realbusy') {
     $wireDone = $result -and $result.outcome -eq 'done'
-    Say ("wire 现场反向判据：结局=done 吗？" + $wireDone + '（期望 False —— 被挡住就该报错，不该做成一件事）')
+    Say ("$Scenario 现场反向判据：结局=done 吗？" + $wireDone + '（期望 False —— 服务方用不了就不该做成一件事）')
     if ($wireDone) { $script:injected = $false }
 } else {
     foreach ($name in $script:sentinel) {
@@ -648,7 +669,7 @@ if (-not $script:injected) {
     exit 2
 }
 if ($script:busyFailed) {
-    Say '产品问题：busy 现场屏幕上那套话不对（逐条见上，判据取自 copy-service.ts）。'
+    Say ("产品问题：$Scenario 现场屏幕上那套话不对（逐条见上，判据取自 copy-service.ts）。")
     exit 3
 }
 exit 0

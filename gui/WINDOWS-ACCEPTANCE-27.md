@@ -77,6 +77,7 @@
 | 2 | **第一屏**（UIA 读窗口真实文字，对照 `copy.ts`） | `gui\scripts\windows\accept-first-screen.ps1 -Exe "C:\Users\cante\AppData\Local\Cante\cante-gui.exe"` | **退出码 0**，10 条对上 10 条、对不上 0 条 ✓ |
 | 3 | **#287 固化的那套判据（GBK(936) 的 CSV 交进来）** | `gui\scripts\windows\accept-gbk-csv.ps1 -Exe "C:\Users\cante\AppData\Local\Cante\cante-sheets.exe"`（它本来就支持 `-Exe`，所以直接指到**装机版**那份，不是工作树产物 ✓） | **退出码 0**，通过 **10/10** ✓ |
 | 4 | **#286 那套话（服务方忙/用完）——真窗口** | `gui\scripts\windows\run-offline.ps1 -Scenario busy -Exe "C:\Users\cante\AppData\Local\Cante\cante-gui.exe"`（`busy` 是本轮新增的现场） | **退出码 0**，屏幕上逐条对上 `copy-service.ts` 的 4 句、零术语 6/6 ✓ |
+| 5 | **同一条判据，但走真服务方上那条真坏掉的路（`realbusy`）** | `gui\scripts\windows\run-offline.ps1 -Scenario realbusy -Exe "C:\Users\cante\AppData\Local\Cante\cante-gui.exe" -StallSecs 180 -TimeoutSec 270` | **退出码 0**，同上 4/4 + 零术语 6/6；且页面 DOM 里查得到**真网关回的原文**（证明请求真打到了那台网关）✓ |
 
 闸门（1）逐条：① `cante-gui` / `cante-sheets` / `cante-pdf` / `cante-bridge` 四个都在；
 ② 三个自带程序**在安装目录里跑得起来**、版本都打 `0.2.4`；③ 没有 `.d`、没有 0 字节文件、
@@ -132,6 +133,46 @@
 
 本轮为此改了两个验收脚本（`relay.mjs` 加 `busy` 模式、`run-offline.ps1` 加 `busy` 现场与判据块），
 详见 §7。
+
+### 4.2 第 5 条（`realbusy`）：不用假服务方，走**真服务方上那条真的坏掉的路**
+
+为什么单开一场：假服务方只证明「我们的中继发 503 时她会看到什么」；这一场证明的是
+「**真的**欠费停机时她会看到什么」（也是 #286 当初的现场）。先把网关探测结果记下：
+
+```
+地址：http://192.168.3.10:20128/v1（来源 ~/.pi/agent/models.json 的 9router；apiKey 不打印）
+--- model=work               → HTTP 503 ---
+{"error":{"message":"[commandcode/deepseek/deepseek-v4.1-flash] [400]: You have insufficient credits to make this request. Please purchase more credits to continue using the service. (reset after 30s)"}}
+--- model=ocg/deepseek-flash → HTTP 200 ---
+--- model=ocg/glm-5.2        → HTTP 200 ---
+```
+
+网关本身是活的（别的 model 200），只有 `work` 这条路真的欠费停机（503）—— 现成的、真的、可复现的现场。
+然后让**装机版的应用**真的去连它（`realbusy`：沿用这台机器的真地址与真凭据，**不起中继、不打防火墙**，
+只把默认 model 显式指到 `9router/work`）：
+
+```
+[phase] 干活（含审批/提问） — 15302 ms
+--- 结局页（error-page）---
+  | 这次没能做完 / 这件事没有做完。
+  | 原来的文件都还在。可以再试一次，或者换一种说法告诉我要做什么。
+  | →过一会儿再试：帮你干活的程序现在用不了，多半不是你做错什么。过几分钟再点这个按钮。
+  | 复制详情给管网络的同事：一直这样，就把下面这段原文复制出来，发给管网络的同事，请他帮忙看看。
+  | 展开技术详情 / 再试一次 / 换一个任务
+  [对] ×4（文案逐条取自 copy-service.ts）  [对] 没有 insufficient/quota/credits/503/429/额度
+  → 通过
+realbusy 现场反向判据：结局=done 吗？False（期望 False）
+原文件哈希一致 = True
+```
+
+**两条不靠「单测」的硬证据**：
+
+1. 页面的 DOM 里查得到**那台真网关回的原文**（它只折在「展开技术详情」后面，没上屏）：
+   `outcome-error-page.html: You have insufficient credits to make this request` ✓
+   —— 这一条同时证明请求**真打到了那台真网关**：我们自己摆的中继返回的原文里没有 `You have …` 这个说法。
+2. 屏幕原文里**没有**英文/状态码/「额度」 ✓（6 个词一个都没出现），而账上那句中文与源码逐条相等 ✓。
+
+退出码 **0**（同一套判据在假服务方那场也是 0）。
 
 ## 5. 我**没**验证什么（如实列，不写成「通过」）
 
@@ -190,6 +231,7 @@ C:\cante-verify-17\busy\relay-busy.log             假服务方日志（每个�
 | `gui\scripts\windows\offline-probe\relay.mjs` | 新增 `busy` 模式：每个请求回 `503` + `insufficient credits` | #286 的现场（网关欠费停机）原来**一个场景都造不出来** —— dead/cut/forbid/wire/proxy407 都不产生「服务方忙/用完」那一类错 |
 | 同上 | 补回 `proxy407` 模式（ `407` + `Proxy-Authenticate` ） | 这个 mode **只写进过文档**，`relay.mjs` 里一直没有 → `-Scenario proxy407` 实际跑的是一个**正常干活**的假服务方（脚本与它声称的现场不是一回事 ✗）。本轮补回；**但没有重跑那一场**（§5 第 8 条）|
 | `gui\scripts\windows\run-offline.ps1` | 加 `busy` 现场（`-Scenario` 白名单、专用端口 `18095`、注释/用法）+ 跑完一段 **#286 判据块** | 把「#286 在真窗口上成不成立」变成**一条命令**（#287 那套做法），而不是手打几条命令 + 人眼看 |
+| 同上 | 另加 `realbusy` 现场（`-RealProvider` / `-RealModel`，默认 `9router` / `work`）：**不起中继、不打防火墙**，把真配置拷进隔离目录并把默认 model 显式指到那条坏路 | 把「**真**服务方欠费停机时她会看到什么」也变成一条命令 —— 不用假服务方也能复现，且判据与 `busy` 共用同一段 |
 
 判据块怎么做人话：**期望文案从产品源码 `copy-service.ts` 里用正则取**（不手抄 —— 手抄会漂移 ✓），
 四条文案逐条比；再加 6 个零术语词（`insufficient` / `quota` / `credits` / `503` / `429` / `额度`）
