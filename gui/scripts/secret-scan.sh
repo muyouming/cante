@@ -30,7 +30,7 @@ allow_file="$here/secret-scan.allow"
 # 从仓库根扫：git ls-files 输出的是仓库相对路径，报告里一眼能对上。
 repo_root="$(git -C "$here" rev-parse --show-toplevel 2>/dev/null || true)"
 if [ -z "$repo_root" ]; then
-  printf 'secret-scan: 这里不是 git 仓库，列不出被跟踪的文件\n' >&2
+  printf 'secret-scan: 这里不是 git 仓库，列不出会被提交的文件\n' >&2
   exit 2
 fi
 cd "$repo_root"
@@ -186,7 +186,7 @@ emit_hit() { # 规则 标签 路径 行号 命中片段
 }
 
 # scan_bulk 规则 标签 正则 [过滤器]
-# 用 git ls-files 列出被跟踪的文件，一次 grep 扫完（只启动一个进程，Windows 上也快）。
+# 用 git ls-files 列出「会被提交的文件」（已跟踪 + 未跟踪但未被忽略），一次 grep 扫完
 scan_bulk() {
   local rule="$1" label="$2" regex="$3" filter="${4:-}"
   local hits hit path line match rest
@@ -224,8 +224,8 @@ if [ "$failed" -ne 0 ]; then
   exit 1
 fi
 
-tracked="$(git ls-files | wc -l | tr -d ' ')"
-printf 'secret-scan: OK —— %s 个被跟踪的文件，没有密钥、内网地址或本机家目录字面量' "$tracked"
+scanned="$(git ls-files | wc -l | tr -d ' ')"
+printf 'secret-scan: OK —— %s 个会被提交的文件，没有密钥、内网地址或本机家目录字面量' "$scanned"
 if [ "$allowed_hits" -gt 0 ]; then
   printf '（放行 %d 条已审阅的例外）' "$allowed_hits"
 fi
