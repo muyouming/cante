@@ -46,7 +46,7 @@
    所以"**真的出声**、她**听**到的是什么"这一层**没验** —— 我验的是它**要念的那串文字**
    （`SpokenText` 是朗读引擎的输入，不是音频）✗（§5）。
 8. **报告自己出过一次错**（已补）：第一版只覆盖了两屏、**漏了确认页**，是另一位 agent
-   核出来的；§2.4 就是补的那一屏（§5 第 8 条）。
+   核出来的；§2.4 就是补的那一屏（§5 第 9 条）。
 
 ---
 
@@ -170,7 +170,7 @@ AudioEndpointBuilder Running
 
 ### 2.4 确认页（**补齐的第三屏** —— 与 2.2/2.3 同一手证据）
 
-> **这一节是后补的，原因写在 §5 第 8 条**：我把报告先写完推上去时，只覆盖了**结果面板**与**首页**
+> **这一节是后补的，原因写在 §5 第 9 条**：我把报告先写完推上去时，只覆盖了**结果面板**与**首页**
 > 两屏，**漏了任务点名要的第三屏（确认页）** —— 是另一位 agent 核出来后告诉我的。
 > 补法用**更硬的那条路**（同 §2.2/2.3）：在确认页上抓 Narrator 的 ETW，
 > **不是**拿 UIA 树推（`narrate-script.ps1` 那次在结果面板上已证明会高估）。
@@ -330,6 +330,16 @@ Tab 没落到面板里）。所以**这一条只能写"没抓到"** ✗ ——
    会被念 **25.6 秒**"。**Narrator 实际一次都没念它** —— `ListItem` **不可 Tab**
    （`focusable=False`），键盘走不到，读屏也就不念。**教训**：读屏念什么**取决于它怎么走**，
    不是"树里有什么"。**这一轮的 ETW 就是来纠这个的。**
+   > **同一个坑的另一面（另一位 agent 独立挖出来的，值得并在这里）**：UIA 有三个视图 ——
+   > `RawView`（一切节点）/ **`ControlView`（控件）** / `ContentView`（内容），
+   > **读屏念的是后两个**。用 `RawView` 数节点，会把 `IsControlElement=False` 的
+   > **布局节点也算进去**；据那位 agent 的报告，首页 `RawView` 146 个里 "74 个是布局节点"、
+   > `ControlView` 只有 72 个 ——
+   > **那个 146/74/72 是他们的数字，我没逐个数过**（我自己的对照跑出了同样的**机制**：
+   > RawView 里有大量 `IsControlElement=False`，ControlView 里为 0，但我那一次没走到首页，
+   > 所以**不把数字当我的**）。两人一致的是**机制**：同一句标题在 `RawView` 里数到两次、
+   > `ControlView` 里只一次 —— 那是**遍历视图的产物，不是产品缺陷**。
+   > 另一位那份报告专门验了它，**两份合起来才是完整的**。
 2. **路径少算一层 → 静默验了旧应用**：脚本在 `windows\a11y\`（比 `a11y-uia.ps1` 多一层），
    第一版 `..\..` 算成 `gui\scripts`，找不到现构建就**回退到装好的那份** ——
    于是看到的是**修复前**的按钮名，差一点写成"#230 没生效"✗。
@@ -373,9 +383,9 @@ Tab 没落到面板里）。所以**这一条只能写"没抓到"** ✗ ——
    **谁受影响**：§2/§3 的读数如果出问题，首先怀疑这里；**但 §2 的关键结论有双份独立复现**
    （台账见 §6 的归属说明），所以它站得住。
    **属实的代价**：§5 第 4 条（`ListItem` 不被念）**只验过一次**，没有第二个人复核。
-7. **"扫描""输入法""窗口标题"那些噪音不该算产品问题，但我没法从 Cante 侧关掉它们** ✗ ——
+8. **"扫描""输入法""窗口标题"那些噪音不该算产品问题，但我没法从 Cante 侧关掉它们** ✗ ——
    我只报告它们**挤进了朗读流**（§3.2），**没有**验"能不能在应用侧减少"。
-8. **我第一版报告漏了第三个界面（确认页），是另一位 agent 核出来后补的** ✗ ——
+9. **我第一版报告漏了第三个界面（确认页），是另一位 agent 核出来后补的** ✗ ——
    任务点名要 **首页 / 确认页 / 结果面板** 三屏，我第一版只写了后两屏（`50486ce`）。
    对方 grep `确认页|它打算这样做|动手前的确认` **0 命中**、并核了手上四份抓包都没有确认页的料，
    所以他说得对：**不是"写了没证据"，是那一屏整个没做**，而且我**连 §5 都没交代**。
@@ -383,7 +393,7 @@ Tab 没落到面板里）。所以**这一条只能写"没抓到"** ✗ ——
    而非拿 `narrate-script.ps1` 那颗会高估的 UIA 清单充数（§4 坑 1）。
    **教训**：写"验收报告"时应对着**任务逐字要的东西**勾一遍（这一屏被漏，就是因为我把注意力
    全放在了 #230 所在的结果面板上）。
-9. **确认页的"扫描模式"那一条我没做成** ✗ —— 我想验"不靠 Tab、用 Narrator 的扫描模式
+10. **确认页的"扫描模式"那一条我没做成** ✗ —— 我想验"不靠 Tab、用 Narrator 的扫描模式
    能不能念到计划正文"（那关系到"念不到"是不是 Tab 的局限而非产品缺），于是按了
    `Caps Lock + Space`。**结果它打开了 Narrator 自己的窗口**（抓包里出现
    「讲述人更新 窗口, 下一步, 按钮,」「连接后，"讲述人"将立即开始使用你的显示器。」），
@@ -401,7 +411,8 @@ Tab 没落到面板里）。所以**这一条只能写"没抓到"** ✗ ——
 | `gui/scripts/windows/a11y/probe-narrator-our-app.ps1` | 抓 Narrator 念**首页**的 ETW（本轮复跑过，1813 事件） |
 | `gui/scripts/windows/a11y/probe-narrator-confirm.ps1` | **补的第三屏**：抓 Narrator 念**确认页**的 ETW（1992 事件 / 90 条 `SpokenText`，§2.4） |
 | `gui/scripts/windows/a11y/probe-confirm-speech-durations.ps1` | 量确认页那四条句子的时长（§2.4：复选框 45 字 / 11.1 秒） |
-| `gui/scripts/windows/a11y/probe-narrator-confirm-scanmode.ps1` | 试"扫描模式能不能念到计划正文" —— **没做成**（它打开了 Narrator 自己的窗口，§5 第 9 条） |
+| `gui/scripts/windows/a11y/probe-narrator-confirm-scanmode.ps1` | 试"扫描模式能不能念到计划正文" —— **没做成**（它打开了 Narrator 自己的窗口，§5 第 10 条） |
+| `gui/scripts/windows/a11y/probe-view-counts.ps1` | 自查用：同一棵树上走 **RawView** 与 **ControlView**，报 `IsControlElement=False` 的数量（解释为什么 UIA 清单会高估，§4 坑 1） |
 | `gui/scripts/windows/a11y/probe-narrator-any-app.ps1` | 同一抓法但可指定 exe（用来做"旧版 vs 新版"对照；本轮旧版那次**没抓到**，§3.1） |
 | `gui/scripts/windows/a11y/narrate-script.ps1` | **对照用**：只按 UIA 树算"会念什么"（本轮证明它**会高估**，坑 1） |
 | `gui/scripts/windows/a11y/probe-actual-speech-durations.ps1` | 把 **Narrator 实际要念的句子**交给本机中文语音，量时长（§3.3） |
@@ -415,18 +426,18 @@ Tab 没落到面板里）。所以**这一条只能写"没抓到"** ✗ ——
 > **⚠️ 归属说明（必须写清，免得下次读的人以为是同一个人干的）**：
 > `gui/scripts/windows/a11y/` 这个目录是**两个 agent 在同一个 worktree 里先后留下的**
 > （两边被派了同一件活，没有通气，各跑各的）。按**另一位 agent 自己的说明**与他/我那批文件的
-> 时间戳分，一共 **23 个脚本**：
+> 时间戳分，一共 **24 个脚本**：
 >
 > - **另一位写的（8 个）**：`probe-narrator.ps1`、`probe-narrator-logs.ps1`、
 >   `probe-narrator-elevated.ps1`、`probe-audio-etw.ps1`、`probe-focus-follow.ps1`、
 >   `extract-narrator-speech.mjs`、`probe-narrator-our-app.ps1`、`extract-narrator-our-app.mjs`；
-> - **本报告作者写的（15 个）**：`narrate-script.ps1`、`probe-wizard-flow.ps1`、
+> - **本报告作者写的（16 个）**：`narrate-script.ps1`、`probe-wizard-flow.ps1`、
 >   `probe-panel-structure.ps1`、`probe-narrator-and-tts.ps1`、`probe-narrator-why.ps1`、
 >   `probe-filename-speech.ps1`、`probe-jarring-parts.ps1`、`probe-tts-duration.ps1`、
 >   `probe-top3-speech.ps1`、`probe-narrator-any-app.ps1`、`probe-narrator-results.ps1`、
 >   `probe-actual-speech-durations.ps1`、**`probe-narrator-confirm.ps1`**、
->   **`probe-confirm-speech-durations.ps1`**、**`probe-narrator-confirm-scanmode.ps1`**
->   （后三个是补第三屏时新写的）。
+>   **`probe-confirm-speech-durations.ps1`**、**`probe-narrator-confirm-scanmode.ps1`**、
+>   **`probe-view-counts.ps1`**（后四个是补第三屏 / 核视图差异时新写的）。
 >
 > **§2 那一轮 ETW 的两份抓包（`results.etl/xml`、`our-app.etl/xml`）是本报告作者自己跑的**
 > （`probe-narrator-results.ps1`；首页那份是**复跑** `probe-narrator-our-app.ps1`，
