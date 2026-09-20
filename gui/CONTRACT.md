@@ -92,13 +92,23 @@ the keys in the table are the ones the frontend sends).
 | Event | Payload |
 | --- | --- |
 | `cante://event` | one `EventMsg`: `{ timestamp, id, event, parent }` |
-| `cante://state` | `{ status: Status, session: SessionInfo \| null, pending_approval: PendingApproval \| null }` |
+| `cante://state` | `{ status: Status, session: SessionInfo \| null, pending_approval: PendingApproval \| null, pending_question: PendingQuestion \| null, cante: string \| null, cwd: string }` |
 | `cante://log` | `{ stream: "stderr" \| "stdout" \| "app", line: string }` |
 | `cante://exit` | `{ code: number \| null }` — the daemon died |
 
 `Status` = `"idle" | "thinking" | "streaming" | "awaiting" | "error" | "offline"`.
 
 `PendingApproval` = `{ turn_id: string, message: string, tools: Array<{ id, name, args }> }`.
+
+`PendingQuestion` = `{ turn_id: string, tool_use_id: string, questions: QuestionSpec[] }` — the
+`TurnPause` / `reason.Question` pause (r25): the paused turn, the tool call to echo back in
+`QuestionResponse`, and the questions. Mirrors `PendingQuestion` in `src/protocol.ts`. An
+`Approval` pause clears it, and the protocol clears it on `TurnResume` **and** `TurnEnd` (a
+cancelled turn may end without a resume).
+
+`cante` is the resolved daemon binary's `--version` (its first line; `null` until probed),
+and `cwd` is the directory the daemon is spawned in (`set_cwd`). `State` in the `events_since`
+reply above is exactly this `cante://state` payload — one object, two entry points.
 
 `SessionInfo` is the daemon's own object, forwarded as-is.
 
@@ -346,7 +356,7 @@ Goodbye
 | 能力 | 决定 | 理由 | 由什么锁住 |
 | --- | --- | --- | --- |
 | `ExtensionRefreshed` 的刷新路径 | 不接，但明确 | 它带的是 skills、subagents、MCP 清单（`crates/protocol-shape/src/msg.rs` 的 `ExtensionRefreshed`），而简单界面没有技能或命令入口——pro 的命令面板已删（`store.ts` 顶部注释），`src/simple/**` 与 `store.ts` 里没有任何一处读 `SessionInfo.skills`。它也不带 model / provider，刷新不了简单界面唯一会读的会话字段（`support_vision`，见 `src/simple/capabilities.ts` 的 `visionAvailable`）。真机确实会发它（2026-09 `sweep excel.merge` 两轮各 1 次），所以是「见过、决定不接」，不是「没见过」 | `store.ts` 的 `IGNORED_EVENTS`；`store.test.ts` 断言 ExtensionRefreshed 不出行、不改状态、不换会话；`fixture-parity.test.ts` 核对 `IGNORED_EVENTS` 里每个事件都在本表里有记录 |
-| 起步时 skills 为空（SessionStart 的 skills 字段） | 不接，但明确 | 真实 `SessionStart` 可能给空 skills，稍后由 `ExtensionRefreshed` 补齐（#107）。但简单界面只有 32 张固定卡片这一个入口，卡片来自 `src/simple/tasks/index.ts` 的静态表，不随 skills 变化，也没有任何地方读这份清单。所以「起步是不是空的」今天不影响任何用户可见行为。将来加了技能或命令入口，这条决定必须重开——那时「刷新补齐」就是必须接的路径 | `store.test.ts` 断言空 skills 起步加带真 skills 的刷新事件不改变任何用户可见状态；`fixture-parity.test.ts` 扫源码，断言 `src/simple/**` 与 `store.ts` 不读 `.skills` |
+| 起步时 skills 为空（SessionStart 的 skills 字段） | 不接，但明确 | 真实 `SessionStart` 可能给空 skills，稍后由 `ExtensionRefreshed` 补齐（#107）。但简单界面只有 `src/simple/tasks/index.ts` 的静态卡片表（`TASKS`）这一个入口，张数由该数组决定（`docs-consistency.test.ts` 盯着文档里写的数），不随 skills 变化，也没有任何地方读这份清单。所以「起步是不是空的」今天不影响任何用户可见行为。将来加了技能或命令入口，这条决定必须重开——那时「刷新补齐」就是必须接的路径 | `store.test.ts` 断言空 skills 起步加带真 skills 的刷新事件不改变任何用户可见状态；`fixture-parity.test.ts` 扫源码，断言 `src/simple/**` 与 `store.ts` 不读 `.skills` |
 | `ShellOutput` | 不接，但明确 | 简单界面没有终端、也没有命令面板；`send_input` 只在 `store.ts` 的 `sendRunInstruction` 里发过一次，mode 恒为 `prompt`，所以产品永远不会触发 shell 命令，也收不到它的 stdout / stderr / 退出码。就算收到了，把命令原文渲染给用户等于把「终端 / 路径」这类黑名单词直接摆到界面上（`src/simple/copy-guard.test.ts` 的黑名单），而且没有可操作的去处 | `store.ts` 的 `IGNORED_EVENTS`；`store.test.ts` 断言 ShellOutput 不出行、不改状态 |
 | `Ambient` | 不接，但明确 | 它是思考短语或输入建议，要先由前端发 `AmbientPhrase` / `AmbientSuggestion` 去问才有回包（`crates/protocol-shape/src/msg.rs` 的 `Evt::Ambient`）；`src/tauri.ts` 的 `Commands` 里没有这两个 op，简单界面也没有状态栏短语或输入提示的位置，所以它只会是没人要的回包。上面「夹具没演的事件」里 Ambient 那一行本就写着「简单界面不显示 Ambient」，这里把它升成一条有测试兜着的决定 | `store.ts` 的 `IGNORED_EVENTS`；`store.test.ts` 断言 Ambient 不出行、不改状态 |
 
