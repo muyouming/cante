@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use cante_gui_lib::files::{
-    backup_files, diff_snapshots, fact_for, facts_of, is_ignored_dir, read_runs, roots_of,
-    scan_roots, undo_files, upsert_run, BeforeState, FileMeta,
+    backup_files, cleanup_orphan_runs, diff_snapshots, fact_for, facts_of, is_ignored_dir, read_runs,
+    roots_of, scan_roots, undo_files, upsert_run, write_runs, BeforeState, FileMeta,
 };
 use serde_json::json;
 
@@ -294,6 +294,160 @@ fn run_log_is_empty_and_survives_a_corrupt_file() {
     assert!(read_runs(root).is_empty());
     fs::write(root.join("runs.json"), "{ not json").unwrap();
     assert!(read_runs(root).is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Backup growth (gui/docs/BACKUP-GROWTH.md): orphan-only cleanup
+//
+// The run log keeps only the newest 200 records, but the backup directories
+// used to stay forever — so every run past the 200th left a directory nobody
+// referenced and nothing ever deleted. These tests pin the bound and, more
+// importantly, the boundary: a directory any *record* still points at, and the
+// run currently being backed up, must never be touched.
+// ---------------------------------------------------------------------------
+
+/// Make `runs/<name>/before/` with one file in it, so we can prove the whole
+/// directory (and not just an empty shell) survives or goes.
+fn make_run_dir(root: &Path, name: &str) -> PathBuf {
+    let dir = root.join("runs").join(name).join("before");
+    write(&dir.join("000000"), "backup bytes");
+    dir
+}
+
+#[test]
+fn truncation_drops_the_record_but_leaves_its_backup_directory_behind() {
+    // A（1）的真跑证据：记录与目录的寿命是**解耦**的，这就是 P1 的根。
+    //
+    // 用真正落盘的两个原语（read_runs / write_runs）走一遍 upsert_run 内部的
+    // 「truncate(MAX_RUNS)」：超出上限的那条记录从 runs.json 里消失了，可它指的那
+    // 个 runs/<编号>/ 目录还好好地在磁盘上——没人再引用、也没有任何东西会去删它。
+    // 修法就是把这个孤儿目录清掉（见下一条 cleanup 的测试）。
+    let cap = 200usize;
+    let temp = TempDir::new("truncate-orphan");
+    let root = temp.path();
+
+    // 上限内每一条都有记录、都有目录；第 201 条只有目录（代表它存的时候刚好越限）。
+    for index in 0..=cap {
+        make_run_dir(root, &format!("run-{index:03}"));
+    }
+    // 和 upsert_run 落盘的顺序一致：最新在前，所以 run-000 在最旧的那一头。
+    let mut runs: Vec<serde_json::Value> = (0..=cap)
+        .rev()
+        .map(|index| json!({ "id": format!("run-{index:03}"), "taskTitle": "做过的事" }))
+        .collect();
+    // 与 upsert_run 完全一致的那一行：只丢记录（最旧的从尾部掉出去）。
+    runs.truncate(cap);
+    write_runs(root, &runs).unwrap();
+
+    // 被挤掉的 run-000：记录没了……
+    assert!(
+        read_runs(root).iter().all(|run| run["id"] != "run-000"),
+        "run-000 的记录应该已经掉出上限"
+    );
+    // ……但它留下的备份目录还在。这就是「只丢记录、不删目录」的积累路径。
+    assert!(
+        root.join("runs/run-000/before/000000").exists(),
+        "这正是 P1：记录被丢了，备份目录却留了下来"
+    );
+}
+
+#[test]
+fn cleanup_removes_only_directories_no_run_record_points_to() {
+    let temp = TempDir::new("cleanup-orphan");
+    let root = temp.path();
+    upsert_run(root, json!({ "id": "kept", "taskTitle": "还有记录" })).unwrap();
+    make_run_dir(root, "kept");
+    make_run_dir(root, "orphan");
+
+    let removed = cleanup_orphan_runs(root, &[]);
+    assert_eq!(removed, vec!["orphan".to_string()]);
+    assert!(root.join("runs/kept/before/000000").exists(), "有记录的那次必须原样留着");
+    assert!(!root.join("runs/orphan").exists(), "没人引用的目录要被清掉");
+}
+
+#[test]
+fn cleanup_never_touches_a_directory_a_record_still_points_to() {
+    // 最要紧的一条回归：只要记录还在，备份就一个都不能动——否则她点「撤销」时
+    // 备份已经被我们删了，那正是产品律 2 不允许发生的事。
+    let temp = TempDir::new("cleanup-kept");
+    let root = temp.path();
+    for id in ["a", "b"] {
+        upsert_run(root, json!({ "id": id, "taskTitle": "做过的事" })).unwrap();
+        make_run_dir(root, id);
+    }
+
+    let removed = cleanup_orphan_runs(root, &[]);
+    assert!(removed.is_empty(), "没有孤儿时不该删任何东西：{removed:?}");
+    for id in ["a", "b"] {
+        assert!(root.join("runs").join(id).join("before/000000").exists(), "{id} 的备份被动了");
+    }
+}
+
+#[test]
+fn cleanup_keeps_the_run_whose_backup_is_still_being_written() {
+    // 记录是在备份之后才落盘的（begin_run 建目录 → 跑完 save_run 写记录）。
+    // keep 就是那一段窗口里的编号：目录已建、记录还没有，绝不能当成孤儿删掉。
+    let temp = TempDir::new("cleanup-inflight");
+    let root = temp.path();
+    make_run_dir(root, "running");
+
+    let removed = cleanup_orphan_runs(root, &["running".to_string()]);
+    assert!(removed.is_empty(), "正在做备份的那次被删了：{removed:?}");
+    assert!(root.join("runs/running/before/000000").exists());
+}
+
+#[test]
+fn cleanup_deletes_only_our_backup_directories_and_never_an_original() {
+    // 清理只碰 file-safety/runs/ 底下的目录；她的原始文件在别的目录里，够不着。
+    let temp = TempDir::new("cleanup-original");
+    let root = temp.path();
+    let original = root.join("她的文件/年度报表.xlsx");
+    write(&original, "原始内容");
+    make_run_dir(root, "orphan");
+
+    let removed = cleanup_orphan_runs(root, &[]);
+    assert_eq!(removed, vec!["orphan".to_string()]);
+    assert!(original.exists(), "原始文件被删了");
+    assert_eq!(fs::read_to_string(&original).unwrap(), "原始内容", "原始文件被改了");
+    // 连 runs.json 自己也不能动。
+    assert!(!root.join("runs/orphan").exists());
+}
+
+#[test]
+fn cleanup_is_a_noop_without_a_runs_directory() {
+    let temp = TempDir::new("cleanup-none");
+    assert!(cleanup_orphan_runs(temp.path(), &[]).is_empty());
+    assert!(!temp.path().join("runs").exists(), "不该为了清理凭空建目录");
+}
+
+#[test]
+fn upsert_run_cleans_the_directory_of_a_record_that_fell_off_the_cap() {
+    // 端到端（A 第 1 条的真跑证据）：先做满 200 条记录 + 200 个备份目录，再存第
+    // 201 条。最旧那条记录被 MAX_RUNS 挤掉，它对应的目录必须在同一次调用里被扫掉——
+    // 这正是 P1 说的「只丢记录、不删目录」。
+    //
+    // 200 是 files.rs 的 MAX_RUNS（私有常量，这里按它的值写死并说明）。
+    let cap = 200usize;
+    let temp = TempDir::new("cleanup-on-save");
+    let root = temp.path();
+    for index in 0..cap {
+        let id = format!("run-{index:03}");
+        make_run_dir(root, &id);
+        upsert_run(root, json!({ "id": id, "taskTitle": "做过的事" })).unwrap();
+    }
+    // 此刻：200 条记录、200 个目录，都在。
+    assert_eq!(read_runs(root).len(), cap);
+    assert!(root.join("runs/run-000/before/000000").exists());
+
+    make_run_dir(root, "run-new");
+    upsert_run(root, json!({ "id": "run-new", "taskTitle": "刚做完的" })).unwrap();
+
+    // 第 201 条进来：最旧的 run-000 记录被挤掉，它的目录也一起清掉，不再占地方。
+    assert_eq!(read_runs(root).len(), cap);
+    assert_eq!(read_runs(root)[0]["id"], "run-new");
+    assert!(!root.join("runs/run-000").exists(), "掉出上限的旧备份目录要被清掉");
+    assert!(root.join("runs/run-001/before/000000").exists(), "没掉出上限的备份不许动");
+    assert!(root.join("runs/run-new/before/000000").exists(), "这次自己的备份要留着");
 }
 
 #[test]

@@ -476,7 +476,62 @@ pub fn upsert_run(root: &Path, record: Value) -> Result<(), String> {
     runs.retain(|run| run.get("id").and_then(Value::as_str) != Some(id.as_str()));
     runs.insert(0, record);
     runs.truncate(MAX_RUNS);
-    write_runs(root, &runs)
+    write_runs(root, &runs)?;
+    // 记录先落盘，再扫目录：刚存下的这次现在有记录了，它自己的备份不会被扫掉；
+    // 被 200 条上限挤掉的那些旧记录，对应的目录在这里被清走，不再无限占地方。
+    // 保留策略与依据见 gui/docs/BACKUP-GROWTH.md。
+    let _ = cleanup_orphan_runs(root, std::slice::from_ref(&id));
+    Ok(())
+}
+
+/// 扫掉运行记录里已经没人引用的备份目录：`runs/<编号>/`。
+///
+/// 为什么要有它（见 gui/docs/BACKUP-GROWTH.md）：运行记录只留最新的 `MAX_RUNS` 条，
+/// 多出来的记录被丢掉了，**可它指的那份备份目录原来一直留在磁盘上**——第 201 次
+/// 之后的每次运行，都会留下一个再也没人引用、也永远不会被删的目录（每个最多
+/// `MAX_BACKUP_BYTES`）。记录没了的那次本来就撤不回来（`undo_run` 读不到 created /
+/// modified / deleted，一个文件也放不回去），所以那份备份是死重，删掉不损害「她随时
+/// 能撤销」——有记录的每一次，目录一个都不动。
+///
+/// 只碰 `runs/` 底下、且没有任何记录（按 `sanitize_id` 对齐编号）指向的目录：她的
+/// 原始文件在别的目录里，这里够不着，也不可能被删。`keep` 是「目录已建、记录还没
+/// 落盘」的那些编号——正在做备份的那一次就是这样，必须保下来。
+///
+/// 返回被清掉的目录名（排序过），好让调用方如实说清动了什么。
+pub fn cleanup_orphan_runs(root: &Path, keep: &[String]) -> Vec<String> {
+    let runs_dir = root.join(RUNS_DIR);
+    let entries = match fs::read_dir(&runs_dir) {
+        Ok(entries) => entries,
+        // 还没有 runs/ 目录：没有任何东西可扫，不是错误。
+        Err(_) => return Vec::new(),
+    };
+
+    let mut referenced: Vec<String> = read_runs(root)
+        .iter()
+        .filter_map(|run| run.get("id").and_then(Value::as_str))
+        .map(sanitize_id)
+        .collect();
+    referenced.extend(keep.iter().map(|id| sanitize_id(id)));
+
+    let mut removed: Vec<String> = Vec::new();
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let name = match entry.file_name().into_string() {
+            Ok(name) => name,
+            // 名字不是合法文字：认不出来就当它有主人，绝不动它。
+            Err(_) => continue,
+        };
+        if referenced.iter().any(|id| id == &name) {
+            continue;
+        }
+        if fs::remove_dir_all(entry.path()).is_ok() {
+            removed.push(name);
+        }
+    }
+    removed.sort();
+    removed
 }
 
 fn strings(value: Option<&Value>) -> Vec<String> {
