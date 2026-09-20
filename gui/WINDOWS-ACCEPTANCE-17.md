@@ -386,8 +386,8 @@ C:\cante-results-audit\v8r-renamed.txt / v8m-moved.txt   第二轮 renamed / mov
 | # | 判据 | 怎么跑 | 结论 |
 | --- | --- | --- | --- |
 | 1 | **产物闸门**（配置≠产物那条） | `bash gui/scripts/verify-bundle.sh --dir "C:\Users\cante\AppData\Local\Cante"` | **退出码 0 / OK** ✓ |
-| 2 | **第一屏**（UIA 读窗口真实文字，对照 `copy.ts`） | `gui\scripts\windows\accept-first-screen.ps1 -Exe <装好的 cante-gui.exe>` | **退出码 0**，10 条对上 10 条、对不上 0 条 ✓ |
-| 3 | **GBK(936) 的 CSV 交进来**（#279） | `gui\scripts\windows\accept-gbk-csv.ps1 -Exe <装好的 cante-sheets.exe>` | **退出码 0**，通过 **10/10** ✓ |
+| 2 | **第一屏**（UIA 读窗口真实文字，对照 `copy.ts`） | `gui\scripts\windows\accept-first-screen.ps1 -Exe "C:\Users\cante\AppData\Local\Cante\cante-gui.exe"` | **退出码 0**，10 条对上 10 条、对不上 0 条 ✓ |
+| 3 | **#287 固化的那套判据（GBK(936) 的 CSV 交进来）** | `gui\scripts\windows\accept-gbk-csv.ps1 -Exe "C:\Users\cante\AppData\Local\Cante\cante-sheets.exe"`（它本来就支持 `-Exe`，所以直接指到**装机版**那份，不是工作树产物 ✓） | **退出码 0**，通过 **10/10** ✓ |
 
 闸门（1）逐条：① `cante-gui` / `cante-sheets` / `cante-pdf` / `cante-bridge` 四个都在；
 ② 三个自带程序**在安装目录里跑得起来**、版本都打 `0.2.4`；③ 没有 `.d`、没有 0 字节文件、
@@ -410,6 +410,13 @@ C:\cante-results-audit\v8r-renamed.txt / v8m-moved.txt   第二轮 renamed / mov
 5. **跨版本的她的档案/历史有没有被保留**：**没验**。覆盖装只证明**文件**换对了。
 6. **`inspect-installer.ps1`（拆开安装包看内部清单）**：**没跑** —— 这台机器**没有 7-Zip**，
    跑了也只会在「列包内文件」那步退 3，不如如实写「没跑」。
+7. **#286「服务方忙 / 用完」的中文出口**：**没验（界面那一层）**。
+   那组话在 `gui/src/simple/copy-service.ts` 里（零术语，技术原文只进「复制详情」）✓，
+   单测（`recovery-service.test.ts` 那组）在 `check-windows.ps1` 里也是绿的 ✓ —— 但这些都只证明
+   **源码里写着这句话**，**不证明装机版界面上真的弹了这句** ✗。真要在真机上验，得跑
+   `gui\scripts\windows\run-offline.ps1 -Scenario <五种现场>`（它驱动真窗口 + 读屏幕原文）—— 而那个
+   脚本默认用的是**本轮构建**那份（`Resolve-BuiltExe`：`target\debug|release\cante-gui.exe`），
+   要指到装机版得显式给 `-Exe`，再等一整轮。这一批的窗口不够，所以**如实写没验**。
 
 ### 8.6 这台机器上留下的原始输出
 
