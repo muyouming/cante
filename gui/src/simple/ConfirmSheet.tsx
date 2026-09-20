@@ -8,7 +8,7 @@
 //
 // The safe choice is the default: the focus ring starts on 取消, and the
 // overwrite checkbox is off and marked "不推荐".
-import { For, Show, createEffect, createSignal } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import { TRUST, TRY_FIRST, evidenceLine } from "./copy.ts";
@@ -29,6 +29,11 @@ import {
 import { FORMAT_COPY, hasExcelFile, hasImageFile, hasPdfFile } from "./copy-capability.ts";
 // P0 — 确认页上「不用这个」：去掉一份文件是**只改输入、不动她的文件**。
 import { CONFIRM_FILES, PASTES_CONTENT_GROUP } from "./copy-files.ts";
+// P1 — 「手里这个文件可以做的事」：选完文件之后，按文件类型把最可能要做的那几件
+// 摆出来。短句来自 copy-pick.ts，判断来自 pick.ts（纯逻辑、可单测）。
+import { PICK_FROM_FILE } from "./copy-pick.ts";
+import { suggestFromFiles, type PickSuggestion } from "./pick.ts";
+import { visibleTasks } from "./admin-config.ts";
 // r10 — 动手前先说清「上次也做成过、那份还在」，安她最怕的那件事（覆盖上次的）。
 import { PAST } from "./copy-past.ts";
 import { useFocusLayer } from "./FocusLayer.tsx";
@@ -89,6 +94,23 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   const pastesContent = (): boolean => def()?.group === PASTES_CONTENT_GROUP;
   const removedAllFiles = (): boolean =>
     needsFiles() && !pastesContent() && files().length === 0 && removedNow().length > 0;
+  // P1 — 「这个文件可以做的事」。只给**真要文件的**这件事看（文件夹那类给的是
+  // 一个文件夹、微信那族的文件是加法不是门槛），而且要有文件在手。
+  // 建议按**文件类型**给（xlsx / pdf / 图片各不同），每一句都指向一张真卡；
+  // 认不出的类型返回空列表，界面照 PICK_FROM_FILE.noIdea 给通用出路，不硬凑。
+  const ideasApply = (): boolean =>
+    needsFiles() && !needsFolder() && !pastesContent() && files().length > 0;
+  const rawFileIdeas = createMemo<PickSuggestion[]>(() =>
+    ideasApply() ? suggestFromFiles(files(), visibleTasks()) : [],
+  );
+  // 她已经在这张卡上了：把这一条去掉。点它等于原地重开一次，白点一下还把她刚在
+  // 上面定好的那几件事清掉（`startRun` 会重建这次）。去掉后一条不剩就整块不出现；
+  // 但**认不出的类型**（本来就没有建议）仍要出现，好把通用出路说给她。
+  const fileIdeas = createMemo<PickSuggestion[]>(() =>
+    rawFileIdeas().filter((item) => item.task.id !== run()?.taskId),
+  );
+  const showFileIdeas = (): boolean =>
+    ideasApply() && (rawFileIdeas().length === 0 || fileIdeas().length > 0);
   // #75 — 选中的是 Excel，而这台电脑还读不了。这是边界，不是错误。
   const showSheetFallback = () => hasExcelFile(files()) && !sheetCapability().available;
   // #50 — 同上，选中的是 PDF 而这台电脑还处理不了。
@@ -140,6 +162,27 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   function restoreFile(path: string): void {
     props.store.addRunFile(path);
     setRemoved((list) => list.filter((item) => item !== path));
+  }
+
+  /**
+   * P1 — 点一句「这个文件可以做的事」= 把这次换乘那张卡。
+   *
+   * 复用现有卡：换的就是目录里那张卡（`item.task`），文件和她刚说的话都带过去，
+   * 只把计划换成那张卡的固定计划——**不新造任务，也不会绕开确认页直接动手**。
+   * 她的话如果没打（理论上不会），就用这一句建议本身当原话。
+   */
+  async function useIdea(item: PickSuggestion): Promise<void> {
+    const current = run();
+    if (!current) return;
+    try {
+      await props.store.startRun(
+        { id: item.task.id, title: item.task.title, plan: item.task.plan },
+        current.files,
+        current.instruction.trim() || item.sentence,
+      );
+    } catch {
+      // 换不了就维持原来那张卡：她没丢东西，也不重复报警。
+    }
   }
 
   /** 「再选一个」：重新打开选文件的窗口（文件夹类任务打开文件夹那一个）。 */
@@ -397,6 +440,37 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
                     )}
                   </For>
                 </ul>
+              </div>
+            </Show>
+
+            {/* P1 — 手里这个文件可以做的事：按类型给几条人话，点一句就换成那张卡。
+                最多 5 条（pick.ts 保证），认不出类型时给通用出路，不假装知道。 */}
+            <Show when={showFileIdeas()}>
+              <div class="mt-6 rounded-2xl border border-slate-700 bg-slate-800/40 px-4 py-4">
+                <h3 class="text-[20px] font-semibold text-slate-200">{PICK_FROM_FILE.heading}</h3>
+                <Show
+                  when={fileIdeas().length > 0}
+                  fallback={
+                    <p class="mt-2 text-[16px] leading-relaxed text-slate-400">{PICK_FROM_FILE.noIdea}</p>
+                  }
+                >
+                  <p class="mt-1 text-[16px] leading-relaxed text-slate-400">{PICK_FROM_FILE.hint}</p>
+                  <ul class="mt-3 flex flex-col gap-2">
+                    <For each={fileIdeas()}>
+                      {(item) => (
+                        <li>
+                          <button
+                            type="button"
+                            onClick={() => void useIdea(item)}
+                            class="min-h-[44px] w-full rounded-xl border border-sky-600 bg-sky-950/30 px-4 text-left text-base text-sky-100 hover:bg-sky-900/60"
+                          >
+                            {item.sentence}
+                          </button>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </Show>
               </div>
             </Show>
 
