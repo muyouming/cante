@@ -13,13 +13,16 @@ import { join } from "node:path";
 
 import {
   RESUME_DISMISSED_KEY,
+  isInterrupted,
   isUnfinished,
   readDismissedRunId,
   rememberDismissedRunId,
+  resumeOffer,
   shouldOfferResume,
   unfinishedRun,
   type ResumeStore,
 } from "./resume.ts";
+import { RESUME } from "./copy-resume.ts";
 import type { TaskRun } from "./run.ts";
 
 function run(id: string, state: TaskRun["state"]): TaskRun {
@@ -65,7 +68,6 @@ describe("只有最近一轮没做完，才该提这一句", () => {
     expect(unfinishedRun([run("a", "failed")])?.id).toBe("a");
     expect(unfinishedRun([run("a", "cancelled")])?.id).toBe("a");
   });
-
   test("最近一轮做完了：不提（哪怕更早的一轮没做完）", () => {
     // 这正是「别有常驻横幅」：最近一件已经做完，那句提示就该消失。
     expect(unfinishedRun([run("new", "done"), run("old", "failed")])).toBeNull();
@@ -87,6 +89,63 @@ describe("只有最近一轮没做完，才该提这一句", () => {
 
   test("换了一轮没做完（id 不同）：再说一次", () => {
     expect(shouldOfferResume([run("b", "failed"), run("a", "failed")], "a")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// r9 — 第三种情形：她**正在做**的时候关掉应用，重开后看到「半途停了」。
+// ---------------------------------------------------------------------------
+describe("半途停了：记录停在 running，但这次内存里没有那件活", () => {
+  test("状态是 running 且内存里没这件（liveRunId 为 null）：认成半途停了", () => {
+    // 刚重开时的样子：runs() 从磁盘读回一条 running，currentRun() 什么都没有。
+    expect(isInterrupted(run("a", "running"), null)).toBe(true);
+    expect(unfinishedRun([run("a", "running")], null)?.id).toBe("a");
+    expect(shouldOfferResume([run("a", "running")], null, null)).toBe(true);
+    expect(resumeOffer([run("a", "running")], null, null)?.kind).toBe("interrupted");
+  });
+
+  test("**当前正在跑的那件**（内存里有同一个 id）：不许被当成半途停了", () => {
+    // 这是最容易错的回归：她正坐在那儿看着它做，首页不该说她「半路停下」。
+    expect(isInterrupted(run("live", "running"), "live")).toBe(false);
+    expect(unfinishedRun([run("live", "running")], "live")).toBeNull();
+    expect(shouldOfferResume([run("live", "running")], null, "live")).toBe(false);
+    expect(resumeOffer([run("live", "running")], null, "live")).toBeNull();
+  });
+
+  test("内存里在跑的是**另一件**：磁盘上那条 running 仍然算半途停了", () => {
+    // 她重开后已经开始做新的一件，旧的那件还是断的——同一轮 id 只对应一条。
+    expect(resumeOffer([run("old", "running"), run("live", "running")], null, "live")?.kind).toBe(
+      "interrupted",
+    );
+  });
+
+  test("failed/cancelled 走原来的那一套，不是「半途停了」", () => {
+    // 回归：别把结束状态也报成 interrupted（那样文案会改错）。
+    for (const state of ["failed", "cancelled"] as const) {
+      expect(isInterrupted(run("a", state), null)).toBe(false);
+      expect(unfinishedRun([run("a", state)], null)?.id).toBe("a");
+      expect(resumeOffer([run("a", state)], null, null)?.kind).toBe("unfinished");
+    }
+  });
+
+  test("半途停了的那一轮她放过之后：同一轮不再提", () => {
+    expect(shouldOfferResume([run("a", "running")], "a", null)).toBe(false);
+    expect(resumeOffer([run("a", "running")], "a", null)).toBeNull();
+  });
+});
+
+describe("「半途停了」那句文案把三件事说全", () => {
+  test("① 半路停下了 ② 原来的文件一个都没动 ③ 再跑一次、且不自动接着做", () => {
+    const { title, body, note } = RESUME.interrupted;
+    const all = `${title}${body}${note}`;
+    // ① 半路停下了
+    expect(title).toContain("半路停下");
+    // ② 原来的文件没有被改——她最怕的就是这个（产品律 2，用主动句说）。
+    expect(body).toContain("原来的文件一个都没动");
+    // ③ 再跑一次
+    expect(note).toContain("再跑一次");
+    // ③ 而且不自动接着做
+    expect(note).toContain("不会自己接着做");
   });
 });
 
@@ -117,10 +176,23 @@ describe("「这一轮她看过了」只记一条事实", () => {
 describe("这条提示不自动继续", () => {
   const HOME = readFileSync(join(import.meta.dir, "Home.tsx"), "utf8");
 
-  test("首页那段提示的开关就是 shouldOfferResume（不是另写一个条件）", () => {
-    // 只单测 shouldOfferResume 不够：生产路径要是换了判据，单测照样绿（AGENTS §3.1 的坑）。
-    expect(HOME).toContain("shouldOfferResume(props.store.runs(), dismissedRunId())");
+  test("首页那段提示的开关就是 resumeOffer（不是另写一个条件）", () => {
+    // 只单测 resumeOffer 不够：生产路径要是换了判据，单测照样绿（AGENTS §3.1 的坑）。
+    expect(HOME).toContain("resumeOffer(props.store.runs(), dismissedRunId(), liveRunId())");
     expect(HOME).toContain("<Show when={offerResume()}>");
+  });
+
+  test("首页把「正在做的那一轮」的真实 id 传进去（不是写死 null）", () => {
+    // 这条是 r9 最容易错的回归的**生产路径**那一半：liveRunId 必须来自
+    // currentRun()（内存里真正在跑的那件），不能永远是 null——永远 null 的话，
+    // 她正在做的过程里首页会一直说她「半路停下」。
+    expect(HOME).toContain("props.store.currentRun()?.id ?? null");
+    expect(HOME).toContain("resumeOffer(props.store.runs(), dismissedRunId(), liveRunId())");
+  });
+
+  test("半途停了用自己那一句文案，没做完用原来那句", () => {
+    expect(HOME).toContain('resume()?.kind === "interrupted" ? RESUME.interrupted : RESUME');
+    expect(HOME).toContain("{resumeCopy().title}");
   });
 
   test("首页接线里没有开始/确认/排队这些动作", () => {

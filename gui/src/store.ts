@@ -1237,6 +1237,21 @@ export function createStore(): Store {
     }
   }
 
+  /**
+   * 开始做的那一刻先落一次盘（`state: "running"`）。
+   *
+   * 她做到一半把应用关掉时（`Drop for Daemon` 只关掉守护进程的输入，不会走
+   * `finishRun`），原来磁盘上一条记录都不会有——重开后首页连一句「上次那件事
+   * 半路停下了」都说不出来。这里补上那一笔：结束时 `finishRun` 会拿**同一个 id**
+   * 再 `persistRun` 一次，而 `save_run` 是 upsert，正好把它覆盖掉。
+   *
+   * 写盘失败不打断任务：`persistRun` 已经把失败吞掉了（记录留在内存里，只是下次
+   * 开不出来）。
+   */
+  async function persistRunStart(run: TaskRun): Promise<void> {
+    await persistRun(run, { created: [], modified: [], deleted: [] }, pendingSnapshot);
+  }
+
   async function refreshRuns(): Promise<void> {
     try {
       const response = (await invokeOp("run_log")) as { runs?: unknown };
@@ -1320,6 +1335,7 @@ export function createStore(): Store {
     setCurrentRun(next);
     markProgressRunning();
     await beginSnapshot(next);
+    await persistRunStart(next);
     const instruction = composedInstruction(run);
     await sendRunInstruction(allowOverwrite ? instruction + OVERWRITE_CONSENT : instruction);
   }
@@ -1331,6 +1347,7 @@ export function createStore(): Store {
     setCurrentRun(next);
     markProgressRunning();
     await beginSnapshot(next);
+    await persistRunStart(next);
     await sendRunInstruction(dryRunInstruction(composedInstruction(run)));
   }
 
@@ -1391,6 +1408,7 @@ export function createStore(): Store {
     const next: TaskRun = { ...run, state: "running", error: null, result: null };
     setCurrentRun(next);
     await beginSnapshot(next);
+    await persistRunStart(next);
     await sendRunInstruction(trimmed);
   }
 

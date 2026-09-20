@@ -396,7 +396,10 @@ describe("confirmation gate", () => {
       expect(run?.result?.files).toEqual([]);
       expect(run?.result?.summary).toContain("没有改动任何文件");
       // 记到磁盘上的那份也一样：undo 里没有任何要回滚的东西。
-      const saved = opCalls("save_run")[0] as { run: { undo: { created: string[]; modified: string[]; deleted: string[] } } };
+      // r9 之后开始做时也会先落一次盘，所以这里要看**最后那次**（结束那次），
+      // 否则断言的是开始那条 running（它的 undo 本来就空，会形同虚设）。
+      const saved = opCalls("save_run").at(-1) as { run: { state: string; undo: { created: string[]; modified: string[]; deleted: string[] } } };
+      expect(saved.run.state).toBe("done");
       expect(saved.run.undo.created).toEqual([]);
       expect(saved.run.undo.modified).toEqual([]);
       expect(saved.run.undo.deleted).toEqual([]);
@@ -460,7 +463,10 @@ describe("finish, impact and undo", () => {
     expect(run?.result?.summary).toContain("新增 1 个文件");
 
     // The record persisted to disk carries the undo metadata.
-    const saved = opCalls("save_run")[0] as { run: { id: string; undo: { created: string[]; roots: string[] } } };
+    // r9 之后开始做时也会先落一次盘，所以要看**最后那次**（结束那次）；断言它的
+    // state 是 done，才能证明「带 undo 元数据的正是结束那条」，而不是开始那条空壳。
+    const saved = opCalls("save_run").at(-1) as { run: { id: string; state: string; undo: { created: string[]; roots: string[] } } };
+    expect(saved.run.state).toBe("done");
     expect(saved.run.id).toBe(run?.id ?? "");
     expect(saved.run.undo.created).toEqual(["/work/新表.xlsx"]);
     expect(saved.run.undo.roots).toEqual(["/work"]);

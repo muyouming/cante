@@ -50,7 +50,7 @@ import ResultsPanel from "./ResultsPanel.tsx";
 // r5 — 重开后主动提一句「上次有件事没做完」：她不用自己想到去点历史。
 // 只在最近一轮真的没做完时出现；她放过的那一轮不再提（见 resume.ts）。
 import { RESUME } from "./copy-resume.ts";
-import { readDismissedRunId, rememberDismissedRunId, shouldOfferResume } from "./resume.ts";
+import { readDismissedRunId, rememberDismissedRunId, resumeOffer } from "./resume.ts";
 import History from "./History.tsx";
 import { useFocusLayer } from "./FocusLayer.tsx";
 import TaskCard from "./TaskCard.tsx";
@@ -94,7 +94,14 @@ export default function Home(props: HomeProps): JSX.Element {
   const [dismissedRunId, setDismissedRunId] = createSignal<string | null>(readDismissedRunId());
   const [resumeHistoryOpen, setResumeHistoryOpen] = createSignal(false);
   // 出现条件就是「最近一轮没做完、且她还没放过这一轮」——没有就不出现，不做常驻横幅。
-  const offerResume = (): boolean => shouldOfferResume(props.store.runs(), dismissedRunId());
+  // r5/r9 — 这次真正在跑的那一轮的 id（没有就是 null）。它就是「内存里有活」的判据：
+  // 刚重开时它是 null，磁盘上那条 `running` 才会被认成「半途停了」；而正在做的
+  // 那件 id 和它相等，不会被误认。
+  const liveRunId = (): string | null => props.store.currentRun()?.id ?? null;
+  const resume = () => resumeOffer(props.store.runs(), dismissedRunId(), liveRunId());
+  const offerResume = (): boolean => resume() !== null;
+  // 半途停了 / 没做完，用各自的文案；其余（没有）由 <Show> 挡住。
+  const resumeCopy = () => (resume()?.kind === "interrupted" ? RESUME.interrupted : RESUME);
   const resumeLayer = useFocusLayer({
     open: () => resumeHistoryOpen(),
     onEscape: () => setResumeHistoryOpen(false),
@@ -295,17 +302,17 @@ export default function Home(props: HomeProps): JSX.Element {
               class="mt-5 rounded-2xl border-2 border-amber-600 bg-amber-950/30 px-5 py-4"
               aria-label={RESUME.ariaSection}
             >
-              <h2 class="text-[20px] font-semibold text-amber-100">{RESUME.title}</h2>
-              <p class="mt-1 text-[16px] leading-relaxed text-slate-200">{RESUME.body}</p>
-              <p class="mt-1 text-[16px] leading-relaxed text-slate-400">{RESUME.note}</p>
+              <h2 class="text-[20px] font-semibold text-amber-100">{resumeCopy().title}</h2>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-200">{resumeCopy().body}</p>
+              <p class="mt-1 text-[16px] leading-relaxed text-slate-400">{resumeCopy().note}</p>
               <div class="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
                   onClick={openResumeHistory}
-                  aria-label={RESUME.ariaOpen}
+                  aria-label={resumeCopy().ariaOpen}
                   class="min-h-[48px] rounded-xl bg-amber-500 px-6 text-[16px] font-bold text-slate-950 hover:bg-amber-400"
                 >
-                  {RESUME.open}
+                  {resumeCopy().open}
                 </button>
                 <button
                   type="button"

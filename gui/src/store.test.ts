@@ -27,6 +27,7 @@ import {
   toggleOption,
 } from "./simple/question.ts";
 import { SCHEDULE_STORAGE_KEY } from "./simple/schedule.ts";
+import type { TaskRun } from "./simple/run.ts";
 // #140 — notice 的四个写方在界面上的说法（结果卡片 / 选文件那一步 / 出错页）。
 import { PICK_KINDS, UNDO_KINDS, noticeView, visibleNotice } from "./simple/copy-notice.ts";
 
@@ -54,6 +55,8 @@ let healthSession: unknown = null;
 let undoReply: { restored?: unknown; failed?: unknown } = { restored: [], failed: [] };
 let undoFails = false;
 let pickerFails = false;
+// r9 — 让 save_run 写盘失败，验证「落盘失败不打断任务」。
+let saveRunFails = false;
 
 function emit(channel: string, payload: unknown): void {
   for (const handler of handlers.get(channel) ?? []) handler(payload);
@@ -66,6 +69,7 @@ function reset(): void {
   undoReply = { restored: [], failed: [] };
   undoFails = false;
   pickerFails = false;
+  saveRunFails = false;
   hydration = { cursor: 0, truncated: false, events: [], state: { status: "idle", session: null, pending_approval: null } };
   clearStorage();
 }
@@ -122,6 +126,9 @@ mock.module("./tauri.ts", () => ({
       case "undo_run":
         if (undoFails) throw new Error("the file is locked");
         return { ok: true, ...undoReply };
+      case "save_run":
+        if (saveRunFails) throw new Error("the disk is full");
+        return { ok: true };
       case "pick_files":
         if (pickerFails) throw new Error("no file dialog on this machine");
         return { paths: [] };
@@ -879,6 +886,71 @@ describe("replyToRun", () => {
 });
 
 // ---------------------------------------------------------------------------
+// r9 — 开始做的那一刻就落一次盘（state: "running"）。
+//
+// 根因：应用退出时只 drop 守护进程 stdin，不走 finishRun，所以「她做到一半关掉
+// 应用」原来在磁盘上一条记录都没有。修法是开始动手时先 save_run 一次，结束时那次
+// save_run 用同一个 id 把它覆盖（Rust 的 upsert_run 按 id 去重后再插到最前）。
+// ---------------------------------------------------------------------------
+describe("r9 开始做时就落盘（半途停下也要有记录）", () => {
+  const TASK = {
+    id: "excel.merge",
+    title: "把几张表合成一张",
+    plan: ["打开这几张表", "合成一张新表"],
+  };
+
+  test("点确认→真的发出去了，而且在这之前已经把这条 running 落盘了", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/a.xlsx", "/work/b.xlsx"], "把这两张表合成一张");
+    // 未开始动手之前不落盘（确认页不是「正在做」）。
+    expect(opCalls("save_run")).toEqual([]);
+
+    await store.confirmRun();
+    expect(store.currentRun()?.state).toBe("running");
+
+    // 走的是生产路径（confirmRun），不是 task.prompt() 那种产品不会走的路。
+    const savedAtStart = opCalls("save_run")[0] as { run: TaskRun } | undefined;
+    expect(savedAtStart).toBeDefined();
+    expect(savedAtStart?.run.state).toBe("running");
+    expect(savedAtStart?.run.id).toBe(store.currentRun()?.id ?? "");
+    // 落盘先于真正把指令发出去：哪怕进程在这之后就没了，磁盘上也已经有这一条。
+    const names = calls.map((call) => call.name);
+    expect(names.indexOf("save_run")).toBeLessThan(names.indexOf("send_input"));
+    // 她说过的那句话和卡片提示词都在发出去的那段里（同一条生产路径）。
+    const sent = opCalls("send_input") as Array<{ text: string }>;
+    expect(sent.at(-1)?.text).toContain("把这两张表合成一张");
+    dispose();
+  });
+
+  test("结束时用同一个 id 覆盖那条 running（不会多出一轮）", async () => {
+    const { store, dispose } = await setup();
+    await store.startRun(TASK, ["/work/a.xlsx"], "把这两张表合成一张");
+    await store.confirmRun();
+    emit("event", event("TurnEnd", { status: "Completed", steps: 1 }));
+    await Bun.sleep(20);
+
+    expect(store.currentRun()?.state).toBe("done");
+    const saved = opCalls("save_run") as Array<{ run: TaskRun }>;
+    const ids = saved.map((call) => call.run.id);
+    // 两次写盘用的是同一个 id。
+    expect(ids.every((id) => id === store.currentRun()?.id)).toBe(true);
+    expect(ids.length).toBeGreaterThanOrEqual(2);
+    // 后写的那次是结束状态。
+    expect(saved.at(-1)?.run.state).toBe("done");
+    dispose();
+  });
+
+  test("落盘失败不打断任务：照样把指令发出去", async () => {
+    const { store, dispose } = await setup();
+    // 写盘报错（磁盘满 / 没权限 / 桥不可用）——persistRun 容错，任务继续。
+    saveRunFails = true;
+    await store.startRun(TASK, ["/work/a.xlsx"], "把这两张表合成一张");
+    await store.confirmRun();
+    expect(opCalls("send_input").length).toBe(1);
+    expect(store.currentRun()?.state).toBe("running");
+    dispose();
+  });
+});
 
 // P0 — 确认页上「不用这个」。
 //
