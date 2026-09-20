@@ -330,20 +330,40 @@ pub fn read_sheet_rows(
     // 工具不在（被删了、路径过时了）时，把操作系统的话换成用户看得懂的一句。
     let output = command.output().map_err(|_| SHEET_UNAVAILABLE_WHY.to_string())?;
     if !output.status.success() {
-        // cante-sheets 的错误都是中文，直接端给用户；真的没有说明时才兜底。
+        // 工具的错误是「中文在前、原文在后」两段（壳用 `sheets::error_stderr` 拼）。
+        // 端出去之前先把原文切掉：库/系统的原话（多半是英文）只进日志，给来帮忙的
+        // 技术同事看 —— 绝不跟她看的那句话拼在一起（产品律 3 的「复制详情」）。
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let message = stderr.trim();
-        return Err(if message.is_empty() {
-            SHEET_READ_FAILED_WHY.to_string()
-        } else {
-            message.to_string()
-        });
+        let (visible, detail) = split_sheet_stderr(&stderr);
+        if let Some(detail) = detail {
+            eprintln!("cante read_result_sheet: {detail}");
+        }
+        return Err(if visible.is_empty() { SHEET_READ_FAILED_WHY.to_string() } else { visible });
     }
 
     // `cante-sheets read` 输出的是标准 CSV：逗号、引号、格子里的换行都已经转义，
     // 所以这里按 CSV 解析回去，格子的内容不会被拆错。
     let stdout = String::from_utf8_lossy(&output.stdout);
     Ok(crate::sheets::csv_to_rows(&stdout))
+}
+
+/// 把 `cante-sheets` 的 stderr 拆成「给她看的那句」和「给技术同事看的原文」。
+///
+/// 壳打印的格式是：她看的中文那句，然后 `DETAIL_MARKER` 一行，再是库/系统的原话
+/// （见 `sheets::error_stderr`）。这里只把标记**之前**那段交给她；标记之后那段
+/// （可能是英文）交给调用方送进日志 —— 关键是她看的那句里永远不会有英文。
+///
+/// 没有标记时（#279 之后所有普通错误都是这样）整段就是她看的那句，原文为空：
+/// 不凭空造详情，也不丢任何一个字。
+fn split_sheet_stderr(stderr: &str) -> (String, Option<String>) {
+    let text = stderr.trim();
+    match text.split_once(crate::sheets::DETAIL_MARKER) {
+        Some((visible, detail)) => {
+            let detail = detail.trim();
+            (visible.trim().to_string(), (!detail.is_empty()).then(|| detail.to_string()))
+        }
+        None => (text.to_string(), None),
+    }
 }
 
 /// 界面上的「复制成微信能贴的文字」用它把结果表读出来。

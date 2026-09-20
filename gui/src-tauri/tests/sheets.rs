@@ -243,3 +243,90 @@ fn the_reader_itself_says_the_file_is_not_plain_text() {
     assert!(!message.to_lowercase().contains("utf-8"), "{message}");
     assert!(message.contains("另存为"), "{message}");
 }
+
+// ---------------------------------------------------------------------------
+// 那种「zip 还能开、表名还读得到、但表自己的 XML 没了」的坏文件（真机 #280 §6
+// 实测会走到她屏幕上的一句英文）。断言分两层：库的 Display 只有中文；
+// 命令行壳的 stderr 用 DETAIL_MARKER 分段，段前无英文、段后保留原文给技术同事。
+// ---------------------------------------------------------------------------
+
+/// 用 zip crate 直接写一个 stored 的最小 xlsx：`[Content_Types].xml` 与
+/// `xl/workbook.xml`（含表名「数据」）和 rels 都在，**唯独 `xl/worksheets/sheet1.xml` 没了**——
+/// 真机验收 #280 §6 里那种「zip 还能开、表名还读得到、表自己的 XML 没了」的坏文件。
+fn write_missing_sheet_xlsx(path: &std::path::Path) {
+    let file = std::fs::File::create(path).expect("create broken xlsx");
+    let mut zip = zip::ZipWriter::new(file);
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Stored);
+    let entries: [(&str, &str); 4] = [
+        (
+            "_rels/.rels",
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"#,
+        ),
+        (
+            "[Content_Types].xml",
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/></Types>"#,
+        ),
+        (
+            "xl/workbook.xml",
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="数据" sheetId="1" r:id="rId1"/></sheets></workbook>"#,
+        ),
+        (
+            "xl/_rels/workbook.xml.rels",
+            r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#,
+        ),
+    ];
+    for (name, body) in entries {
+        zip.start_file(name, opts).expect("start zip entry");
+        std::io::Write::write_all(&mut zip, body.as_bytes()).expect("write entry");
+    }
+    zip.finish().expect("finish zip");
+}
+
+#[test]
+fn a_workbook_missing_its_sheet_xml_shows_her_only_chinese() {
+    let dir = TempDir::new("missing-sheet");
+    let file = dir.join("结果.xlsx");
+    write_missing_sheet_xlsx(&file);
+
+    let error = read_sheet(&file, Some("数据")).expect_err("这张表的 XML 没了，必须报错");
+    let shown = error.to_string();
+    // 她看的那句：必须是中文的说法，不许把库的英文原话拼进来。
+    for leak in ["Xlsx", "xlsx error", "Worksheet", "not found", "Error", "error:"] {
+        assert!(!shown.contains(leak), "她看的那句漏了英文 {leak:?}：{shown}");
+    }
+    assert!(shown.contains("出了点问题"), "她应该看到中文的说明：{shown}");
+    // 给技术同事的原文必须还在（产品律 3 的「复制详情」，不许把它删了）。
+    let detail = error.detail().expect("给技术同事的原文必须保留");
+    assert!(!detail.is_empty());
+}
+
+#[test]
+fn the_shell_splits_her_sentence_from_the_raw_with_the_marker() {
+    let dir = TempDir::new("missing-sheet-cli");
+    let file = dir.join("结果.xlsx");
+    write_missing_sheet_xlsx(&file);
+
+    let output = Command::new(SHEETS_BIN).arg("read").arg(&file).output().expect("run shell");
+    assert_eq!(output.status.code(), Some(2), "坏文件必须退出 2");
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let (visible, detail) = match stderr.split_once(cante_gui_lib::sheets::DETAIL_MARKER) {
+        Some(pair) => pair,
+        // 没有标记 = 那句本来就全是中文（也允许），但那种情况下更不许有英文。
+        None => {
+            assert!(!stderr.contains("Xlsx error"), "无标记时整段都是给她看的：{stderr}");
+            return;
+        }
+    };
+    assert!(visible.contains("出了点问题"), "她看的那段必须是中文说明：{visible}");
+    for leak in ["Xlsx error", "Worksheet", "not found"] {
+        assert!(!visible.contains(leak), "标记之前（她看的段）漏了英文 {leak:?}：{visible}");
+    }
+    assert!(!detail.trim().is_empty(), "标记之后（给技术同事的段）必须有原文");
+}
+
+
