@@ -13,7 +13,15 @@ pub mod sheets;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tauri::{Emitter as _, Manager as _};
+use tauri::{Emitter as _, Listener as _, Manager as _};
+
+/// 网页侧确认「可以关了」的那一下。
+///
+/// 她正在做的时候点右上角关掉，网页侧会先亮一句确认（gui/src/simple/close-guard.ts）。
+/// 她选「关掉」之后，网页侧关不了这个窗口：本应用的 core:default 没有 allow-destroy /
+/// allow-close（见 src-tauri/capabilities/default.json），而只要网页侧存在 close-requested
+/// 的监听，Rust 就会自动拦下原生关闭。所以真正的关由这里执行。
+const CLOSE_CONFIRMED: &str = "cante://close-confirmed";
 
 /// Bridges the daemon's event sink to Tauri's global event bus.
 struct TauriEmitter {
@@ -52,6 +60,14 @@ pub fn run() {
             let emitter: Arc<dyn daemon::Emitter> =
                 Arc::new(TauriEmitter { app: app.handle().clone() });
             app.manage(daemon::Daemon::new(emitter));
+            // 她确认要关（CLOSE_CONFIRMED）：把窗口销毁掉。销毁唯一窗口后就走到
+            // RunEvent::ExitRequested → 应用退出，和直接点 X 是同一条路。
+            let handle = app.handle().clone();
+            let _ = app.listen(CLOSE_CONFIRMED, move |_| {
+                if let Some(window) = handle.get_webview_window("main") {
+                    let _ = window.destroy();
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
