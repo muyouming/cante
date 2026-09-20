@@ -114,7 +114,7 @@ async function renderedButtonNames(): Promise<string[]> {
   scope.document = { addEventListener: () => {}, removeEventListener: () => {} };
   try {
     const html = renderToString(() =>
-      ResultsPanel({ store: stubStore(runs), onClose: () => {} }),
+      ResultsPanel({ store: stubStore(runs), onClose: () => {}, onExplore: () => {} }),
     );
     // 组件拆掉时 FocusLayer 会把「把焦点还回去」排进一个微任务（queueMicrotask）；
     // 等它跑完再撤掉 document，否则会在别的测试文件头上炸一个假的红。

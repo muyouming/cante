@@ -90,7 +90,9 @@ async function renderedHeadings(runs: TaskRun[]): Promise<Array<{ level: number;
   const previous = scope.document;
   scope.document = { addEventListener: () => {}, removeEventListener: () => {} };
   try {
-    const html = renderToString(() => ResultsPanel({ store: stubStore(runs), onClose: () => {} }));
+    const html = renderToString(() =>
+      ResultsPanel({ store: stubStore(runs), onClose: () => {}, onExplore: () => {} }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
     return [...html.matchAll(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/g)].map((match) => ({
       level: Number(match[1]),

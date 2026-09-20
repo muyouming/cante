@@ -638,9 +638,18 @@ export default function Home(props: HomeProps): JSX.Element {
         </form>
       </div>
 
-      {/* r17 — 全屏的「我做的结果」。打开文件/文件夹都走 store，面板自己不碰桥接。 */}
+      {/* r17 — 全屏的「我做的结果」。打开文件/文件夹都走 store，面板自己不碰桥接。
+          一份都没有时，面板里的「去看看能做什么」把这一层换成卡片库（先关这一层、
+          再开那一层，同一时刻只有一层）。 */}
       <Show when={resultsOpen()}>
-        <ResultsPanel store={store()} onClose={() => setResultsOpen(false)} />
+        <ResultsPanel
+          store={store()}
+          onClose={() => setResultsOpen(false)}
+          onExplore={() => {
+            setResultsOpen(false);
+            setLibraryOpen(true);
+          }}
+        />
       </Show>
 
       {/* r5 — 首页上那层「我做过的事」：她点「看看上次那件事」时打开，直接看那件

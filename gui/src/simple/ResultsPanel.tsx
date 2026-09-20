@@ -26,6 +26,12 @@ import { fetchFileFacts, normalizeFacts, type FileFact } from "./verify.ts";
 export interface ResultsPanelProps {
   store: Store;
   onClose(): void;
+  /**
+   * 一份结果都没有时，卡片里那个出路要干的事：关掉这一层、开卡片库（「你要做
+   * 什么」）。这里不直接开库：面板只渲染，开哪一层由首页决定（和 onClose 一样）。
+   * 故意做成**必填**——少接一根线应该是编译错误，而不是空态里悄悄少一个出路。
+   */
+  onExplore(): void;
 }
 
 /** 一行结果文件的现状，用颜色分清楚：还在是绿的，不在是红的，说不清是中性的。 */
@@ -117,8 +123,10 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
   }
 
   // 打开就落在搜索框上：这个面板的意义就是「用一句话把上次那张表找回来」；一个结果
-  // 都还没有的时候落在「关掉」上（那时屏幕上只有它）。焦点进得来、Tab 在这一层里
-  // 循环、Esc 关掉——三件事都在 FocusLayer 里做（别的浮层走同一条路）。
+  // 都还没有的时候搜索框根本不渲染，焦点就落在「回到首页」上（空态里除了它还有
+  // 「去看看能做什么」，两个都够得着、读屏也都念得出，落在关闭键上是安全答案）。
+  // 焦点进得来、Tab 在这一层里循环、Esc 关掉——三件事都在 FocusLayer 里做
+  // （别的浮层走同一条路）。
   const layer = useFocusLayer({
     open: () => true,
     initialFocus: () => searchInput ?? closeButton,
@@ -214,6 +222,17 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
               <div class="mt-5 rounded-2xl border border-slate-700 bg-slate-900 px-5 py-8 text-center">
                 <p class="text-[20px] font-semibold text-slate-200">{RESULTS.empty.title}</p>
                 <p class="mt-2 text-[16px] leading-relaxed text-slate-400">{RESULTS.empty.body}</p>
+                {/* 她第一次点开这个面板时就是这一屏，而右上角那个「回到首页」离这里
+                    隔着一整个屏；在卡片里直接给一个 44px 的出路，她不用先找关闭键。 */}
+                <div class="mt-5 flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => props.onExplore()}
+                    class="min-h-[48px] rounded-xl bg-sky-500 px-6 text-[18px] font-bold text-slate-950 hover:bg-sky-400"
+                  >
+                    {RESULTS.empty.explore}
+                  </button>
+                </div>
               </div>
             }
           >
