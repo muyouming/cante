@@ -5,10 +5,15 @@
 //   * dead   —— 端口没人听（连 TCP 都握不上手）→ 等价于「服务方端口不可达」；
 //   * cut    —— 正常开始，答到第 2 个工具调用之后**不再写一个字节、也不发 FIN**
 //              （测试 bridge.rs 的 `stall` 现场就是这么造的，可复用）→ 等价于「中途断掉」；
-//   * forbid —— 每个请求都回 403（公司网络挡住/网关拒绝）→ 等价于「代理挡住」。
+//   * forbid —— 每个请求都回 403（公司网络挡住/网关拒绝）→ 等价于「代理挡住」；
+//   * proxy407 —— 每个请求都回 407（代理要你先登录/验证：公司网关那种）；
+//   * busy   —— 每个请求都回 503 + 「insufficient credits」（#286 的真实原文形状：
+//              派活的网关欠费停机）→ 等价于「服务方自己忙不过来 / 这个月用完了」。
+//               这一场要证的是 **她看到的不是「你的文件有问题」、也不是「你没配好」**，
+//               而是「服务方用不了 → 等一会儿 → 一直这样再找管网络的同事」那三步。
 //
 // 它**只**实现 pi 真正会发的两条路径：GET /v1/models 与 POST /v1/chat/completions（SSE）。
-// 用法： node relay.mjs <dead|cut|forbid> <port> [--marker <文件>]
+// 用法： node relay.mjs <dead|cut|forbid|proxy407|busy> <port> [--marker <文件>]
 
 import http from "node:http";
 import fs from "node:fs";
@@ -71,6 +76,35 @@ const server = http.createServer((req, res) => {
         error: { message: "Forbidden: blocked by corporate proxy", type: "proxy_error", code: 403 },
       });
       res.writeHead(403, { "Content-Type": "application/json" });
+      res.end(payload);
+      return;
+    }
+
+    if (mode === "proxy407") {
+      // 代理要你先证明你是谁（407 Proxy Authentication Required）。
+      // 注意：**2026-09-21 之前这个 mode 只写在 run-offline.ps1 的文档里，relay.mjs 里没有** ——
+      // 于是 `-Scenario proxy407` 实际跑的是一个**正常干活**的假服务方（验收 15 记的那种 407
+      // 已经不是这份脚本产出的了）。这里把它补回来。
+      res.writeHead(407, {
+        "Content-Type": "application/json",
+        "Proxy-Authenticate": 'Basic realm="corporate-proxy"',
+      });
+      res.end(JSON.stringify({ error: { message: "Proxy Authentication Required", type: "proxy_error", code: 407 } }));
+      return;
+    }
+
+    if (mode === "busy") {
+      // 服务方收不了这一单：欠费停机 / 限流。正文照真实网关返回的形状（#286 的现场：
+      // `503: {...insufficient credits to make this request...}`）。
+      // 英文原文只该出现在「复制详情」里 —— 界面上那三句中文是产品翻出来的。
+      const payload = JSON.stringify({
+        error: {
+          message: '503: {"type":"error","error":{"type":"insufficient_quota","message":"insufficient credits to make this request"}}',
+          type: "insufficient_quota",
+          code: 503,
+        },
+      });
+      res.writeHead(503, { "Content-Type": "application/json" });
       res.end(payload);
       return;
     }

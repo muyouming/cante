@@ -69,13 +69,14 @@
   它当初是怎么装的（那份的 setup.exe 是 37,202,447，与 0.2.4 的 37,245,131 几乎一样大）——
   所以这仍然是**观察，不是结论**：说不了“0.2.3 那份是别的来源” ✗。
 
-## 4. 复跑判据（三条跑的全是**装出来的那份**）
+## 4. 复跑判据（四条，跑的全是**装出来的那份**）
 
 | # | 判据 | 怎么跑 | 结论 |
 | --- | --- | --- | --- |
 | 1 | **产物闸门**（配置≠产物那条） | `bash gui/scripts/verify-bundle.sh --dir "C:\Users\cante\AppData\Local\Cante"` | **退出码 0 / OK** ✓ |
 | 2 | **第一屏**（UIA 读窗口真实文字，对照 `copy.ts`） | `gui\scripts\windows\accept-first-screen.ps1 -Exe "C:\Users\cante\AppData\Local\Cante\cante-gui.exe"` | **退出码 0**，10 条对上 10 条、对不上 0 条 ✓ |
 | 3 | **#287 固化的那套判据（GBK(936) 的 CSV 交进来）** | `gui\scripts\windows\accept-gbk-csv.ps1 -Exe "C:\Users\cante\AppData\Local\Cante\cante-sheets.exe"`（它本来就支持 `-Exe`，所以直接指到**装机版**那份，不是工作树产物 ✓） | **退出码 0**，通过 **10/10** ✓ |
+| 4 | **#286 那套话（服务方忙/用完）——真窗口** | `gui\scripts\windows\run-offline.ps1 -Scenario busy -Exe "C:\Users\cante\AppData\Local\Cante\cante-gui.exe"`（`busy` 是本轮新增的现场） | **退出码 0**，屏幕上逐条对上 `copy-service.ts` 的 4 句、零术语 6/6 ✓ |
 
 闸门（1）逐条：① `cante-gui` / `cante-sheets` / `cante-pdf` / `cante-bridge` 四个都在；
 ② 三个自带程序**在安装目录里跑得起来**、版本都打 `0.2.4`；③ 没有 `.d`、没有 0 字节文件、
@@ -93,6 +94,45 @@
 （`runs.json`）与历史**已经不在了** ✓ —— 这是脚本的既定行为（不是意外），但它意味着
 「她的档案/历史跨版本还在不在」这一条**在本机已经无法再补验**（见 §5 第 5 条）。
 
+### 4.1 第 4 条（#286）屏幕上的原文
+
+场景：假服务方对每个请求都回 `503` + `insufficient credits`（#286 的真实原文形状）。
+应用是**装机版那份的隔离副本**（`C:\Users\cante\AppData\Local\Cante\cante-gui.exe`
+→ `C:\cante-verify-17\busy\app-root\app\cante-gui.exe`）；跑完落盘的是真 WebView2 屏幕文字：
+
+```
+这次没能做完
+发生了什么
+这件事没有做完。
+你可以怎么做
+原来的文件都还在。可以再试一次，或者换一种说法告诉我要做什么。
+→过一会儿再试
+帮你干活的程序现在用不了，多半不是你做错什么。过几分钟再点这个按钮。
+复制详情给管网络的同事
+一直这样，就把下面这段原文复制出来，发给管网络的同事，请他帮忙看看。
+展开技术详情
+再试一次
+换一个任务
+```
+
+逐条判据（**期望文案从 `copy-service.ts` 里取**，不手抄 —— 手抄会漂移 ✓）：
+
+```
+[对] 按钮「过一会儿再试」：过一会儿再试
+[对] 那句解释：帮你干活的程序现在用不了，多半不是你做错什么。过几分钟再点这个按钮。
+[对] 按钮「复制详情给管网络的同事」：复制详情给管网络的同事
+[对] 那句解释：一直这样，就把下面这段原文复制出来，发给管网络的同事，请他帮忙看看。
+[对] 没有 insufficient / quota / credits / 503 / 429 / 额度
+→ 通过
+```
+
+另外两条硬事实：**原文件 sha256 跑前跑后一致** ✓
+（`07B21A65…E95F`）；**现场真摆上了** ✓（pi 在本轮配置目录里留下了 `auth.json` / `models-store.json`
+哨兵 —— 否则屏幕上是成功也说明不了什么）。退出码 **0**。
+
+本轮为此改了两个验收脚本（`relay.mjs` 加 `busy` 模式、`run-offline.ps1` 加 `busy` 现场与判据块），
+详见 §7。
+
 ## 5. 我**没**验证什么（如实列，不写成「通过」）
 
 1. **端到端跑一张卡（真出一份文件）**：**没跑**。理由：`run-accept-drive.ps1` 单卡按
@@ -108,13 +148,13 @@
    要看档案有没有被保住，得在**不删档案**的前提下另跑一轮（装前多一份档案快照），这一批没做。
 6. **`inspect-installer.ps1`（拆开安装包看内部清单）**：**没跑** —— 这台机器**没有 7-Zip**，
    跑了也只会在「列包内文件」那步退 3，不如如实写「没跑」。
-7. **#286「服务方忙 / 用完」的中文出口**：**没验（界面那一层）**。
-   那组话在 `gui/src/simple/copy-service.ts` 里（零术语，技术原文只进「复制详情」）✓，
-   单测（`recovery-service.test.ts` 那组）在 `check-windows.ps1` 里也是绿的 ✓ —— 但这些都只证明
-   **源码里写着这句话**，**不证明装机版界面上真的弹了这句** ✗。真要在真机上验，得跑
-   `gui\scripts\windows\run-offline.ps1 -Scenario <五种现场>`（它驱动真窗口 + 读屏幕原文）—— 而那个
-   脚本默认用的是**本轮构建**那份（`Resolve-BuiltExe`：`target\debug|release\cante-gui.exe`），
-   要指到装机版得显式给 `-Exe`，再等一整轮。这一批的窗口不够，所以**如实写没验**。
+7. **#286「服务方忙 / 用完」的那一层「复制详情」**：屏幕那一层**已经验了**（§4 第 4 条 ✓），
+   但**英文原文（`503` / `insufficient credits`）我没点开「展开技术详情」去复核** ——
+   屏幕原文里它当时是**折着的** ✓（那一屏没有英文 ✓，那是对的）。
+   「点开后给的原文对不对」属于 #282 那一层的判据，本轮**没验** ✗。
+8. **`proxy407` 那一场没有重跑**：我在 `relay.mjs` 里补回了 407 的分支（见 §7：那个 mode 只写在
+   文档里、脚本里一直没有，所以 `-Scenario proxy407` 实际跑的是一个**正常干活**的假服务方），
+   但**这一轮没有重跑那一场** —— 验收 15 记的 407 结论仍然只是当时的证据 ✗。
 
 ## 6. 这台机器上留下的原始输出
 
@@ -131,7 +171,37 @@ C:\cante-verify-17\17\first-screen\report.txt      第一屏 UIA 读回的文字
 C:\cante-verify-17\17\gbk\gbk-csv-report.txt       GBK 那条的原始报告（10/10，退出码 0）
 C:\cante-verify-17\17\gbk\gbk-input.csv            真样本（脚本打印的头 12 字节 D0 D5 C3 FB …）
 C:\cante-verify-17\17\gbk\stderr.txt  stdout.txt   产物发出来的原文（可复核「退出 2 / 没有半成品」）
+C:\cante-verify-17\busy-run.txt                    #286 那一场的完整脚本输出（含逐条判据块）
+C:\cante-verify-17\busy\report.txt                 #286 那一场的报告（含屏幕原文哈希对照）
+C:\cante-verify-17\busy\artifacts\outcome-error-page.txt / .html / .png   屏幕原文 / DOM / 截图
+C:\cante-verify-17\busy\artifacts\offline-result.json   结构化结果（outcome=error-page）
+C:\cante-verify-17\busy\relay-busy.log             假服务方日志（每个请求都回了 503）
 ```
 
 （`C:\cante-verify-17\` 在**仓库外**。我临时在仓库里用的 `.verify\` 已经整个移出去，没留在库里；
 `git status` 只剩这条分支上本来就有的 `?? gui/accept-drive-result.json` —— 不是这一批产生的。）
+
+---
+
+## 7. 这一轮改的验收脚本（为什么改、怎么跑）
+
+| 文件 | 改了什么 | 为什么 |
+| --- | --- | --- |
+| `gui\scripts\windows\offline-probe\relay.mjs` | 新增 `busy` 模式：每个请求回 `503` + `insufficient credits` | #286 的现场（网关欠费停机）原来**一个场景都造不出来** —— dead/cut/forbid/wire/proxy407 都不产生「服务方忙/用完」那一类错 |
+| 同上 | 补回 `proxy407` 模式（ `407` + `Proxy-Authenticate` ） | 这个 mode **只写进过文档**，`relay.mjs` 里一直没有 → `-Scenario proxy407` 实际跑的是一个**正常干活**的假服务方（脚本与它声称的现场不是一回事 ✗）。本轮补回；**但没有重跑那一场**（§5 第 8 条）|
+| `gui\scripts\windows\run-offline.ps1` | 加 `busy` 现场（`-Scenario` 白名单、专用端口 `18095`、注释/用法）+ 跑完一段 **#286 判据块** | 把「#286 在真窗口上成不成立」变成**一条命令**（#287 那套做法），而不是手打几条命令 + 人眼看 |
+
+判据块怎么做人话：**期望文案从产品源码 `copy-service.ts` 里用正则取**（不手抄 —— 手抄会漂移 ✓），
+四条文案逐条比；再加 6 个零术语词（`insufficient` / `quota` / `credits` / `503` / `429` / `额度`）
+**不许出现在屏幕上**；任一不对就退 **3（产品问题）**。
+
+跑法（一条命令；`-Exe` 指装机版那份就验装机版，不给就用工作树构建 —— 注意默认是**后者**）：
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File gui\scripts\windows\run-offline.ps1 ^
+  -Scenario busy -Exe "C:\Users\cante\AppData\Local\Cante\cante-gui.exe" ^
+  -WorkRoot "C:\cante-verify-17\busy" -TimeoutSec 900
+```
+
+退出码沿用原本那套：**0** = 到结局页且判据全中；**2** = 环境问题（现场没摆上 / 驱动起不来）；
+**3** = 产品问题（屏幕上那套话不对）。

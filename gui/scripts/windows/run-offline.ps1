@@ -3,10 +3,13 @@
 # 它做一件事：为一种现场摆好条件（假服务方，或**真的防火墙出站阻断**）+ 把 pi 指过去，
 # 跑一张卡，把**她屏幕上那一屏**原样落盘（文字 / HTML / 截图 / 结构化结果 / 原文件哈希）。
 #
-# 五种现场（-Scenario）：
+# 六种现场（-Scenario）：
 #   dead     —— 服务方端口不可达：把 pi 指到一个**没人听**的端口（连 TCP 都握不上）；
 #   cut      —— 中途断掉：服务方答到第 2 个工具调用后彻底静音（不发 FIN，socket 挂着）；
 #   forbid   —— 代理挡住：每个请求都回 403（公司网关那种）；
+#   busy     —— 服务方自己忙不过来/这个月用完了（#286）：每个请求都回 503 +
+#               「insufficient credits」。这一场要证的是她看到的既不是「你的文件有问题」、
+#               也不是「你没配好」，而是「等一会儿 → 一直这样再找管网络的同事」那套话。
 #   wire     —— **真把出站掐掉**（本轮新增）：**不是我们摆的假服务方**，而是用 Windows
 #               防火墙按远端端口把这个应用自己的 `pi\bun.exe` 挡住，让它够不到真正的服务方。
 #               这一场最接近「她的网线被拔了 / 公司网关把流量掐了」。
@@ -22,6 +25,7 @@
 #   powershell -NoProfile -ExecutionPolicy Bypass -File gui\scripts\windows\run-offline.ps1 -Scenario dead
 #   ... -Scenario cut       -StallSecs 90
 #   ... -Scenario forbid
+#   ... -Scenario busy
 #   ... -Scenario proxy407
 #   ... -Scenario wire      -Gateway "<主机>:<端口>"   # 不给就自动读这台机器默认服务方的地址
 #
@@ -31,7 +35,7 @@
 # 注意：本文件必须保存为 UTF-8 with BOM（Windows PowerShell 5.1 否则按 GBK 解析中文）。
 
 param(
-    [Parameter(Mandatory = $true)][ValidateSet('dead', 'cut', 'forbid', 'wire', 'proxy407')][string]$Scenario,
+    [Parameter(Mandatory = $true)][ValidateSet('dead', 'cut', 'forbid', 'wire', 'proxy407', 'busy')][string]$Scenario,
     [string]$Exe = "",
     [string]$WorkRoot = "",
     # 停滞后判据（秒）。产品的默认是 600（10 分钟）；这里默认压到 120，
@@ -245,7 +249,7 @@ if (-not (Test-Path $sheetsBin)) { Say "环境问题：找不到 cante-sheets.ex
 
 # dead/cut/forbid/proxy407 各用一个固定端口，避免互相踩（wire 不用中继端口）。
 if ($RelayPort -eq 0) {
-    $RelayPort = switch ($Scenario) { 'dead' { 18090 } 'cut' { 18091 } 'forbid' { 18092 } 'proxy407' { 18093 } default { 18094 } }
+    $RelayPort = switch ($Scenario) { 'dead' { 18090 } 'cut' { 18091 } 'forbid' { 18092 } 'proxy407' { 18093 } 'busy' { 18095 } default { 18094 } }
 }
 
 # WebDriver 端口：挑一个空闲的（不写死）。
@@ -341,7 +345,7 @@ if ($Scenario -eq 'wire') {
 
 # ---------------------------------------------------------------------------
 # 1) 造一个只属于这一轮的 pi 配置目录。
-#    * dead/cut/forbid/proxy407：把服务方指向我们摆的本地中继。
+#    * dead/cut/forbid/proxy407/busy：把服务方指向我们摆的本地中继。
 #    * wire：把服务方指向**真的服务方**（也就是这台机器默认那个），因为这一场要验的
 #      就是「真正的出站被系统级挡掉」——如果还指向本地中继，那就又变成我们摆的现场了。
 #    为什么用 PI_CODING_AGENT_DIR 而不是改 ~/.pi：那一份是这台机器真正在用的配置，
@@ -405,7 +409,7 @@ Say ("输入 sha256（跑之前）：" + $hashBefore)
 
 # ---------------------------------------------------------------------------
 # 3) 摆现场。
-#    * dead/cut/forbid/proxy407：起假服务方（dead 模式的 relay 会立即退出 —— 端口保持没人听）。
+#    * dead/cut/forbid/proxy407/busy：起假服务方（dead 模式的 relay 会立即退出 —— 端口保持没人听）。
 #    * wire：**不起中继**，而是用 Windows 防火墙把这个应用自己的动手组件
 #      （`pi\bun.exe`）到真服务方的出站掐掉。这是本轮新增的那种「真拔网线」。
 # ---------------------------------------------------------------------------
@@ -476,7 +480,7 @@ if ($Scenario -eq 'wire') {
     exit 2
 }
 
-# 确认端口状态符合预期（dead = 没人听；cut/forbid/proxy407 = 在听）—— 记事实，不猜。
+# 确认端口状态符合预期（dead = 没人听；cut/forbid/proxy407/busy = 在听）—— 记事实，不猜。
 # wire 没有本地中继端口（它挡的是到真服务方的出站），所以这一条跳过。
 if ($Scenario -ne 'wire') {
     $probe = Test-NetConnection -ComputerName 127.0.0.1 -Port $RelayPort -WarningAction SilentlyContinue
@@ -525,6 +529,41 @@ $resultPath = $env:OFFLINE_RESULT_JSON
 if (Test-Path $resultPath) {
     $result = Get-Content $resultPath -Raw -Encoding UTF8 | ConvertFrom-Json
     Say ("结局：" + $result.outcome)
+}
+
+# ---------------------------------------------------------------------------
+# busy 那一场（#286）：屏幕上的话必须是「服务方用不了」那一套 —— 中文、两步出路，
+# 而且**不把英文原文/状态码端给她**（原文只该藏在「复制详情」里）。
+# 期望文案从**产品源码里取**（copy-service.ts），不手抄 —— 手抄会漂移。
+# ---------------------------------------------------------------------------
+$script:busyFailed = $false
+if ($Scenario -eq 'busy') {
+    $copySrc = Get-Content (Join-Path $script:Repo 'gui\src\simple\copy-service.ts') -Raw -Encoding UTF8
+    $waitLabel = [regex]::Match($copySrc, 'wait:\s*\{\s*label:\s*"([^"]+)"').Groups[1].Value
+    $waitWhy = [regex]::Match($copySrc, 'wait:\s*\{\s*label:\s*"[^"]+",\s*why:\s*"([^"]+)"').Groups[1].Value
+    $adminLabel = [regex]::Match($copySrc, 'admin:\s*\{\s*label:\s*"([^"]+)"').Groups[1].Value
+    $adminWhy = [regex]::Match($copySrc, 'admin:\s*\{\s*label:\s*"[^"]+",\s*why:\s*"([^"]+)"').Groups[1].Value
+    $screen = [string]$result.outcomeText
+    Say ''
+    Say '=== busy 那一场的判据（#286：服务方忙/用完，说的是不是人话）==='
+    $bad = 0
+    foreach ($pair in @(
+        @('按钮「过一会儿再试」', $waitLabel),
+        @('那句解释', $waitWhy),
+        @('按钮「复制详情给管网络的同事」', $adminLabel),
+        @('那句解释', $adminWhy))) {
+        $hit = ($screen.Contains([string]$pair[1]))
+        Say ('  ' + $(if ($hit) { '[对]' } else { '[缺]' }) + ' ' + $pair[0] + '：' + $pair[1])
+        if (-not $hit) { $bad++ }
+    }
+    # 零术语：英文原文/状态码/「额度」不该出现在她看的这一屏。
+    foreach ($word in @('insufficient', 'quota', 'credits', '503', '429', '额度')) {
+        $hit = ($screen.Contains($word))
+        Say ('  ' + $(if ($hit) { '[✗ 出现了]' } else { '[对] 没有' }) + ' ' + $word)
+        if ($hit) { $bad++ }
+    }
+    Say ('  → ' + $(if ($bad -eq 0) { '通过' } else { "不通过（$bad 条不对）" }))
+    if ($bad -gt 0) { $script:busyFailed = $true }
 }
 
 # wire 那一场：无论如何都要把规则删掉（这是系统级改动，不能留在机器上）。
@@ -607,5 +646,9 @@ if (-not $script:injected) {
     Say '     屏幕上是成功也好、失败也好，都不能当作这一种现场的证据。'
     Say '环境问题：现场没摆上（见上面「不算数」那几行）—— 这一轮的结果不能用。'
     exit 2
+}
+if ($script:busyFailed) {
+    Say '产品问题：busy 现场屏幕上那套话不对（逐条见上，判据取自 copy-service.ts）。'
+    exit 3
 }
 exit 0
