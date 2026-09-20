@@ -16,12 +16,26 @@ import { For, Show, createEffect, createMemo, createSignal } from "solid-js";
 import type { JSX } from "solid-js";
 
 import type { Store } from "../store.ts";
+// 「把这批结果一次复制成微信能贴的文字」的话，和别的面向用户中文一样单放一个模块。
+import { BATCH } from "./copy-batch.ts";
 import { RESULTS } from "./copy-results.ts";
+// 一段文字里读不出来的那份，用同一句「这次读不出来」的说法（单份复制也是这句）。
+import { shareReadFailed } from "./copy-share.ts";
+import { sheetCapability } from "./capabilities.ts";
 import { useFocusLayer } from "./FocusLayer.tsx";
 import { canOpen, collectResults, resultPaths, searchResults, type ResultEntry } from "./results.ts";
 import { groupResults } from "./results-when.ts";
 import { formatSize, formatWhen } from "./run.ts";
+import {
+  canShareBatch,
+  CHAT_MAX_WIDTH,
+  batchChatText,
+  isTablePath,
+  type BatchEntry,
+  type TableRow,
+} from "./share.ts";
 import { fetchFileFacts, normalizeFacts, type FileFact } from "./verify.ts";
+import { errorText, invoke } from "../tauri.ts";
 
 export interface ResultsPanelProps {
   store: Store;
@@ -48,12 +62,50 @@ function presenceClass(entry: ResultEntry): string {
   }
 }
 
+/**
+ * 把一段文字放进剪贴板（和结果卡片上那份单份复制同一套退路）。
+ *
+ * 先走系统剪贴板；在不让用的环境（例如真渲染里没有权限）退回选中复制。
+ * 复制不是发送：这里只把文字放到她的剪贴板，发不发她自己决定。
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* 退回下面的选中复制 */
+  }
+  try {
+    if (typeof document === "undefined") return false;
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.top = "-1000px";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    const ok = typeof document.execCommand === "function" && document.execCommand("copy");
+    document.body.removeChild(area);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
   const [query, setQuery] = createSignal("");
   // null 表示「这次没能核对」——不是「文件都不在」，两者在界面上说得很不一样。
   const [facts, setFacts] = createSignal<FileFact[] | null>(null);
   let searchInput: HTMLInputElement | undefined;
   let closeButton: HTMLButtonElement | undefined;
+
+  // 「把这批结果一次交出去」的现场：正在读、读完之后的那句话、以及没能放进去几份。
+  // 读表要走后端，所以这里要有一个进行中的状态，免得她连点两次。
+  const [batch, setBatch] = createSignal<{ note: string; skipped: number } | null>(null);
+  const [batching, setBatching] = createSignal(false);
 
   const entries = createMemo(() => collectResults(props.store.runs(), facts()));
   const shown = createMemo(() => searchResults(entries(), query()));
@@ -159,6 +211,63 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
     searchInput?.focus();
   }
 
+  // 把**屏幕上正列着的这几份**读成表格、拼成一段文字，放进她的剪贴板。
+  //
+  // 走的是和单份复制同一条真读路径（read_result_sheet → cante-sheets read），
+  // 一段文字也沿用同一套排版（tableToChatText），所以她知道「一起复制」和「单独
+  // 复制一份」贴出来是同一个样子。只是复制，不是发送：Cante 不碰微信。
+  //
+  // 一份读不出来不影响别的份：那一份如实计入「没能放进去」，剩下的照常给她。
+  async function copyBatch(): Promise<void> {
+    const list = shown();
+    if (list.length === 0 || batching()) return;
+    const cap = sheetCapability();
+    if (!cap.available || !cap.path) {
+      setBatch({ note: BATCH.toolUnavailable, skipped: 0 });
+      return;
+    }
+    setBatching(true);
+    setBatch(null);
+    try {
+      const read = invoke as unknown as (
+        name: string,
+        args?: Record<string, unknown>,
+      ) => Promise<{ rows?: TableRow[] }>;
+      const entries: BatchEntry[] = [];
+      let tables = 0;
+      let readFailures = 0;
+      for (const entry of list) {
+        if (!isTablePath(entry.path)) continue;
+        tables += 1;
+        try {
+          const response = await read("read_result_sheet", {
+            tool: cap.path,
+            path: entry.path,
+          });
+          entries.push({ name: entry.name, rows: response?.rows ?? [] });
+        } catch {
+          readFailures += 1;
+        }
+      }
+      const result = batchChatText(entries, { maxWidth: CHAT_MAX_WIDTH });
+      // 不是表格的、空表的、这次读不出来的，一起如实交代。
+      const skipped = result.skipped + (list.length - tables) + readFailures;
+      if (result.text.trim() === "") {
+        setBatch({ note: readFailures > 0 ? BATCH.readFailed : BATCH.empty, skipped: 0 });
+        return;
+      }
+      const copied = await copyText(result.text);
+      setBatch({
+        note: copied ? BATCH.copied(result.included) : BATCH.copyFailed,
+        skipped,
+      });
+    } catch (error) {
+      setBatch({ note: shareReadFailed(errorText(error)), skipped: 0 });
+    } finally {
+      setBatching(false);
+    }
+  }
+
   return (
     <div
       ref={layer}
@@ -211,6 +320,34 @@ export default function ResultsPanel(props: ResultsPanelProps): JSX.Element {
               class="mt-2 min-h-[52px] w-full rounded-xl border border-slate-700 bg-[#141b24] px-4 text-[18px] text-slate-100 placeholder:text-slate-500"
             />
           </div>
+
+          {/* 一次交出去：她做了五份时，不用再逐个点开、逐个复制。只复制成一段
+              文字，不发微信；有几份没能放进去也照实说。 */}
+          <Show when={canShareBatch(shown().length)}>
+            <div class="mx-auto mt-3 w-full max-w-3xl">
+              <div class="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  disabled={batching()}
+                  onClick={() => void copyBatch()}
+                  class="min-h-[48px] rounded-xl border-2 border-sky-600 px-5 text-[16px] font-bold text-sky-100 hover:bg-sky-950/40 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {BATCH.copyButton}
+                </button>
+                <p class="text-[16px] leading-relaxed text-slate-400">{BATCH.hint}</p>
+              </div>
+              <Show when={batch()}>
+                <div class="mt-2 rounded-xl border border-slate-700 bg-slate-900/50 px-3 py-2" role="status">
+                  <p class="text-[16px] leading-relaxed text-slate-200">{batch()!.note}</p>
+                  <Show when={batch()!.skipped > 0}>
+                    <p class="mt-1 text-[16px] leading-relaxed text-slate-300">
+                      {BATCH.skipped(batch()!.skipped)}
+                    </p>
+                  </Show>
+                </div>
+              </Show>
+            </div>
+          </Show>
         </div>
       </Show>
 

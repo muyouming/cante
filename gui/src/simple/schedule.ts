@@ -1,10 +1,11 @@
 // 定时/重复任务（#55）的纯逻辑。
 //
 // 王姐的活是按月、按周重复的（每周一整理上周的销售表、每月 5 号把微信报名
-// 整理出来）。产品要她"不用记着"，所以这里只回答三个问题：
+// 整理出来）。产品要她"不用记着"，所以这里只回答几个问题：
 //
 //   * 下一次该在什么时候做？  -> `nextRunAfter`
 //   * 到点了没有？会不会一次涌出好几次？  -> `dueSchedules`
+//   * 这一回是不是"错过以后补上的"？  -> `isCatchUp` / `catchUpScheduleFor`
 //   * 用中文怎么念出来？  -> `describe`
 //
 // 这里没有副作用，也不碰 Daemon：算时间、比大小、拼字符串，全部可以单测。
@@ -127,6 +128,86 @@ export function dueSchedules(schedules: readonly Schedule[], now: number): Sched
     if (nextRunAfter(schedule, from) <= now) due.push(schedule);
   }
   return due;
+}
+
+// ---------------------------------------------------------------------------
+// 这一回是不是"错过以后补上的"
+// ---------------------------------------------------------------------------
+//
+// 到点是由程序自己盯着的：电脑或程序关着的时候，那个时间点就悄悄过去了。重新
+// 打开后 `dueSchedules` 会补上——但只补一次。补上的这一次要能认出来，界面才能
+// 告诉她"上次错过的，今天补上了"，而不是让她以为"今天本来就该做"。
+//
+// 判据只看**调度自己的钟点**，不看 `lastRunAt`（那个值在摆上确认页时刚好被
+// 覆盖成"现在"，读不出过去）。正常到点是 tick 的零头里就做（一分钟上下），
+// 而错过是以天计的——所以离最近的钟点超过一个宽限，就是补上的那一次。
+
+/** 往前找钟点时最多回溯这么久（比最长的一个月还长一点）。 */
+const MAX_PERIOD_MS = 40 * 24 * 60 * 60 * 1000;
+
+/** 正常的到点发生在最近钟点之后一分钟上下；超过这个宽限就算"错过了才补"。 */
+export const CATCH_UP_GRACE_MS = 15 * 60 * 1000;
+
+/** 调度里**最近一次不晚于 `at` 的钟点**（本地时区）。没有则 null。 */
+function lastSlotAtOrBefore(schedule: Schedule, at: number): number | null {
+  let slot = nextRunAfter(schedule, at - MAX_PERIOD_MS);
+  for (let i = 0; i < 96 && slot <= at; i += 1) {
+    const next = nextRunAfter(schedule, slot);
+    if (next > at) return slot;
+    slot = next;
+  }
+  return slot <= at ? slot : null;
+}
+
+/**
+ * 这一回是不是"错过以后补上的"：`runAt` 离它该做的那个钟点，超过一个宽限。
+ * 正常到点为 false；关机一周回来补的那一次为 true。
+ */
+export function isCatchUp(
+  schedule: Schedule,
+  runAt: number,
+  graceMs: number = CATCH_UP_GRACE_MS,
+): boolean {
+  const slot = lastSlotAtOrBefore(schedule, runAt);
+  if (slot === null) return false;
+  return runAt - slot > graceMs;
+}
+
+/** 摆到确认页的那次运行，只需要这几个字段就能和调度对上。 */
+export interface ScheduledRunLike {
+  taskId: string;
+  instruction: string;
+  createdAt: number;
+}
+
+/** 摆上确认页和写 `lastRunAt` 是连着发生的，差不了几毫秒；留一分钟足够。 */
+const RUN_MATCH_TOLERANCE_MS = 60 * 1000;
+
+/**
+ * 确认页上这一件，如果是某个自动任务刚补上的，返回那个调度；否则 null。
+ *
+ * 和调度对上的凭据有三样：同一张卡、同一句交代，以及 `lastRunAt` 就落在这次
+ * 运行的同一时刻（`runScheduled` 摆上去的瞬间记的）。所以她手动做同样一件事
+ * 不会被当成"自动补上的"。
+ */
+export function catchUpScheduleFor(
+  schedules: readonly Schedule[],
+  run: ScheduledRunLike,
+): Schedule | null {
+  let best: Schedule | null = null;
+  let bestDelta = Number.POSITIVE_INFINITY;
+  for (const schedule of schedules) {
+    if (!schedule.enabled) continue;
+    if (schedule.taskId !== run.taskId) continue;
+    if (schedule.instruction !== run.instruction) continue;
+    if (schedule.lastRunAt === undefined) continue;
+    const delta = Math.abs(schedule.lastRunAt - run.createdAt);
+    if (delta > RUN_MATCH_TOLERANCE_MS || delta >= bestDelta) continue;
+    best = schedule;
+    bestDelta = delta;
+  }
+  if (!best) return null;
+  return isCatchUp(best, run.createdAt) ? best : null;
 }
 
 // ---------------------------------------------------------------------------
