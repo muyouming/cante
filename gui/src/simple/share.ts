@@ -9,6 +9,10 @@
 // 宽度算、长格截断加「…」、列多时改成「名称：值」、行多时分段、空值写成空。
 // 组件只负责把这里的结果送进剪贴板。
 
+// 「一批结果一次复制」的话（开头总起、每份的小标题）放在 copy-batch.ts，和别的
+// 面向用户中文一样。这里只放拼段与判断，所以 bun test 能把「几份、怎么隔开」钉住。
+import { BATCH } from "./copy-batch.ts";
+
 /** 单元格能出现的值：read 命令给的是字符串，但空值一律要写成空。 */
 export type CellValue = string | number | boolean | null | undefined;
 export type TableRow = readonly CellValue[];
@@ -288,4 +292,74 @@ const TABLE_EXTENSIONS = [".xlsx", ".xls", ".csv"] as const;
 export function isTablePath(path: string): boolean {
   const lowered = path.toLowerCase();
   return TABLE_EXTENSIONS.some((extension) => lowered.endsWith(extension));
+}
+
+// ---------------------------------------------------------------------------
+// 一批结果：一次交出去
+// ---------------------------------------------------------------------------
+
+/**
+ * 批量要交出去的一份结果。
+ *
+ * **只给名字，不给完整位置**：这段文字是贴进微信给同事看的，她电脑上从哪个文件夹
+ * 拿来的对同事没用，还可能把她本机的目录结构带出去。所以类型层面就不留位置这一项。
+ */
+export interface BatchEntry {
+  /** 这份结果的名字（文件名，不含文件夹）。 */
+  name: string;
+  /** 表格内容；读不出来/不是表格时给空数组。 */
+  rows: readonly TableRow[];
+}
+
+/** 拼好的批量文字，以及这次到底放进去了几份。 */
+export interface BatchText {
+  /** 能贴进微信的那段文字；一份都没放进去时是空字符串。 */
+  text: string;
+  /** 真正放进去的份数（有内容、也拼出来了的）。 */
+  included: number;
+  /** 放不进去的份数（空表、读不出来）：如实交代，不假装全都进去了。 */
+  skipped: number;
+}
+
+/**
+ * 把一批结果拼成**一段**能贴进微信的文字。
+ *
+ * 形状（都有测试钉着）：
+ * * 第一行是总起，说清一共几份；
+ * * 每份一段，先是「第 N 份「名字」」，接着沿用 {@link tableToChatText} 的段落形状；
+ * * 段与段之间空一行——一眼能分辨是一份一份，而不是五份拼成一坨；
+ * * 空表和读不出来的那份**不占段**，只计入 `skipped`，如实告诉她有几份没放进去。
+ *
+ * 一份都没拼出来时 `text` 是空字符串，调用方据此说「没有能复制的内容」，不硬凑。
+ */
+export function batchChatText(
+  entries: readonly BatchEntry[],
+  options: ChatTextOptions = {},
+): BatchText {
+  const blocks: string[] = [];
+  let skipped = 0;
+  for (const entry of entries) {
+    const body = tableToChatText(entry.rows, options);
+    if (body.trim() === "") {
+      skipped += 1;
+      continue;
+    }
+    blocks.push(`${BATCH.section(blocks.length + 1, entry.name)}\n${body}`);
+  }
+  if (blocks.length === 0) return { text: "", included: 0, skipped };
+  return {
+    text: `${BATCH.heading(blocks.length)}\n\n${blocks.join("\n\n")}`,
+    included: blocks.length,
+    skipped,
+  };
+}
+
+/**
+ * 面板上要不要给「一次复制成微信」这个出口。
+ *
+ * 只有真有一份结果时才给：一份都没有时她已经有一条出路（卡片库），再挂一个点了
+ * 没反应的按钮只是空话。
+ */
+export function canShareBatch(count: number): boolean {
+  return Number.isFinite(count) && count >= 1;
 }
