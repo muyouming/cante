@@ -60,6 +60,49 @@ function To-WslPath([string]$WindowsPath) {
     return "/mnt/$drive$rest"
 }
 
+# --- -1) WSL 到底能不能用（不能用就当面说清，别留个空报告）------------------
+#
+# 为什么要有这一步（2026-09-20 实测的教训）：这台机器上的 WSL 一度被禁用
+# （Microsoft-Windows-Subsystem-Linux 与 VirtualMachinePlatform 都是 Disabled，
+#  HKCU 下没有 Lxss 键，两个发行版目录都空）。此时 `wsl.exe` 自己只会打一屏安装提示，
+# 而普查跑到最后留下一个 **5 字节**的报告 + 退出码 1 —— 从报告上**看不出**是
+# "WSL 没了"，下一个人只会以为"普查跑了、什么都没查出来"。
+# 所以先问一句：能不能真的在 WSL 里跑一条命令。不能就写清原因再退出。
+$wslProbe = $null
+try {
+    $wslProbe = & wsl.exe -e echo cante-wsl-ok 2>&1 | Out-String
+} catch {
+    $wslProbe = "$_"
+}
+if ($wslProbe -notmatch 'cante-wsl-ok') {
+    $why = @(
+        "# 每周普查没跑成：这台机器上的 WSL 现在用不了",
+        "",
+        "普查要驱动真守护进程，而守护进程只有 Linux/macOS 构建，所以它只能跑在 WSL 里。",
+        "这一次连 WSL 都没起来，**不是产品的结论，也不是某张卡的结果** —— 是环境缺了东西。",
+        "",
+        "## 你能怎么做",
+        "",
+        "1. 以管理员身份开一个 PowerShell，跑 `wsl --install`（或先 `wsl --list --verbose` 看现状）；",
+        "2. 装完**重启**这台机器；",
+        "3. 按 `gui/scripts/windows/wsl-ante-setup.ps1` 把守护进程装回 WSL 里；",
+        "4. 再手动跑一次 `gui\\scripts\\windows\\weekly-sweep.ps1` 确认能出报告。",
+        "",
+        "## 这次探到的实情（原始输出，供技术同事定位）",
+        "",
+        '```',
+        ($wslProbe -replace "`r?`n", "`n").Trim(),
+        '```'
+    ) -join "`n"
+    New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
+    $stamp0 = Get-Date -Format 'yyyyMMdd'
+    $rp0 = Join-Path $OutDir "report-$stamp0.md"
+    Set-Content -LiteralPath $rp0 -Value $why -Encoding UTF8
+    Write-Line "==> WSL 不可用，已把原因写进报告：$rp0"
+    Write-Line "==> 这不是产品结论 —— 是环境缺了 WSL。"
+    exit 3
+}
+
 # --- 0) 目录 ----------------------------------------------------------------
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $logDir = Join-Path $OutDir 'logs'
