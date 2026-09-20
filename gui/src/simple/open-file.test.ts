@@ -18,13 +18,14 @@ const OPEN = "打不开这个文件。你可以自己找到它再双击打开。
 /** store.ts 里「打开所在文件夹」失败时逐字写的前缀。 */
 const REVEAL = "打不开它所在的文件夹。";
 
-const fileMissing = `${OPEN}这个文件找不到了：C:\\Users\\王\\Desktop\\结果.xlsx`;
-const noProgram = `${OPEN}打不开 C:\\Users\\王\\Desktop\\结果.xlsx：No application is associated with the specified file for this operation. (os error 1155)`;
-const busy = `${OPEN}打不开 C:\\Users\\王\\Desktop\\结果.xlsx：The process cannot access the file because it is being used by another process. (os error 32)`;
-const denied = `${OPEN}打不开 C:\\Users\\王\\Desktop\\结果.xlsx：Access is denied. (os error 5)`;
+// 夹具里的文件位置是**编出来的**（不是真机器上的家目录）：这里量的是判定，与具体位置无关。
+const fileMissing = `${OPEN}这个文件找不到了：D:\\工作\\结果.xlsx`;
+const noProgram = `${OPEN}打不开 D:\\工作\\结果.xlsx：No application is associated with the specified file for this operation. (os error 1155)`;
+const busy = `${OPEN}打不开 D:\\工作\\结果.xlsx：The process cannot access the file because it is being used by another process. (os error 32)`;
+const denied = `${OPEN}打不开 D:\\工作\\结果.xlsx：Access is denied. (os error 5)`;
 const folderMissing = `${REVEAL}打不开文件夹：path doesn't exist`;
 const bridge = `${OPEN}这个功能要在 Cante 桌面版里使用。`;
-const unknown = `${OPEN}打不开 C:\\Users\\王\\Desktop\\结果.xlsx：Launcher "/usr/bin/open -- …" failed with ExitStatus(unix_wait_status(256))`;
+const unknown = `${OPEN}打不开 D:\\工作\\结果.xlsx：Launcher "/usr/bin/open -- …" failed with ExitStatus(unix_wait_status(256))`;
 
 describe("打不开的判定：四种失败各是各的说法", () => {
   test("文件不在了 → 说「找不到」，给「打开所在文件夹」这条出路", () => {
