@@ -17,7 +17,7 @@ import { SENT } from "./copy-privacy-audit.ts";
 // 入口点开的就是隐私面板里同一节（同一个组件，不另做一份）。
 import { SentContentSection } from "./PrivacyPanel.tsx";
 // r17 — 结果卡片上补一句：这些文件以后在首页也能找回来。
-import { RESULTS, openFailureView } from "./copy-results.ts";
+import { RESULTS, openFailureView, pathForClipboard } from "./copy-results.ts";
 // 两轮各自的文案模块都要（核对 + 复制成微信能贴的文字）。
 import { VERIFY } from "./copy-verify.ts";
 import { SHARE, shareReadFailed } from "./copy-share.ts";
@@ -171,6 +171,8 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
   // 都在能打开 / 它说有却找不到 / 没能核对。核对没做成时绝不假装核对过。
   const [verification, setVerification] = createSignal<Verification | null>(null);
   const [copyNote, setCopyNote] = createSignal("");
+  // 「复制位置」的现场：复制成了没有，以及是哪一份结果（一屏可能有好几行）。
+  const [locationNote, setLocationNote] = createSignal<{ path: string; note: string } | null>(null);
   let verifyKey = "";
   createEffect(() => {
     const current = run();
@@ -200,6 +202,20 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
     } catch {
       setCopyNote(VERIFY.copyFailed);
     }
+  }
+
+  // 她说给别人听不方便——那串位置又长又绕（界面上还写成正斜杠）。给她一步能做完的
+  // 动作：按一下就整条放进她的剪贴板，她自己粘到微信里、或者粘进「打开文件」的
+  // 窗口里直接找到这个文件。**复制不是发送**：只放到她的剪贴板，发不发由她定。
+  //
+  // 复制用的是完整位置（file.path），不是被界面截断的那一截；写法换成反斜杠
+  // （Windows 习惯，见 copy-results.ts 的 pathForClipboard）。
+  async function copyLocation(file: RunResultFile): Promise<void> {
+    const copied = await copyText(pathForClipboard(file.path));
+    setLocationNote({
+      path: file.path,
+      note: copied ? RESULTS.actions.copied : RESULTS.actions.copyFailed,
+    });
   }
 
   // 内容层核对：她真正会问的是「这是我要的那个吗」。我们不替她回答，而是把
@@ -596,6 +612,21 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
                     >
                       打开所在文件夹
                     </button>
+                    {/* r15 — 她要把「这份表在哪」告诉同事/领导（微信上、电话里）。
+                        念一长串位置念不清楚，所以给她一步能做完的动作：整条复制走。 */}
+                    <button
+                      type="button"
+                      onClick={() => void copyLocation(file)}
+                      aria-label={RESULTS.actions.ariaCopyLocation(fileName(file.path))}
+                      class="min-h-[48px] rounded-xl border border-slate-600 px-5 text-base font-semibold text-slate-100 hover:bg-slate-800"
+                    >
+                      {RESULTS.actions.copyLocation}
+                    </button>
+                    <Show when={locationNote()?.path === file.path}>
+                      <span class="self-center text-[16px] text-slate-300" role="status">
+                        {locationNote()?.note}
+                      </span>
+                    </Show>
                   </div>
                   {/* r17 — 告诉她这些结果以后还能从哪儿找回来，一次说完，不多嘴。 */}
                   <p class="w-full text-[16px] leading-relaxed text-slate-400 sm:basis-full">
