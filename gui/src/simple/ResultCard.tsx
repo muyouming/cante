@@ -17,7 +17,7 @@ import { SENT } from "./copy-privacy-audit.ts";
 // 入口点开的就是隐私面板里同一节（同一个组件，不另做一份）。
 import { SentContentSection } from "./PrivacyPanel.tsx";
 // r17 — 结果卡片上补一句：这些文件以后在首页也能找回来。
-import { RESULTS } from "./copy-results.ts";
+import { RESULTS, openFailureView } from "./copy-results.ts";
 // 两轮各自的文案模块都要（核对 + 复制成微信能贴的文字）。
 import { VERIFY } from "./copy-verify.ts";
 import { SHARE, shareReadFailed } from "./copy-share.ts";
@@ -866,6 +866,11 @@ export default function ResultCard(props: ResultCardProps): JSX.Element {
 
         {/* #140 — 撤销的结果就在这里说：三种结果三句话，撤销失败时绝不说「已撤回」。 */}
         <Notice text={props.store.notice()} kinds={UNDO_KINDS} />
+
+        {/* r11 — 她点「打开文件 / 打开所在文件夹」失败时本来一句话都没有；就在这一屏说清是哪一种打不开，好让她知道下一步（事实与依据见 docs/OPEN-FILE-FAILURES.md）。 */}
+        <Show when={openFailureView(props.store.notice())}>
+          {(view) => <p role="status" class="mt-4 rounded-2xl border border-sky-700 bg-sky-950/40 px-4 py-3 text-[16px] leading-relaxed text-sky-100"><span class="font-semibold">{view().what}</span> {view().how}</p>}
+        </Show>
 
         <footer class="flex flex-wrap items-center justify-end gap-3">
           <Show when={changed() && run()?.undone !== true}>
