@@ -57,3 +57,8 @@ tauri-build = { version = "2", features = [] }
 [lib]
 name = "cante_gui_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+# 测试里要手写 zip 字节来造「缺 sheet XML」的坏 xlsx（真机 #280 §6 那种）。
+# 版本与 calamine 用的对齐（Cargo.lock 里是 8.6.0），避免多拉一份。
+[dev-dependencies]
+zip = { version = "=8.6.0", default-features = false }

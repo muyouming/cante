@@ -36,6 +36,14 @@ const WPS_EXTENSIONS: &[&str] = &["et", "ett", "wps", "dps"];
 /// 没给表名时写进 xlsx 的默认表名。命令行壳也用这个常量，免得两边各写一份。
 pub const DEFAULT_SHEET_NAME: &str = "Sheet1";
 
+/// 命令行壳用来把「给她看的中文那句」和「给技术同事看的原文」分开的一行标记。
+///
+/// 壳的 stderr 先放她看的那句；真有库/系统的原话（多半是英文）时，标记**之后**才是
+/// 它。应用只把标记之前那段端到她面前，原文进日志留给来帮忙的技术同事（产品律 3
+/// 的「复制详情」）——这样库的英文永远不会拼进她看的那句话里。见
+/// [`error_stderr`]。
+pub const DETAIL_MARKER: &str = "—— 以下是给技术同事看的原文 ——";
+
 /// 工作簿里有哪些表。保留这个结构体，是为了让调用方有一个明确的"表清单"类型。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SheetDescription {
@@ -54,6 +62,13 @@ pub enum SheetError {
     WpsFormat(String),
     /// 文件在，但打不开（坏了、加密了、表名对不上……）。
     Broken(String),
+    /// 文件在，但**那张表自己的那一段**读不出来（多半是文件损坏：压缩包还能打开、
+    /// 目录也还在，可这张表对应的一段没了）。
+    ///
+    /// 库兜出来的说明是英文（例如 `Xlsx error: Worksheet '数据' not found`），
+    /// **不能**拼进她看的那句里；[`SheetError::detail`] 把它单独留给技术同事
+    /// （产品律 3 的「复制详情」）。
+    BrokenSheet { path: String, sheet: String, raw: String },
     /// 这份表不是常见的文字格式（多半是拿别的方式存的），照直读会变成乱码，所以不
     /// 硬读。真机上最常见的一脚：微信导出的、旧一点儿的 Excel 存的 CSV。
     NotText(String),
@@ -79,6 +94,10 @@ impl fmt::Display for SheetError {
                 "这是 WPS 表格自己的格式（不是 Excel 格式），我读不了：{path}。在 WPS 里打开它，点「另存为」选 Excel 文件（.xlsx），再把新文件交给我就行。"
             ),
             SheetError::Broken(what) => write!(f, "这个文件像是坏了，读不开：{what}"),
+            SheetError::BrokenSheet { path, sheet, .. } => write!(
+                f,
+                "这个文件像是坏了，读不开：{path}（读「{sheet}」这张表的时候出了点问题）"
+            ),
             SheetError::NotText(path) => write!(
                 f,
                 "这份表打不开：{path}。它存的方式和平时的不一样（微信导出来的、旧一点儿的 Excel 存的表常常这样），也可能是文件坏了。请用 Excel 或 WPS 打开这份表，点「另存为」选 Excel 文件（.xlsx），再把新文件交给我；要是连它也打不开，那就是文件坏了，请让对方重新发一份。"
@@ -109,6 +128,31 @@ impl fmt::Display for SheetError {
 }
 
 impl std::error::Error for SheetError {}
+
+impl SheetError {
+    /// 给技术同事排查用的原文（库/系统的原话，可能是英文）。
+    ///
+    /// 她看的那句（[`Display`](std::fmt::Display)）永远不含它——这条区分就是产品律 3：
+    /// 界面上是「发生了什么 + 你可以怎么做」，跟着的「复制详情」可以含英文。
+    pub fn detail(&self) -> Option<String> {
+        match self {
+            SheetError::BrokenSheet { path, sheet, raw } => {
+                Some(format!("{path}（读「{sheet}」这张表）：{raw}"))
+            }
+            _ => None,
+        }
+    }
+}
+
+/// 命令行壳打印错误用它：先给她看的中文那句，再（有原文时）用 [`DETAIL_MARKER`]
+/// 分隔、附上给技术同事的原文。应用端在端出去之前只取标记前面那段（见
+/// `commands.rs` 的 `split_sheet_stderr`），所以原文到不了她的屏幕上。
+pub fn error_stderr(error: &SheetError) -> String {
+    match error.detail() {
+        Some(detail) => format!("{error}\n{DETAIL_MARKER}\n{detail}"),
+        None => error.to_string(),
+    }
+}
 
 /// 一个工作簿，按路径自动判断格式。
 type Spreadsheet = Sheets<BufReader<std::fs::File>>;
@@ -166,8 +210,12 @@ pub fn read_sheet(path: &Path, sheet: Option<&str>) -> Result<Vec<Vec<String>>, 
     };
 
     // 库里兜出来的错误说明是英文，不能端给她，所以只保留中文的半句。
-    let range = workbook.worksheet_range(&target).map_err(|_| {
-        SheetError::Broken(format!("{}（读「{}」这张表的时候出了点问题）", path.display(), target))
+    // 库兜出来的说明是英文（例如 `Xlsx error: Worksheet '数据' not found`），不能端给
+    // 她——她看到的那句只有中文。原文留着走 [`SheetError::detail`] 给来帮忙的技术同事。
+    let range = workbook.worksheet_range(&target).map_err(|error| SheetError::BrokenSheet {
+        path: path.display().to_string(),
+        sheet: target.clone(),
+        raw: error.to_string(),
     })?;
 
     Ok(range.rows().map(|row| row.iter().map(cell_to_string).collect()).collect())

@@ -43,7 +43,8 @@ fn run(args: &[String]) -> Result<(), String> {
         }
         "sheets" => {
             let file = args.get(1).ok_or_else(usage)?;
-            let names = sheets::describe(Path::new(file)).map_err(|error| error.to_string())?;
+            let names =
+                sheets::describe(Path::new(file)).map_err(|error| sheets::error_stderr(&error))?;
             for name in names {
                 println!("{name}");
             }
@@ -53,7 +54,7 @@ fn run(args: &[String]) -> Result<(), String> {
             let file = args.get(1).ok_or_else(usage)?;
             let sheet = parse_sheet_flag(&args[2..])?;
             let rows = sheets::read_sheet(Path::new(file), sheet.as_deref())
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| sheets::error_stderr(&error))?;
             let csv = sheets::rows_to_csv(&rows);
             if !csv.is_empty() {
                 println!("{csv}");
@@ -65,13 +66,14 @@ fn run(args: &[String]) -> Result<(), String> {
             let input = args.get(2).ok_or_else(usage)?;
             let sheet = parse_sheet_flag(&args[3..])?;
             // 结果名先过闸门：名字和数据对不上会产出一个自己也读不回去的文件。
-            sheets::check_output_name(Path::new(output)).map_err(|error| error.to_string())?;
-            let text =
-                sheets::read_csv_input(Path::new(input)).map_err(|error| error.to_string())?;
+            sheets::check_output_name(Path::new(output))
+                .map_err(|error| sheets::error_stderr(&error))?;
+            let text = sheets::read_csv_input(Path::new(input))
+                .map_err(|error| sheets::error_stderr(&error))?;
             let rows = sheets::csv_to_rows(&text);
             let name = sheet.as_deref().unwrap_or(sheets::DEFAULT_SHEET_NAME);
             sheets::write_xlsx(Path::new(output), &rows, name)
-                .map_err(|error| error.to_string())?;
+                .map_err(|error| sheets::error_stderr(&error))?;
             Ok(())
         }
         other => Err(format!("不认识的用法：{other}\n{}", usage())),
