@@ -1381,6 +1381,19 @@ export function createStore(): Store {
    * the user's existing files as if this turn had created them; the undo record
    * built from that diff would then be able to touch her originals. Snapshotting
    * first keeps both the result and the one-click undo honest for this turn.
+   *
+   * 追问是**第二个「让助手干活」的入口**（第一个是确认页的「开始」），所以它必须
+   * 和确认页走同一条组装（`composedInstruction`）：卡片的规矩 + 要处理的文件 +
+   * 她这回说的话。只发她那句，等于把「不要动原文件」「结果另存新文件」这些规矩
+   * 一起漏掉——和当年卡片提示词从未发出是同一个坑，只是换了个入口。
+   *
+   * 「要处理的文件」：上一次真产出了结果，就列**结果文件**（她是在拿刚做好的那份
+   * 继续，比如「把金额列改成整数」）；没有结果（它活干到一半停下来问她）就退回这次
+   * 选进来的那几份。
+   *
+   * 已知的残留：隐私面板（`SentContentSection`）读的是 `composedInstruction(run)`，
+   * 同一个 run 只展示确认页那一次发的文字，**看不到追问这一段的原文**。这不是本轮
+   * 修的范围（要动 PrivacyPanel.tsx / 给 run 加字段），但先记在这里。
    */
   async function replyToRun(text: string): Promise<void> {
     const trimmed = text.trim();
@@ -1391,7 +1404,11 @@ export function createStore(): Store {
     const next: TaskRun = { ...run, state: "running", error: null, result: null };
     setCurrentRun(next);
     await beginSnapshot(next);
-    await sendRunInstruction(trimmed);
+    const results = (run.result?.files ?? [])
+      .map((file) => file.path)
+      .filter((path) => path.trim().length > 0);
+    const files = results.length > 0 ? results : run.files;
+    await sendRunInstruction(composedInstruction({ ...run, files, instruction: trimmed }));
   }
 
   /**
