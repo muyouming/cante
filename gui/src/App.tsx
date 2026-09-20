@@ -20,6 +20,8 @@ import { APP_NAME, COMMON, TASK_FLOW } from "./simple/copy.ts";
 import AboutEntry from "./simple/About.tsx";
 import ErrorView from "./simple/ErrorView.tsx";
 import Home from "./simple/Home.tsx";
+import { useCloseSheet } from "./simple/close-guard.ts";
+import { CLOSE } from "./simple/copy-close.ts";
 import Wizard, { shouldShowWizard } from "./simple/Wizard.tsx";
 import { freeTask, type TaskDef } from "./simple/tasks/index.ts";
 import { initCapabilities } from "./simple/capabilities.ts";
@@ -113,6 +115,8 @@ function SimpleApp(props: SimpleAppProps): JSX.Element {
   // (#44) instead of showing a plan that could never run.
   const [failure, setFailure] = createSignal<unknown>(null);
   const [panel, setPanel] = createSignal<"history" | "privacy" | null>(null);
+  // 正在做的时候点 X：先问一句（默认焦点在「继续做」）；手里没活就不拦。
+  const close = useCloseSheet(() => props.store.currentRun());
 
   // Keep the bridge alive so the task flow can talk to the daemon the moment it
   // needs to; the health probe inside the wizard is independent of this.
@@ -229,6 +233,16 @@ function SimpleApp(props: SimpleAppProps): JSX.Element {
             </Switch>
           </div>
         </div>
+      </Show>
+
+      <Show when={close.open()}>
+        <div ref={close.layer} role="alertdialog" aria-modal="true" aria-label={CLOSE.title} class="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 px-5">
+          <section class="w-full max-w-lg rounded-2xl border-2 border-sky-600 bg-[#0b0f14] px-6 py-6">
+            <h2 class="text-[22px] font-bold text-slate-100">{CLOSE.title}</h2>
+            <p class="mt-2 text-[17px] leading-relaxed text-slate-300">{CLOSE.body}</p>
+            <div class="mt-5 flex flex-wrap items-center gap-3">
+              <button type="button" ref={close.keepRef} onClick={close.keep} class="min-h-[52px] rounded-xl bg-sky-500 px-6 text-[17px] font-bold text-slate-950 hover:bg-sky-400">{CLOSE.keep}</button><button type="button" onClick={close.leave} class="min-h-[52px] rounded-xl border border-slate-600 px-6 text-[17px] font-semibold text-slate-200 hover:bg-slate-800">{CLOSE.leave}</button>
+            </div></section></div>
       </Show>
     </div>
   );

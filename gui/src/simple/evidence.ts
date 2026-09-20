@@ -15,7 +15,7 @@
 // Everything here is pure and framework-free so `bun test` can pin the
 // arithmetic and the text extraction without a browser or a daemon.
 
-import { formatWhen, type TaskRun } from "./run.ts";
+import { fileName, formatWhen, type TaskRun } from "./run.ts";
 
 /** The marker the assistant is told to end its reply with (see tasks/prompt.ts). */
 export const CHECK_MARKER = "【需要你核对】";
@@ -52,6 +52,43 @@ export function evidenceFor(
     if (run.state === "done") ok += 1;
   }
   return total > 0 ? { runs: total, ok } : null;
+}
+
+/**
+ * The result of the newest *successful* attempt at this job, for the moment right
+ * before she starts again. Her biggest fear is that this run overwrites what the
+ * last one produced, so this answers "is last time's file still there, and what
+ * is it called?" — and nothing more.
+ *
+ * `name` is a bare file name (never a full location): the confirm page must not
+ * put a path in front of her. There is no optimistic fallback — a run that
+ * finished without producing any result file yields null, because there is no
+ * file to point at and guessing one would be a lie.
+ */
+export interface PastSuccess {
+  /** 上次做出来的那个文件的名字（不含文件夹）。 */
+  name: string;
+  /** "今天 14:30" / "昨天 09:05" / "3月5日 14:30" */
+  when: string;
+}
+
+/**
+ * #64 — the newest successful attempt whose result file is known. Only `done`
+ * runs that are not rehearsals count (`dryRun` touches no files), and only when
+ * the record actually names a result file. No success → null, so the caller
+ * renders nothing rather than a vague "you've done this before".
+ */
+export function lastSuccessFor(runs: readonly TaskRun[], taskId: string): PastSuccess | null {
+  if (!taskId) return null;
+  let newest: TaskRun | null = null;
+  for (const run of runs) {
+    if (run.taskId !== taskId || run.state !== "done" || run.dryRun === true) continue;
+    if (!run.result || run.result.files.length === 0) continue;
+    if (!newest || (run.createdAt ?? 0) > (newest.createdAt ?? 0)) newest = run;
+  }
+  const first = newest?.result?.files[0];
+  if (!newest || !first) return null;
+  return { name: fileName(first.path), when: formatWhen(newest.createdAt ?? 0) };
 }
 
 /** The newest failure for a task, in the user's language. */

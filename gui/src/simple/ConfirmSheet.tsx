@@ -34,9 +34,11 @@ import { CONFIRM_FILES, PASTES_CONTENT_GROUP } from "./copy-files.ts";
 import { PICK_FROM_FILE } from "./copy-pick.ts";
 import { suggestFromFiles, type PickSuggestion } from "./pick.ts";
 import { visibleTasks } from "./admin-config.ts";
+// r10 — 动手前先说清「上次也做成过、那份还在」，安她最怕的那件事（覆盖上次的）。
+import { PAST } from "./copy-past.ts";
 import { useFocusLayer } from "./FocusLayer.tsx";
 import { inspectSelection, nothingReadable as nothingReadableVerdict } from "./format-check.ts";
-import { evidenceFor, failureFor } from "./evidence.ts";
+import { evidenceFor, failureFor, lastSuccessFor } from "./evidence.ts";
 import { fileName, folderName, hasActiveRisk, planRisks } from "./run.ts";
 import { FREE_TEXT_TASK_ID, risksForTask, taskById } from "./tasks/index.ts";
 import {
@@ -200,6 +202,9 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
   // #64 — what this computer's own history says, or nothing at all.
   const track = () => evidenceFor(props.store.runs(), run()?.taskId ?? "");
   const failure = () => failureFor(props.store.runs(), run()?.taskId ?? "");
+  // r10 — the newest *successful* attempt of this same job, if its result file is
+  // known. Only file name + time, never a location; told before she presses 开始.
+  const past = () => lastSuccessFor(props.store.runs(), run()?.taskId ?? "");
   // #88 — 选中的文件里有没有我根本读不了的格式（WPS / 苹果自己的）。
   // 这件事必须在动手前说清：原来她要等跑了一会儿才知道。
   const verdict = () => inspectSelection(files());
@@ -308,6 +313,19 @@ export default function ConfirmSheet(props: ConfirmSheetProps): JSX.Element {
                   )}
                 </For>
               </ul>
+            </Show>
+
+            {/* r10 — 「上次也做成过，那份还在」：同一张卡以前成功过才出现，且排在
+                失败那句之前。她第一次做时这里什么也不说（不吓她）。 */}
+            <Show when={past()}>
+              {(record) => (
+                <div class="mt-4 rounded-2xl border border-emerald-800 bg-emerald-950/30 px-4 py-3">
+                  <p class="text-[16px] leading-relaxed text-emerald-100">
+                    {PAST.line(record().name, record().when)}
+                  </p>
+                  <p class="mt-1 text-[16px] leading-relaxed text-slate-300">{PAST.safe}</p>
+                </div>
+              )}
             </Show>
 
             <Show when={track()}>
