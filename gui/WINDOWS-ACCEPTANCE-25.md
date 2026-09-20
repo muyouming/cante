@@ -1,6 +1,6 @@
 # Windows 验收 25：**#268 的构建标记在 Windows 产物里真的在**，以及「两份同名的 cante-gui.exe」
 
-日期：2026-09-20　机器：那台 Windows 11 验收机（工作树 `C:\cante-wt\docs`）。
+日期：2026-09-20　机器：那台 Windows 11 验收机（工作树 `C:\<工作树>\docs`）。
 这一轮是**机械核查**（不需要模型判断 ✓）—— 命令与原始输出如下，逐条可复跑。
 
 ---
@@ -11,7 +11,7 @@
 本机（macOS）只能验到"串拼得出来、解得回去" ✓。**这一轮要回答的是**：
 在 **Windows 上真编出来的产物**里，那个标记**真的在不在**？
 
-## 2. 做了什么（一次跑完，日志落在 `C:\Users\cante\r13-report.txt`）
+## 2. 做了什么（一次跑完，日志落在 `C:\Users\<用户名>\r13-report.txt`）
 
 1. `git fetch origin main` + `git merge origin/main --no-edit` → 到 `0ce67d9`（含 #267/#268 ✓）；
 2. `bun run build:web`；
@@ -28,8 +28,8 @@ built in 1.84s
   index-7rn4ZlyB.js : CANTE-BUILD|2026-09-20 16:43|0.2.3"}function qu(
 
 --- the two artifacts that both answer to cante-gui.exe ---
-  C:\Users\cante\AppData\Local\Cante\cante-gui.exe                time=09/20/2026 02:27:50
-  C:\cante-wt\docs\gui\src-tauri\target\release\cante-gui.exe     time=09/20/2026 16:11:44
+  C:\Users\<用户名>\AppData\Local\Cante\cante-gui.exe                time=09/20/2026 02:27:50
+  C:\<工作树>\docs\gui\src-tauri\target\release\cante-gui.exe     time=09/20/2026 16:11:44
 ```
 
 ## 4. 结论（这一轮真验到的）
