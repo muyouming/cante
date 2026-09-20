@@ -18,6 +18,7 @@ export type NoticeKind =
   | "undo-ok"
   | "undo-partial"
   | "undo-failed"
+  | "undo-nothing"
   | "pick-files"
   | "pick-folder"
   | "error";
@@ -32,8 +33,13 @@ export interface NoticeView {
   source: string;
 }
 
-/** 结果卡片上「撤销」的三种结果。 */
-export const UNDO_KINDS: readonly NoticeKind[] = ["undo-ok", "undo-partial", "undo-failed"];
+/** 结果卡片上「撤销」的四种结果（多的那种是「根本没有可恢复的记录」）。 */
+export const UNDO_KINDS: readonly NoticeKind[] = [
+  "undo-ok",
+  "undo-partial",
+  "undo-failed",
+  "undo-nothing",
+];
 /** 选文件那一步「窗口打不开」。 */
 export const PICK_KINDS: readonly NoticeKind[] = ["pick-files", "pick-folder"];
 /** 出错页。 */
@@ -45,6 +51,9 @@ const PICK_FOLDER_PREFIX = "打不开选择文件夹的窗口。";
 const UNDO_OK_PREFIX = "已经放回去了";
 const UNDO_PARTIAL_PREFIX = "放回去了 ";
 const UNDO_FAILED_PREFIX = "没能撤销。";
+// 「根本没有可恢复的记录」这一句：store 逐字写它，这里按前缀认回来。
+export const UNDO_NOTHING_WHAT = "这次的文件我没有留下可以放回去的记录。";
+const UNDO_NOTHING_PREFIX = UNDO_NOTHING_WHAT;
 
 export const NOTICE = {
   /** 撤销成功之后她还能做的一件事。 */
@@ -54,6 +63,14 @@ export const NOTICE = {
     "没能自动放回去的那几个，需要你打开文件所在的文件夹，把它们放回原来的地方。也可以把这件事交给懂电脑的同事。",
   /** 一个都没放回去：不许说「已撤回」，要给她一条再试的路。 */
   undoFailedHow: "原来的文件没有被改动，都还在。你可以过一会儿再点一次「撤销这次操作」。",
+  /**
+   * 没有可恢复的记录：撤销什么也没做。这里**不许**说「已经放回去了」，
+   * 也**不许**让她「再点一次」——记录不在，再点多少次结果都一样。
+   * 给的两条出路都是真有的：去「我做的结果」看现在的文件；备份可能还在这台
+   * 电脑的私有目录里（有没有要看当时有没有建备份），可以请懂电脑的同事来帮忙。
+   */
+  undoNothingHow:
+    "你可以打开「我做的结果」，看一眼这次做出来的文件还在不在、是不是你要的。想变回动手前的样子，可以请懂电脑的同事来帮忙。让他看看这台电脑里有没有备份。",
   /** 选文件的窗口没打开：告诉她还能怎么选，而不是只说「发生错误」。 */
   pickHowFiles:
     "你可以再点一次「选择文件」；也可以把文件直接拖进这个窗口。要是还打不开，把 Cante 关掉再重新打开一次。",
@@ -84,6 +101,9 @@ export function noticeView(text: string | null | undefined): NoticeView | null {
   }
   if (source.startsWith(UNDO_FAILED_PREFIX)) {
     return { kind: "undo-failed", what: UNDO_FAILED_PREFIX, how: NOTICE.undoFailedHow, source };
+  }
+  if (source.startsWith(UNDO_NOTHING_PREFIX)) {
+    return { kind: "undo-nothing", what: UNDO_NOTHING_WHAT, how: NOTICE.undoNothingHow, source };
   }
   // 其余都归「出错」：只有能认出具体原因（正被占用、没权限、没空间……）时才说。
   // 泛泛的「出了点问题」由出错页自己说，不在这里重复第二遍。

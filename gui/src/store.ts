@@ -41,6 +41,10 @@ import {
 // 卡片提示词（`instructionFor`）：卡片里写好的步骤与安全规矩必须真的发出去，
 // 见 `composedInstruction`。曾经因为漏了这条导入路径，卡片的规矩从未到达助手。
 import { instructionFor } from "./simple/tasks/index.ts";
+// 「撤不回来」的那句话只在 copy-notice.ts 里写一遍；判断「有没有东西可恢复」的
+// 纯函数在 undo.ts（组件只渲染，不许把判断塞进 JSX）。
+import { UNDO_NOTHING_WHAT } from "./simple/copy-notice.ts";
+import { undoOutcome } from "./simple/undo.ts";
 // r25 — 结构化提问：协议载荷 → 可渲染的题目 → `Op::QuestionResponse`。
 import { readPendingQuestion, readQuestionSpecs } from "./simple/question.ts";
 import {
@@ -1450,12 +1454,21 @@ export function createStore(): Store {
       const response = (await invokeOp("undo_run", { id })) as { restored?: unknown; failed?: unknown };
       const restored = stringList(response?.restored);
       const failed = stringList(response?.failed);
-      if (failed.length === 0) {
-        setNotice(`已经放回去了：${restored.length} 个文件恢复原样。`);
-      } else {
+      // 撤销到底有没有东西可恢复，由纯函数判；组件只渲染。没有记录时 `undo_files`
+      // 两个清单都空 —— 原来这里按「没有失败」判成功，屏幕会说「已经放回去了：0 个
+      // 文件恢复原样。」，其实一个文件都没动（运行记录被 200 条上限挤掉、或
+      // `save_run` 写盘失败时就是这样）。对怕弄坏东西的她，这是最坏的一种失败，
+      // 所以这里绝不报成功。
+      const outcome = undoOutcome(restored, failed);
+      if (outcome.kind === "ok") {
+        setNotice(`已经放回去了：${outcome.restored} 个文件恢复原样。`);
+      } else if (outcome.kind === "partial") {
         setNotice(
-          `放回去了 ${restored.length} 个文件；还有 ${failed.length} 个没能自动还原，请按提示去文件夹里看看。`,
+          `放回去了 ${outcome.restored} 个文件；还有 ${outcome.failed} 个没能自动还原，请按提示去文件夹里看看。`,
         );
+      } else {
+        // 文案只在 copy-notice.ts 里写一遍，这里逐字引用，免得两处各说各话。
+        setNotice(UNDO_NOTHING_WHAT);
       }
       await refreshRuns();
     } catch (error) {
