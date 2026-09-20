@@ -14,8 +14,9 @@ import type { JSX } from "solid-js";
 import type { Store } from "../store.ts";
 import { visibleTasks } from "./admin-config.ts";
 import { visionAvailable } from "./capabilities.ts";
-import { availabilityHint, groupTasks, searchTasks } from "./catalog.ts";
+import { availabilityHint, groupTasks, searchTasks, suggestTasks } from "./catalog.ts";
 import { LIBRARY } from "./copy-library.ts";
+import { SUGGEST } from "./copy-suggest.ts";
 import { useFocusLayer } from "./FocusLayer.tsx";
 import { HintChip } from "./HintText.tsx";
 import { hintsIn } from "./hints.ts";
@@ -125,6 +126,19 @@ export default function TaskLibrary(props: TaskLibraryProps): JSX.Element {
   // #58 — 技术同事关掉的任务在这里也不出现，和首页保持一致。
   const hits = createMemo(() => searchTasks(query(), visibleTasks()));
   const sections = createMemo(() => groupTasks(visibleTasks()));
+  // #224（首页）那一套「你说的是这件事吗」在这里原样复用：判据是 catalog.ts 的
+  // suggestTasks，一个字都没改；认不出来就返回空数组（不硬凑）。她不用先知道该搜
+  // 哪个词，说一句话就行——这正是她原来的动作。
+  const suggested = createMemo(() => suggestTasks(query(), visibleTasks()));
+  const suggestedIds = createMemo(() => new Set(suggested().map((task) => task.id)));
+  // 最像的几张已经单独摆出来了，关键词结果里就不重复；一个都没认出来时，关键词结果
+  // 就是全部（还是她熟悉的那个「搜关键词」）。
+  const related = createMemo(() => {
+    const found = hits();
+    if (suggested().length === 0) return found;
+    return found.filter((task) => !suggestedIds().has(task.id));
+  });
+  const suggestedCount = () => suggested().length;
 
   return (
     <div
@@ -185,39 +199,57 @@ export default function TaskLibrary(props: TaskLibraryProps): JSX.Element {
               </For>
             }
           >
-            <Show
-              when={hits().length > 0}
-              fallback={
-                <div class="mt-6 rounded-2xl border border-dashed border-slate-700 bg-[#111820] px-5 py-6">
-                  <h3 class="text-[20px] font-semibold text-slate-200">{LIBRARY.emptyTitle}</h3>
-                  <p class="mt-2 text-[16px] leading-relaxed text-slate-400">{LIBRARY.emptyBody}</p>
-                  <div class="mt-4 flex flex-col gap-3 sm:flex-row">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        searchInput?.focus();
-                        searchInput?.select();
-                      }}
-                      class="min-h-[52px] flex-1 rounded-xl bg-sky-600 px-5 text-[18px] font-semibold text-white hover:bg-sky-500"
-                    >
-                      {LIBRARY.emptyRetry}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => props.onClose()}
-                      class="min-h-[52px] flex-1 rounded-xl border border-slate-600 px-5 text-[18px] font-semibold text-slate-100 hover:border-slate-400"
-                    >
-                      {LIBRARY.emptyHome}
-                    </button>
-                  </div>
+            {/* #224 那句「你是想做这个吗」在这里也生效：她说一句整话时，先摆出最像的
+                2–3 张卡，放在最上面。点一张走的是和下面关键词结果、和整列卡片完全相同
+                的一条路（props.onPick），不是另拼一个入口。文案整段复用 copy-suggest.ts。 */}
+            <Show when={suggestedCount() > 0}>
+              <section class="mt-5 rounded-xl border border-sky-700 bg-sky-950/30 px-4 py-3" role="status">
+                <h3 class="text-[20px] font-semibold text-sky-100">{SUGGEST.title}</h3>
+                <div class="mt-3 flex flex-col gap-3">
+                  <For each={suggested()}>
+                    {(task) => <ResultCard task={task} canSeeImages={canSeeImages()} onPick={(picked) => props.onPick(picked)} />}
+                  </For>
                 </div>
+                <p class="mt-2 text-[16px] leading-relaxed text-sky-200">{SUGGEST.hint}</p>
+              </section>
+            </Show>
+
+            <Show
+              when={related().length > 0}
+              fallback={
+                // 一个建议都认不出来、关键词也一个都没有：才算真的没找到。
+                <Show when={suggestedCount() === 0}>
+                  <div class="mt-6 rounded-2xl border border-dashed border-slate-700 bg-[#111820] px-5 py-6">
+                    <h3 class="text-[20px] font-semibold text-slate-200">{LIBRARY.emptyTitle}</h3>
+                    <p class="mt-2 text-[16px] leading-relaxed text-slate-400">{LIBRARY.emptyBody}</p>
+                    <div class="mt-4 flex flex-col gap-3 sm:flex-row">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          searchInput?.focus();
+                          searchInput?.select();
+                        }}
+                        class="min-h-[52px] flex-1 rounded-xl bg-sky-600 px-5 text-[18px] font-semibold text-white hover:bg-sky-500"
+                      >
+                        {LIBRARY.emptyRetry}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => props.onClose()}
+                        class="min-h-[52px] flex-1 rounded-xl border border-slate-600 px-5 text-[18px] font-semibold text-slate-100 hover:border-slate-400"
+                      >
+                        {LIBRARY.emptyHome}
+                      </button>
+                    </div>
+                  </div>
+                </Show>
               }
             >
               <h3 class="mt-5 text-[20px] font-semibold text-slate-200">
-                {LIBRARY.hitsTitle(hits().length)}
+                {suggestedCount() > 0 ? LIBRARY.relatedTitle(related().length) : LIBRARY.hitsTitle(related().length)}
               </h3>
               <div class="mt-3 flex flex-col gap-3">
-                <For each={hits()}>
+                <For each={related()}>
                   {(task) => <ResultCard task={task} canSeeImages={canSeeImages()} onPick={(picked) => props.onPick(picked)} />}
                 </For>
               </div>
