@@ -404,6 +404,20 @@ schtasks /delete /tn CanteWeeklySweep /f
   验过：没有手工触发，到点自己跑了、Last Result=0、文件写出来了）。
   **但机器如果一直没人登录、又碰上 `StartWhenAvailable` 的处理，最坏情况是错过一次**——
   每周报告断了一次就去看 `history.log` 和任务的 Last Run Time。
+- **WSL 只能在 cante 的交互会话/交互计划任务里跑**（issue #303，两小时换来的）：guest exec /
+  SYSTEM 身份下 WSL 2.7 直接报 `WSL_E_LOCAL_SYSTEM_NOT_SUPPORTED`。要在 WSL 里做真实验收，
+  就走 `CanteWeeklySweep` 那条交互任务，或在 cante 自己的登录会话里跑 `wsl.exe`。
+- **`Start-Process -ArgumentList` 不转义引号**：带空格的 `bash -lc "…"` 会被拆碎。
+  规矩是“把要跑的东西写成 .sh 文件，再用 `wsl.exe -- bash /mnt/c/…/x.sh` 调它”，
+  别把命令拼进 `-ArgumentList`。
+- **给 bash 的 .sh 必须是 LF**：`Set-Content` 默认写 CRLF，进 WSL 会报 `command not found`
+  （甚至看不出是行尾的错）。用 `[System.IO.File]::WriteAllText(…, UTF8Encoding($false))`，或写完 `dos2unix`。
+- **两套编码别混**：`wsl.exe` 自己打的字（安装提示、`-l -v` 列表）是 **UTF-16LE**，
+  而它里面跑的 bash / 工具输出是 **UTF-8**。#300 修的是前者；报告里“原始输出”要按实际字节认编码。
+- **网关要配进 WSL，光装 ante 不够**（issue #303）：守护进程只认 `OPENAI_COMPATIBLE_BASE_URL` /
+  `OPENAI_COMPATIBLE_API_KEY`。`wsl-ante-setup.ps1` 现在会把 Windows 侧的网关落成 WSL 里的
+  `~/.ante/cante-gateway.env`（chmod 600），`task-sweep.sh` 与 `run-desktop.sh` 读同一份。
+  没有它时，守护进程起来后第一次请求才失败，报告上看起来像“整批卡 0 秒全灭”。
 - **WSL 里必须有原生 bun**（`$HOME/.bun/bin/bun`）。`/mnt/c` 上那份是 Windows 的，
   在 WSL 里用它+Linux 路径会出问题。装法（WSL 里没有 unzip 时用 python 解压）见
   `gui/WINDOWS-ACCEPTANCE-4.md`。

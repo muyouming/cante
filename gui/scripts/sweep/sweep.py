@@ -1530,6 +1530,22 @@ def render_environment(options, extra_lines: list[str] | None = None) -> list[st
     return lines
 
 
+def looks_like_startup_failure(item: dict) -> bool:
+    """这一张卡是不是「守护进程/端点根本没起来」那种，而不是卡片本身的回归。
+
+    判据（全部满足）：0 秒级、没有任何工具调用、没有产出、没有助手输出。
+    这种卡要聚成一行看——#303 那次 38 张卡 0 秒全灭、原因列全是「（无）」，
+    一眼分不出是环境没配好还是卡坏了。
+    """
+    return item.get("serve_failed") is True or (
+        float(item.get("elapsed") or 0) < 1.0
+        and int(item.get("tool_starts") or 0) == 0
+        and not item.get("created")
+        and not item.get("stderr")
+        and not (item.get("last_message") or "").strip()
+    )
+
+
 def render_report(results: list[dict], options, skipped_reason: str | None) -> str:
     lines: list[str] = []
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
@@ -1563,6 +1579,21 @@ def render_report(results: list[dict], options, skipped_reason: str | None) -> s
     if wobbly:
         lines.append("")
         lines.append("结论不一致说明这些卡的结果在样本之间会变——**不要拿单次结果当回归**。")
+    startup_dead = [item for item in results if looks_like_startup_failure(item)]
+    if startup_dead:
+        lines.append("")
+        if len(startup_dead) == len(results):
+            lines.append(
+                f"> **这批全是启动即失败**：{len(startup_dead)} 张卡 0 秒、一次工具调用都没有、也没有任何输出。"
+                "先去看网关/守护进程配置（守护进程有没有起来、模型端点有没有配进去），"
+                "**不要当成卡片回归**。"
+            )
+        else:
+            lines.append(
+                f"> 有 {len(startup_dead)}/{len(results)} 张卡是**启动即失败**（0 秒、没有工具调用也没有输出）："
+                + "、".join(item["key"] for item in startup_dead)
+                + "。这些卡先按环境问题查（守护进程/模型端点），别混进卡片回归里。"
+            )
     lines.append("")
     lines.append("模型：" + os.environ.get("CANTE_SWEEP_MODEL", DEFAULT_MODEL))
     lines.append("")
@@ -1584,10 +1615,14 @@ def render_report(results: list[dict], options, skipped_reason: str | None) -> s
             mark = "完整" if info.get("status") == "complete" else f"缺依赖（{info.get('status')}）"
             lines.append(f"| {key} | {mark} | {info.get('path', '')} |")
         lines.append("")
+    startup_dead_keys = {item["key"] for item in startup_dead}
     lines.append("| 卡 | 结论 | 样本 | 波动 | 耗时 | 工具调用 | 产出 |")
     lines.append("| --- | --- | --- | --- | --- | --- | --- |")
     for item in results:
-        produced = "、".join(os.path.basename(x) for x in item["created"]) or "（无）"
+        # 启动即失败的卡不再逐行写「（无）」——那正是 #303 里看不出问题的写法。
+        produced = "启动即失败" if item["key"] in startup_dead_keys else (
+            "、".join(os.path.basename(x) for x in item["created"]) or "（无）"
+        )
         sample_list = item.get("samples") or []
         count = int(item.get("sample_count") or len(sample_list) or 1)
         if len(sample_list) > 1:
@@ -2171,6 +2206,38 @@ def main(argv: list[str]) -> int:
             print(f"==> {label}", flush=True)
             try:
                 result = runner.run_card(prep, prompts)
+            except (FileNotFoundError, PermissionError) as error:
+                # 守护进程根本没起来（缺文件 / 不可执行）。这一条单独标出来：
+                # 不是这张卡坏了，是环境没准备好（#303：38 张卡 0 秒全灭、
+                # 原因列全是「（无）」，从报告上完全看不出是缺 ante）。
+                import traceback
+
+                traceback.print_exc()
+                missing = getattr(error, "filename", None) or (runner.bin[0] if runner.bin else "ante")
+                result = {
+                    "key": key,
+                    "title": card["id"],
+                    "group": "",
+                    "elapsed": 0,
+                    "tool_starts": 0,
+                    "tool_failed": 0,
+                    "tool_denied": 0,
+                    "pauses": 0,
+                    "errors": [str(error)],
+                    "stderr": [],
+                    "created": [],
+                    "changed": [],
+                    "moved": [],
+                    "lost": [],
+                    "verdict": "failed",
+                    "serve_failed": True,
+                    "evidence": (
+                        f"守护进程起不来（serve 都没起来）：找不到 {missing}。"
+                        "先按环境问题查：守护进程装没装、模型端点配没配。"
+                    ),
+                    "last_message": "",
+                    "run_dir": "",
+                }
             except Exception as error:  # noqa: BLE001
                 import traceback
 

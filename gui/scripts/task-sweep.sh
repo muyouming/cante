@@ -34,6 +34,25 @@ if ! command -v bun >/dev/null 2>&1; then
   exit 2
 fi
 
+# --- 模型端点：WSL 里手工跑也要有 -------------------------------------------
+#
+# 为什么在这里读（issue #303）：weekly-sweep.ps1 是用 WSLENV 把端点渡进 WSL 的，
+# 但只要有人**直接在 WSL 里**跑 `bash gui/scripts/task-sweep.sh`（真机验收就是这么跑的），
+# 进程环境里就没有端点——守护进程起来后第一次请求才失败，报告上看起来像"整批卡全灭"。
+# 位置和 gui/scripts/run-desktop.sh 一致：~/.ante/cante-gateway.env（一行一个 export）。
+# 已经在环境里的值优先，不被文件盖掉（例如 weekly-sweep 已经渡进来的那份）。
+if [ -z "${OPENAI_COMPATIBLE_BASE_URL:-}" ] || [ -z "${OPENAI_COMPATIBLE_API_KEY:-}" ]; then
+  gw_env="${CANTE_ENV_FILE:-$HOME/.ante/cante-gateway.env}"
+  if [ -f "$gw_env" ]; then
+    # shellcheck disable=SC1090  # 这个路径是用户的，不是仓库里的
+    set -a
+    # shellcheck disable=SC1090
+    . "$gw_env"
+    set +a
+    echo "task-sweep: 已从 $gw_env 读入模型端点（值不打印）" >&2
+  fi
+fi
+
 # --- 找 cante-sheets / cante-pdf -------------------------------------------
 # 顺序和产品里的一致：环境变量 → 本 worktree 的构建产物 → ~/.cante/bin → PATH。
 resolve_helper() {

@@ -15,6 +15,8 @@ wsl-ante-setup.ps1 —— 在 WSL 里准备好 Linux 版 ante，并打印该给�
 常用参数：
 
     -Version 0.preview.99     要装的版本（默认就是我们验过的那一版）
+    -GatewayEnvFile           网关来源（默认 %USERPROFILE%\.ante\cante-gateway.env）
+    -Provider                 回退时从 pi models.json 取哪个服务方（默认 9router）
     -Distro Ubuntu            指定 WSL 发行版（默认用 WSL 的默认发行版）
     -InstallDir /home/x/bin   安装目录（默认在 WSL 里 $HOME/cante-bin）
     -Force                    已装同版本也重新下载一次
@@ -31,7 +33,12 @@ param(
     [string]$Distro = "",
     [string]$InstallDir = "",
     [switch]$Force,
-    [switch]$CheckOnly
+    [switch]$CheckOnly,
+    # 网关（模型端点）来源。默认就是 gui/scripts/run-desktop.sh 读的那份；
+    # 没有它的时候回退到 pi 的 models.json（和 weekly-sweep.ps1 同一套做法）。
+    [string]$GatewayEnvFile = "$env:USERPROFILE\.ante\cante-gateway.env",
+    [string]$ModelsJson = "$env:USERPROFILE\.pi\agent\models.json",
+    [string]$Provider = "9router"
 )
 
 $ErrorActionPreference = "Stop"
@@ -346,6 +353,100 @@ if ($LASTEXITCODE -ne 0) {
     Fail "ante --help 失败（退出码 $LASTEXITCODE）。"
 }
 Write-Ok "ante --help 正常"
+
+# ---------------------------------------------------------------------------
+# 4.5 把网关配进 WSL（issue #303）
+# ---------------------------------------------------------------------------
+#
+# 为什么要有这一步（2026-09-21 实测）：ante 装好、bun 也在，但 WSL 里的守护
+# 进程**没有任何模型端点**——起来之后第一次请求才失败，报告上就表现为"整批卡
+# 0 秒全灭、原因列全是（无）"，看起来像卡坏了。守护进程只认环境变量
+# （OPENAI_COMPATIBLE_BASE_URL / OPENAI_COMPATIBLE_API_KEY），所以这里把
+# Windows 侧那份网关落成 WSL 里的 ~/.ante/cante-gateway.env（chmod 600）——
+# task-sweep.sh 与 run-desktop.sh 读的是同一个位置。
+#
+# 密钥不进仓库、不进日志、不进命令行：值只出现在喂给 WSL 的 stdin / 环境里，
+# 本脚本只打印"来源 / 长度 / 掩码后的主机"。
+
+Write-Step "4.5/5 把网关配进 WSL（没有它守护进程起来也用不了）"
+
+$gwBase = ''
+$gwKey = ''
+$gwSource = ''
+
+if (Test-Path -LiteralPath $GatewayEnvFile) {
+    # 和 gui/scripts/run-desktop.sh 同一份格式：一行一个 export VAR=value。
+    foreach ($line in (Get-Content -LiteralPath $GatewayEnvFile -Encoding UTF8)) {
+        if ($line -match '^\s*(?:export\s+)?OPENAI_COMPATIBLE_BASE_URL\s*=\s*(.+?)\s*$') {
+            $gwBase = $Matches[1].Trim('"', "'")
+        }
+        if ($line -match '^\s*(?:export\s+)?OPENAI_COMPATIBLE_API_KEY\s*=\s*(.+?)\s*$') {
+            $gwKey = $Matches[1].Trim('"', "'")
+        }
+    }
+    if ($gwBase -and $gwKey) { $gwSource = $GatewayEnvFile }
+}
+if (-not $gwSource -and (Test-Path -LiteralPath $ModelsJson)) {
+    try {
+        $cfg = Get-Content -LiteralPath $ModelsJson -Raw -Encoding UTF8 | ConvertFrom-Json
+        $entry = $cfg.providers.$Provider
+        if ($entry) {
+            $gwBase = [string]$entry.baseUrl
+            $gwKey = [string]$entry.apiKey
+            if ($gwBase -and $gwKey) { $gwSource = "$ModelsJson（服务方 $Provider）" }
+        }
+    } catch { }
+}
+
+if (-not $gwSource) {
+    Write-Note "没找到网关：$GatewayEnvFile 不在，$ModelsJson 里也没有可用的服务方 $Provider。"
+    Write-Note "跳过这一步。但请记住：WSL 里的守护进程没有端点时，普查会整批 0 秒失败。"
+} elseif ($CheckOnly) {
+    Write-Note "-CheckOnly：只确认有网关来源（$gwSource），不写入 WSL。"
+} else {
+    # 掩码：只报主机形状，绝不打印值本身。
+    $maskedHost = $gwBase -replace '^\w+://([^/:]+).*$', '$1'
+    $gwScript = @'
+set -euo pipefail
+dir="$HOME/.ante"
+mkdir -p "$dir"
+umask 077
+{
+  printf 'export OPENAI_COMPATIBLE_BASE_URL=%s\n' "$OPENAI_COMPATIBLE_BASE_URL"
+  printf 'export OPENAI_COMPATIBLE_API_KEY=%s\n' "$OPENAI_COMPATIBLE_API_KEY"
+} > "$dir/cante-gateway.env"
+chmod 600 "$dir/cante-gateway.env"
+if [ -s "$dir/cante-gateway.env" ]; then
+  printf 'GATEWAY_WRITTEN:%s:%s\n' "$dir/cante-gateway.env" "$(stat -c %a "$dir/cante-gateway.env")"
+  printf 'GATEWAY_KEY_LEN:%s\n' "${#OPENAI_COMPATIBLE_API_KEY}"
+else
+  printf 'GATEWAY_EMPTY\n'
+  exit 1
+fi
+'@
+    # 值经进程环境 + WSLENV 渡过边界（不拼进命令行，免得出现在进程列表里）。
+    $prevBase = $env:OPENAI_COMPATIBLE_BASE_URL
+    $prevKey = $env:OPENAI_COMPATIBLE_API_KEY
+    $prevWslEnv = $env:WSLENV
+    $env:OPENAI_COMPATIBLE_BASE_URL = $gwBase
+    $env:OPENAI_COMPATIBLE_API_KEY = $gwKey
+    $env:WSLENV = 'OPENAI_COMPATIBLE_BASE_URL:OPENAI_COMPATIBLE_API_KEY'
+    try {
+        $gw = Invoke-WslScript -Script $gwScript -Label "gateway"
+    } finally {
+        # 还原，别让后面几步在不知情的情况下带着密钥。
+        $env:OPENAI_COMPATIBLE_BASE_URL = $prevBase
+        $env:OPENAI_COMPATIBLE_API_KEY = $prevKey
+        $env:WSLENV = $prevWslEnv
+    }
+    if ($gw.ExitCode -ne 0 -or $gw.Text -notlike "*GATEWAY_WRITTEN:*") {
+        Show-Captured $gw
+        Fail "把网关写进 WSL 失败（退出码 $($gw.ExitCode)）。"
+    }
+    Write-Ok "网关来源：$gwSource"
+    Write-Ok "已写入 WSL 的 ~/.ante/cante-gateway.env（权限 600；主机 $maskedHost，密钥 $($gwKey.Length) 位）"
+    Write-Note "task-sweep.sh 与 run-desktop.sh 读的是同一个位置；值不进仓库、不进报告。"
+}
 
 # ---------------------------------------------------------------------------
 # 5. 打印 CANTE_BIN
