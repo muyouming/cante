@@ -11,10 +11,29 @@ description: "将 Cante 作为长寿命机器人接入 Slack 或 Discord"
 ## 基础用法 {#basic-usage}
 
 ```bash
+# 首先启动 Cante 宿主服务
+cante serve --sock
+
+# 在另一个终端中启动网关
 cante gateway
 ```
 
-此命令将读取 `~/.cante/channels.json`，连接您启用的所有平台，并开始监听消息。
+`cante gateway` 通过 Cante SDK 连接到正在运行的 Cante 宿主（`cante serve --sock` 或通过 `--connect`），而非在进程内直接管理运行时。它会读取 `~/.cante/channels.json`，连接您启用的所有平台，并开始监听消息。
+
+### 从源码运行独立网关 {#standalone-gateway-from-source}
+
+同款渠道配置的独立 SDK 客户端 `ante-gateway` 位于上游仓库 [AntigmaLabs/ante](https://github.com/AntigmaLabs/ante) —— 它**不在本仓库中**，而且**尚未发布**：负责发布它的工作流目前仍需手动触发，因此今天没有可安装的包或下载。下面描述的是那个 crate，只有在你已经检出该仓库之后才适用：
+
+```bash
+cargo install --path ante-gateway
+ante-gateway
+```
+
+请先按上文启动 `cante serve --sock`，或者使用 `ante-gateway --connect stdio` 为每个对话拉起一个 Cante 宿主。使用 stdio 时，可执行文件依次从非空的 `CANTE` 环境变量、`--executable PATH`、`PATH` 上的 `cante` 解析。该独立客户端基于 SDK/协议 0.2.1 构建，请配合兼容的 Cante 宿主使用。
+
+独立可执行文件支持下面列出的全部网关参数，另加用于 stdio 连接的 `--executable`。`CANTE_HOME` 可覆盖 `channels.json` 与 `run/serve.sock` 所用的默认 `~/.cante` 目录；`CANTE_SERVE_TOKEN` 为 WebSocket 宿主提供 Bearer Token。日志输出到 stderr，而 `--output-format` 控制 stdout 上的协议事件。
+
+安装该 crate 不会替换上文记录的 `cante gateway` 命令：独立客户端是需要你直接调用的另一个可执行文件。
 
 ## 配置文件 {#configuration}
 
@@ -79,7 +98,7 @@ export SLACK_APP_TOKEN="xapp-..."
 export DISCORD_BOT_TOKEN="..."
 ```
 
-**在 Discord 中使用机器人：** 在服务器频道中 `@提及` 机器人，或发送私聊 DM。机器人会通过引用回复你的消息 —— 直接回复机器人的消息即可继续对话。
+**在 Discord 中使用机器人：** 在服务器频道中 `@提及` 机器人，或发送私聊 DM。机器人会通过引用回复你的消息 —— 直接回复机器人的消息即可继续对话（会话讨论串中的后续回复会自动路由回原对话，无需重复显式 @提及）。
 
 ## 与机器人交互 {#talking-to-the-bot}
 
@@ -104,19 +123,19 @@ export DISCORD_BOT_TOKEN="..."
 ## 命令行参数参考 {#cli-reference}
 
 ```bash
-cante gateway [--config PATH] [--model MODEL] [--provider PROVIDER] [--output-format FORMAT] [--offline-model PATH]
+cante gateway [--config PATH] [--connect ENDPOINT] [--model MODEL] [--provider PROVIDER] [--output-format FORMAT]
 ```
 
 | 参数标识 | 默认值 | 说明 |
 | --- | --- | --- |
 | `--config` | `~/.cante/channels.json` | 渠道配置文件的路径 |
-| `--model` | `local` | 所有会话使用的大语言模型 |
-| `--provider` | `local` | 所选模型的提供商 |
+| `--connect` | `unix:~/.cante/run/serve.sock` | Cante 宿主端点：`unix:<path>`、`ws://<addr>`、`wss://<addr>` 或 `stdio`。可通过 `cante serve --sock` 启动宿主 |
+| `--model` | — | 请求的模型（未指定时使用宿主设置） |
+| `--provider` | — | 请求的提供商（未指定时由宿主解析） |
 | `--output-format` | `minimal` | 网关 stdout 输出格式：`minimal`、`human` 或 `json` |
-| `--offline-model` | — | 本地 GGUF 文件路径。在接受消息前启动共享的 `llama serve` 路由器，并将所有对话路由至该服务（强制使用 `--provider local --model local`） |
 
 :::tip
-默认配置假定使用本地 llama.cpp 服务器或路由器。若需使用云端托管提供商，请显式传入 `--provider` 和 `--model`（例如 `cante gateway --provider anthropic --model claude-sonnet-5`）。
+默认情况下，`cante gateway` 连接本地宿主套接字 `unix:~/.cante/run/serve.sock`。若需连接其他端点，请传入 `--connect`（例如 `cante gateway --connect unix:/tmp/cante.sock`）。
 :::
 
 ### 输出格式 {#output-formats}

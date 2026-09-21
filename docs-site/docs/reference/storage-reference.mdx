@@ -19,10 +19,10 @@ Cante persists configuration and state on the local filesystem. This page is a r
 | `~/.cante/.system/` | Bundled skills and sub-agents managed by the installed Cante version |
 | `~/.cante/sessions/<session-id>/` | Persisted sessions (for `/resume` and `--resume`) |
 | `~/.cante/projects/<project-id>/memory/` | Per-project auto-memory |
-| `~/.cante/cache/` | Oversized WebFetch response spill files; entries older than 48 hours are removed at startup |
 | `~/.cante/run/jobs/<proc-id>/` | Background Bash job handles: `status.json`, `stdout.txt`, and `stderr.txt` |
 | `~/.cante/run/serve.sock` | Default Unix socket for [`cante serve --sock`](/reference/cli-reference#cante-serve); a `serve.sock.lock` sibling holds the host's exclusive lock |
-| `~/.cante/tmp/` | Disposable staging files; entries older than 48 hours are removed at startup |
+| OS cache dir (`~/Library/Caches/cante`, `$XDG_CACHE_HOME/cante`) | Oversized WebFetch response spill files |
+| OS temp dir | Disposable staging files and intermediate downloads |
 | `~/.cante/logs/<YYYY-MM-DD>/` | Application and crash logs, partitioned by UTC date (`cante.<pid>.log` and `cante.<pid>.crash.log`) |
 | `~/.cante/logs/llama-server.log` | Local inference server log |
 | `~/.cante/models/` | Default directory for local GGUF models |
@@ -33,7 +33,7 @@ Cante persists configuration and state on the local filesystem. This page is a r
 | `~/.cante/versions.json` | Cached update check and release-note state |
 | `~/.cante/user_input_history.jsonl` | TUI prompt history |
 | `~/.cante/tip_history.json` | Show history for [spinner tips](/usage/tui#spinner-tips) (delete to reset the rotation) |
-| `~/.cante/installation-id` | Random installation label for [telemetry](/configuration/preference#identity), written only when telemetry is configured (delete to reset the identity) |
+| `~/.cante/installation-id` | Installation label for [telemetry](/configuration/preference#identity), written when telemetry is configured (edit to set a common name like `anon`, or delete to reset) |
 | `AGENTS.md` | Project instructions injected alongside global instructions |
 | `.cante/settings.json` | [Project settings](/configuration/preference#project-settings) layered over the user's, resolved from the nearest ancestor of the session directory |
 | `.cante/` | Project-local configuration (skills, sub-agents) |

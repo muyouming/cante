@@ -8,10 +8,29 @@ Gateway mode runs Cante as a long-lived bot reachable from Slack, Discord, or bo
 ## Basic usage
 
 ```bash
+# Start a Cante host first
+cante serve --sock
+
+# In another terminal, start the gateway
 cante gateway
 ```
 
-This reads `~/.cante/channels.json`, connects to every platform you've enabled, and starts listening for messages.
+`cante gateway` connects to a running Cante host (`cante serve --sock` or via `--connect`) using the Cante SDK rather than managing an in-process runtime. It reads `~/.cante/channels.json`, connects to every platform you've enabled, and starts listening for messages.
+
+### Standalone gateway from source
+
+The standalone SDK client for the same channel configuration, `ante-gateway`, lives in the upstream repository [AntigmaLabs/ante](https://github.com/AntigmaLabs/ante) — it is **not part of this repository**, and it is **not published yet**: the workflow that would release it is still run by hand, so there is no package or download to install today. The commands below describe that crate, and only apply once you have that repository checked out:
+
+```bash
+cargo install --path ante-gateway
+ante-gateway
+```
+
+Start `cante serve --sock` first, as above, or use `ante-gateway --connect stdio` to spawn a Cante host for each conversation. For stdio, the executable is resolved from a non-empty `CANTE` environment variable, then `--executable PATH`, then `cante` on `PATH`. The standalone client is built against SDK/protocol version 0.2.1; use a compatible Cante host.
+
+The standalone binary accepts the gateway flags listed below, plus `--executable` for stdio connections. `CANTE_HOME` overrides the default `~/.cante` directory for `channels.json` and `run/serve.sock`; `CANTE_SERVE_TOKEN` supplies the bearer token for WebSocket hosts. Logs go to stderr, while `--output-format` controls protocol events on stdout.
+
+Installing that crate does not replace the `cante gateway` command documented above: the standalone client is a separate executable you invoke directly.
 
 ## Configuration
 
@@ -76,7 +95,7 @@ Anytime you change scopes or event subscriptions, you must **Reinstall to Worksp
 export DISCORD_BOT_TOKEN="..."
 ```
 
-**Using the bot in Discord:** `@mention` it in a server channel, or just DM it. The bot replies as a reference to your message — reply to the bot's message to continue the conversation.
+**Using the bot in Discord:** `@mention` it in a server channel, or just DM it. The bot replies as a reference to your message — reply to the bot's message to continue the conversation (subsequent replies in the thread route back to the original conversation without requiring explicit bot re-mentions).
 
 ## Talking to the bot
 
@@ -101,19 +120,19 @@ See [Approvals](/usage/approvals) for more on tool approval flows.
 ## CLI reference
 
 ```bash
-cante gateway [--config PATH] [--model MODEL] [--provider PROVIDER] [--output-format FORMAT] [--offline-model PATH]
+cante gateway [--config PATH] [--connect ENDPOINT] [--model MODEL] [--provider PROVIDER] [--output-format FORMAT]
 ```
 
 | Flag | Default | Description |
 | --- | --- | --- |
 | `--config` | `~/.cante/channels.json` | Path to the channels config file |
-| `--model` | `local` | LLM model to use for every session |
-| `--provider` | `local` | Provider for the chosen model |
+| `--connect` | `unix:~/.cante/run/serve.sock` | Cante host endpoint: `unix:<path>`, `ws://<addr>`, `wss://<addr>`, or `stdio`. Start a host with `cante serve --sock` |
+| `--model` | — | Model to request (otherwise uses host settings) |
+| `--provider` | — | Provider to request (otherwise resolved by host) |
 | `--output-format` | `minimal` | Gateway stdout format: `minimal`, `human`, or `json` |
-| `--offline-model` | — | Path to a local GGUF file. Starts a shared `llama serve` router before accepting messages and routes every conversation through it (forces `--provider local --model local`) |
 
 :::tip
-The defaults assume a local llama.cpp server or router. To use a hosted provider, pass `--provider` and `--model` explicitly (e.g. `cante gateway --provider anthropic --model claude-sonnet-5`).
+By default, `cante gateway` connects to a local host socket at `unix:~/.cante/run/serve.sock`. To connect to a different host endpoint, pass `--connect` (e.g. `cante gateway --connect unix:/tmp/cante.sock`).
 :::
 
 ### Output formats

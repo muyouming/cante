@@ -34,6 +34,7 @@ An example `settings.json`:
   "tips": true,
   "group_tool_activity": true,
   "short_prompt": false,
+  "max_concurrent_subagents": 0,
   "auto_compact": true,
   "channel": "stable",
   "resize_reflow": "conservative",
@@ -82,6 +83,7 @@ An example `settings.json`:
 | `tips` | Whether the TUI shows a [tip line](/usage/tui#spinner-tips) under the spinner while the agent works. On unless set to `false` |
 | `group_tool_activity` | Collapse contiguous quiet tool calls into a single activity summary in the chat. On unless set to `false`; full per-call details remain in the **Ctrl+O** transcript. Changes apply to new tool activity only |
 | `short_prompt` | Use the compact prompt set — a condensed system prompt and shorter built-in tool descriptions — for new and resumed sessions. Off unless set to `true`; the `--short-prompt` CLI flag enables it for a single run |
+| `max_concurrent_subagents` | Cap on how many subagents a session runs at once. When the model spawns more `Agent` calls than this in one message, the extra calls wait for a slot (the TUI shows `waiting for a subagent slot`) instead of starting immediately, and the `Agent` tool description tells the model about the cap. Unset or `0` means no cap. Set it to `1` for a local model that serves one request at a time, so queued subagents don't sit in the server's queue until [`stream_idle_timeout_secs`](/reference/catalog-reference#provider-fields) fires |
 | `auto_compact` | Proactively reduce older history as the dialog nears the context limit: aged tool results are evicted first, then only the older prefix the model will no longer see is summarized. Manual `/compact` targets a tighter working set than this automatic path. On unless set to `false`; `/compact` and overflow recovery still work when disabled. Toggling it in `/config` applies to the running session |
 | `channel` | Release channel `cante update` tracks (`stable` or `nightly`). Defaults to `stable`; legacy `latest` values are treated as `stable`. See [Update & Channels](/start/update). |
 | `resize_reflow` | Scrollback strategy on terminal resize: `conservative` (default) or `purge` (see below) |
@@ -105,6 +107,10 @@ cante update --profile work
 The profile `work` reads and writes `~/.cante/work.settings.json`. Profiles are whole-file replacements, not layers: values omitted from an existing profile fall back to Cante defaults, not to `settings.json`. The file must already exist or be a bundled template; an unknown name prints a warning and uses `settings.json` instead of creating a profile. To create one, write or copy `~/.cante/<name>.settings.json` before launching Cante. Profile names may contain lowercase ASCII letters, digits, `-`, and `_`. CLI flags still override the selected profile. For per-repository configuration, prefer [project settings](#project-settings): they layer rather than replace, and need no flag.
 
 The built-in `bare` profile ships with Cante: the first `--profile bare` run seeds `~/.cante/bare.settings.json` with onboarding and ambient UI features disabled, plus `auto_memory`, `skills`, and `session_save` set to `false` (and no MCP servers, since the profile defines none). After that it behaves like any other profile — edit the file or change settings in `/config` and they persist. Explicit run flags such as `--enable-auto-memory` still override it per run.
+
+The community and team also share ready-to-use profiles in the repository's `curated/` directory:
+- `pi`: Strips Cante down to four tools (`Read`, `Write`, `Edit`, `Bash`) with a concise system prompt, delegating search and automation to shell tools.
+- `plan`: A read-only research and planning agent with file mutations disabled, designed to produce an implementation plan before execution.
 
 ### Project settings
 
@@ -136,7 +142,7 @@ Because `.cante/settings.json` is repository content, it can be written by anyon
 | `model` | A repository cannot redirect your traffic to a different model |
 | `provider` | A repository cannot redirect your traffic to a different provider |
 
-The remaining session fields layer normally. A project may set `append_system_prompt`, `tools`, `auto_memory`, `skills`, `include_skills`, `exclude_skills`, `session_save`, `short_prompt`, `model_effort`, and the narrowing `permissions.ask` / `permissions.deny` rules. UI and device preferences such as `auto_compact`, `theme`, `channel`, status-line settings, and ambient features are ignored with a notice.
+The remaining session fields layer normally. A project may set `append_system_prompt`, `tools`, `auto_memory`, `skills`, `include_skills`, `exclude_skills`, `session_save`, `short_prompt`, `max_concurrent_subagents`, `model_effort`, and the narrowing `permissions.ask` / `permissions.deny` rules. UI and device preferences such as `auto_compact`, `theme`, `channel`, status-line settings, and ambient features are ignored with a notice.
 
 #### Checking what applied
 
@@ -280,7 +286,6 @@ Settings can be overridden per-session via CLI flags.
 | `OPENROUTER_API_KEY` | API key for Open Router |
 | `ZAI_API_KEY` | API key for Zai |
 | `DEEPSEEK_API_KEY` | API key for DeepSeek |
-| `ALI_CODING_PLAN_API_KEY` | API key for Ali Coding Plan |
 | `ANTIX_API_KEY` | API key for Antix |
 | `MODEL_BASE_URL` | Global fallback base URL (overridden by per-provider vars below) |
 | `ANTHROPIC_BASE_URL` | Override the Anthropic base URL |
@@ -321,11 +326,11 @@ Exports are anonymous by default. There is no username fallback, no hostname, no
 | Identifier | Source | Purpose |
 |---|---|---|
 | Run id | Random per process, never persisted | Gives each concurrently running Cante its own metric series, which cumulative counters require. Exported as `service.instance.id` on metrics only. |
-| Installation id | A random memorable label such as `clever-otter-x7f2`, stored in `~/.cante/installation-id` | Distinguishes "one machine reported 500 errors" from "500 machines did". Minted at the first startup that has telemetry configured, and word-shaped so you can quote it in a bug report — `cante rage` includes it. The words encode nothing about you, your host, or any account. |
+| Installation id | A random memorable label such as `clever-otter-x7f2`, stored in `~/.cante/installation-id` | Distinguishes "one machine reported 500 errors" from "500 machines did". Minted at the first startup that has telemetry configured, and word-shaped so you can quote it in a bug report — `cante rage` includes it. The words encode nothing about you, your host, or any account. You can edit this file to change its content to a common name like `anon` or anything you like. |
 | `user.name` | `CANTE_USER`, explicit only | Names whoever operates a deployment. CI and eval runners set it; a laptop leaves it unset. |
 | `user.id` | `CANTE_USER_ID`, explicit only | An operator-chosen identifier when a name isn't the right shape. |
 
-Delete `~/.cante/installation-id` to reset to a fresh identity; it is recreated on the next run that has telemetry configured. A home directory Cante cannot read or write simply reports without one. Deployments can also group data with `CANTE_ENV` (default: `local`).
+You can edit `~/.cante/installation-id` to change the identifier to a common label like `anon` or any name you prefer, or delete `~/.cante/installation-id` to reset to a fresh identity (it is recreated on the next run that has telemetry configured). A home directory Cante cannot read or write simply reports without one. Deployments can also group data with `CANTE_ENV` (default: `local`).
 
 All application tracing records that pass the active `RUST_LOG` filter are exported too. Log *bodies* are not scrubbed, so a message that interpolates a home path or a tool argument still carries it even though no attribute names you — only point `OTEL_EXPORTER_OTLP_ENDPOINT` at a collector you trust.
 

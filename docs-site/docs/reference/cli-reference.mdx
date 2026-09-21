@@ -160,21 +160,22 @@ cante serve --ws 127.0.0.1:8080
 cante gateway [OPTIONS]
 ```
 
-Gateway mode connects Cante to Slack, Discord, or both using the channels config file.
+Gateway mode connects Cante to Slack, Discord, or both using the channels config file. It connects to a running Cante host via the SDK rather than managing an in-process runtime.
 
 | Flag | Default | Description |
 |---|---|---|
 | `--config <PATH>` | `~/.cante/channels.json` | Path to the channels configuration file. |
-| `--model <MODEL>` | `local` | Model to use for agent sessions. |
-| `--provider <PROVIDER>` | `local` | Provider to use for agent sessions. |
+| `--connect <ENDPOINT>` | `unix:~/.cante/run/serve.sock` | Cante host endpoint: `unix:<path>`, `ws://<addr>`, `wss://<addr>`, or `stdio`. Start a host with `cante serve --sock`. |
+| `--model <MODEL>` | — | Model to request (otherwise uses host settings). |
+| `--provider <PROVIDER>` | — | Provider to request (otherwise resolved by host). |
 | `--output-format <FORMAT>` | `minimal` | Gateway stdout format: `json`, `human`, or `minimal`. |
-| `--offline-model <PATH>` | - | Load a local GGUF model for all gateway conversations. |
 | `-h`, `--help` | - | Print command help. |
 
 ### Examples
 
 ```bash
 cante gateway
+cante gateway --connect unix:/tmp/cante.sock
 cante gateway --provider anthropic --model claude-sonnet-5
 cante gateway --config ./channels.json --output-format human
 ```
@@ -194,7 +195,7 @@ The update command checks for a newer Cante release and installs it when one is 
 | Flag | Description |
 |---|---|
 | `--channel <CHANNEL>` | Release channel to update from. Equivalent to the positional form. |
-| `--version <VERSION>` | Install an exact release instead of the channel's newest release. Accepts values with or without a leading `v`, such as `v0.preview.98` or `0.preview.98`. Conflicts with channel arguments. |
+| `--version <VERSION>` | Install an exact release instead of the channel's newest release. Accepts values with or without a leading `v`, such as `v0.2.1` or `0.2.1`. Conflicts with channel arguments. |
 | `-h`, `--help` | Print command help. |
 
 ### Examples
@@ -203,7 +204,7 @@ The update command checks for a newer Cante release and installs it when one is 
 cante update
 cante update nightly
 cante update --channel stable
-cante update --version v0.preview.98
+cante update --version v0.2.1
 cante --profile work update
 ```
 
@@ -309,7 +310,7 @@ An unrecognized command name dispatches to an executable named `cante-<name>`, f
 cante deploy --target production
 ```
 
-Cante searches `~/.cante/bin` before `PATH`, passes remaining arguments through unchanged, and mirrors the application's exit status. Built-in subcommands always win, so an external executable cannot shadow `cante update` or another built-in. If no executable is found, Cante reports exit status `127` and still suggests a similarly named built-in for likely typos.
+Cante searches `~/.cante/bin` before `PATH`, falls back to `~/.cargo/bin` if missing from `PATH`, passes remaining arguments through unchanged, and mirrors the application's exit status. Built-in subcommands always win, so an external executable cannot shadow `cante update` or another built-in. If no executable is found, Cante reports exit status `127` and still suggests a similarly named built-in for likely typos.
 
 External applications receive `CANTE` (the absolute path to the Cante binary), `CANTE_APP` (the resolved app name), and the selected `CANTE_PROFILE` when one is active. Like help and usage errors, dispatch occurs before Cante starts its runtime, logging, telemetry, or crash hook.
 
