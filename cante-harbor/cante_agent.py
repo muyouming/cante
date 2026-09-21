@@ -4,7 +4,9 @@ import os
 import shlex
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
+
+from pydantic import Field, field_validator
 
 from cante_events import (
     CACHE_CREATION_METADATA_KEY,
@@ -23,6 +25,7 @@ from cante_events import (
     trajectory_from_events,
 )
 
+from harbor.agents.capabilities import AgentCapabilities
 from harbor.agents.installed.base import (
     AgentAuthenticationError,
     AgentSafetyRefusalError,
@@ -32,14 +35,13 @@ from harbor.agents.installed.base import (
     ApiRateLimitError,
     ApiUsageLimitError,
     BaseInstalledAgent,
-    CliFlag,
     ContextWindowExceededError,
-    EnvVar,
     NetworkConnectionError,
     NonZeroAgentExitCodeError,
     UnknownApiError,
     with_prompt_template,
 )
+from harbor.agents.options import Cli, Env, InstalledAgentOptions
 from harbor.environments.base import BaseEnvironment
 from harbor.models.agent.context import AgentContext
 from harbor.models.trial.result import AgentInfo, ModelInfo
@@ -206,42 +208,45 @@ async def upload_instruction(environment: BaseEnvironment, instruction: str) -> 
         await environment.upload_file(source_path, str(_INSTRUCTION_PATH))
 
 
-class CanteAgent(BaseInstalledAgent):
-    SUPPORTS_ATIF: bool = True
-    _INSTALL_VERSION_COMMAND = "cante --version"
-    CLI_FLAGS = [
-        CliFlag("provider", cli="--provider", type="str"),
-        CliFlag("reasoning_effort", cli="--effort", type="str"),
-    ]
-    ENV_VARS = [
-        EnvVar(
-            "enable_atif",
-            env=ENABLE_ATIF_ENV,
-            type="bool",
-            default=False,
-            env_fallback=ENABLE_ATIF_ENV,
-        ),
-    ]
+class CanteOptions(InstalledAgentOptions):
+    provider: Annotated[str | None, Cli("--provider")] = None
+    reasoning_effort: Annotated[str | None, Cli("--effort")] = None
+    enable_atif: Annotated[
+        bool | None, Env(ENABLE_ATIF_ENV, fallback=ENABLE_ATIF_ENV)
+    ] = False
+    cante_args: str | None = Field(
+        default=None,
+        description=f"Extra Cante flags; defaults to {DEFAULT_CANTE_ARGS!r}.",
+    )
+    install_command: str | None = Field(
+        default=None,
+        description="Command that installs Cante inside the sandbox.",
+    )
+    install_args: str | None = Field(
+        default=None,
+        description="Arguments to Cante's published install.sh; empty uses its default.",
+    )
 
-    def __init__(
-        self,
-        *args,
-        cante_args: str | None = None,
-        install_command: str | None = None,
-        install_args: str | None = None,
-        **kwargs,
-    ) -> None:
+    @field_validator("prompt_template_path", mode="before")
+    @classmethod
+    def normalize_prompt_template_path(cls, value: Any) -> Any:
+        return str(value) if isinstance(value, Path) else value
+
+    @field_validator("cante_args")
+    @classmethod
+    def validate_cante_args(cls, value: str | None) -> str | None:
+        split_extra_cante_args(value or "")
+        return value
+
+
+class CanteAgent(BaseInstalledAgent):
+    capabilities = AgentCapabilities(atif=True)
+    options_model = CanteOptions
+    options: CanteOptions
+    _INSTALL_VERSION_COMMAND = "cante --version"
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
-        self._cante_args = DEFAULT_CANTE_ARGS if cante_args is None else cante_args
-        self._provider = self._resolved_flags.get("provider") or None
-        self._effort = self._resolved_flags.get("reasoning_effort") or None
-        self._enable_atif = self.resolve_env_vars().get(ENABLE_ATIF_ENV) == "true"
-        # Optional in-sandbox install command (e.g. an install.sh one-liner). When
-        # set, install() runs it instead of uploading a runner-built binary, so the
-        # same adapter works for both PR builds and published nightly/release
-        # builds. It must leave `cante` on PATH for the shared --version check.
-        self._install_command = install_command or None
-        self._install_args = install_args
         # Successful exec output is authoritative over a possibly partial
         # downloaded cante.txt. Timeouts leave this unset and use the file.
         self._event_output: str | None = None
@@ -256,7 +261,7 @@ class CanteAgent(BaseInstalledAgent):
             name=self.name(),
             version=self.version() or "unknown",
             model_info=(
-                ModelInfo(name=self.model_name, provider=self._provider)
+                ModelInfo(name=self.model_name, provider=self.options.provider or None)
                 if self.model_name
                 else None
             ),
@@ -284,9 +289,9 @@ class CanteAgent(BaseInstalledAgent):
             self.logger.debug("Cante is already available at the requested version")
             return
 
-        install_command = self._install_command
-        if install_command is None and self._install_args is not None:
-            install_command = install_command_from_args(self._install_args)
+        install_command = self.options.install_command or None
+        if install_command is None and self.options.install_args is not None:
+            install_command = install_command_from_args(self.options.install_args)
 
         if install_command is not None:
             # Provision cante from within the sandbox: a raw command, or install.sh
@@ -379,7 +384,7 @@ class CanteAgent(BaseInstalledAgent):
             context, events, failure.failure_class if failure else None
         )
 
-        if self._enable_atif:
+        if self.options.enable_atif:
             if events:
                 try:
                     trajectory = trajectory_from_events(
@@ -417,7 +422,12 @@ class CanteAgent(BaseInstalledAgent):
         # populates from --ae/--agent-env. The instruction is uploaded as a
         # file so the command only needs shell escaping for flags and paths.
         await upload_instruction(environment, instruction)
-        command = cante_command(model_name, self._provider, self._effort, self._cante_args)
+        command = cante_command(
+            model_name,
+            self.options.provider,
+            self.options.reasoning_effort,
+            DEFAULT_CANTE_ARGS if self.options.cante_args is None else self.options.cante_args,
+        )
 
         result = await self.exec_as_agent(environment, command=command)
         # tee mirrors the event stream to stdout. A successful exec's captured
