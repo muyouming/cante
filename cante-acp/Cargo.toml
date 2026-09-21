@@ -1,7 +1,8 @@
 [package]
 name = "cante-acp"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
+rust-version = "1.88"
 description = "Agent Client Protocol support for Cante"
 license = "Apache-2.0"
 documentation = "https://docs.rs/cante-acp"
@@ -9,3 +10,17 @@ homepage = "https://antigma.ai"
 repository = "https://github.com/muyouming/cante"
 
 [dependencies]
+agent-client-protocol = "2.2"
+# Path rather than the registry: our fork's SDK is not published, and CI
+# builds each crate standalone (`.github/workflows/public-crates.yml`).
+# The version is what `cargo publish` would fall back to once it is.
+cante-sdk = { version = "0.2", path = "../crates/cante-sdk", default-features = false }
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4.5", features = ["derive"] }
+futures = { version = "0.3", default-features = false, features = ["std"] }
+serde_json = "1"
+tokio = { version = "1.52", features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+which = "8.0"

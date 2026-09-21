@@ -1,6 +1,6 @@
 [package]
 name = "cante-llm"
-version = "0.1.0"
+version = "0.2.2"
 edition = "2024"
 rust-version = "1.88"
 description = "Provider profiles and shared LLM primitives for Cante"
@@ -9,6 +9,6 @@ repository = "https://github.com/muyouming/cante"
 readme = "README.md"
 
 [dependencies]
-cante-protocol-shape = { version = "0.1", path = "../protocol-shape" }
+cante-protocol-shape = { version = "=0.2.2", path = "../protocol-shape" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
