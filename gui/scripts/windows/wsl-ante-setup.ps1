@@ -82,63 +82,80 @@ function Fail([string]$Text) {
 #
 # 做法：Start-Process 原样重定向到临时文件（PowerShell 不经手解码），再读字节：
 # 有 UTF-16 BOM、或含 NUL 字节 → UTF-16LE；否则 UTF-8。失败路径给空文件也不炸。
-function Read-WslStreamFile([string]$Path) {
-    if (-not (Test-Path -LiteralPath $Path)) { return '' }
-    $bytes = [System.IO.File]::ReadAllBytes($Path)
-    if ($bytes.Length -eq 0) { return '' }
-    if ($bytes.Length -ge 2 -and $bytes[0] -eq 0xFF -and $bytes[1] -eq 0xFE) {
-        return [System.Text.Encoding]::Unicode.GetString($bytes, 2, $bytes.Length - 2)
+function Read-WslBytes([byte[]]$Bytes) {
+    if ($null -eq $Bytes -or $Bytes.Length -eq 0) { return '' }
+    if ($Bytes.Length -ge 2 -and $Bytes[0] -eq 0xFF -and $Bytes[1] -eq 0xFE) {
+        return [System.Text.Encoding]::Unicode.GetString($Bytes, 2, $Bytes.Length - 2)
     }
-    if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-        return [System.Text.Encoding]::UTF8.GetString($bytes, 3, $bytes.Length - 3)
+    if ($Bytes.Length -ge 3 -and $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF) {
+        return [System.Text.Encoding]::UTF8.GetString($Bytes, 3, $Bytes.Length - 3)
     }
-    foreach ($b in $bytes) {
-        if ($b -eq 0) { return [System.Text.Encoding]::Unicode.GetString($bytes) }
+    foreach ($b in $Bytes) {
+        if ($b -eq 0) { return [System.Text.Encoding]::Unicode.GetString($Bytes) }
     }
-    return [System.Text.Encoding]::UTF8.GetString($bytes)
+    return [System.Text.Encoding]::UTF8.GetString($Bytes)
 }
 
-# 跑一次 wsl.exe，把 stdout/stderr 读回来（可选经 stdin 喂脚本）。
+function Read-WslStreamFile([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return '' }
+    return Read-WslBytes ([System.IO.File]::ReadAllBytes($Path))
+}
+
+# 跑一次 wsl.exe，把 stdout/stderr 读回来（可选经 stdin 喂脚本），**带超时**。
+#
+# 为什么用 .NET 的 Process 而不是 Start-Process：PS 5.1 下 `Start-Process -Wait`
+# 没法设超时，而 AGENTS.md §5 要求每条可能变慢的外部命令都有上限、并且把
+# 「超时（没等到结果）」和「确认没有」分开报。.NET 的 WaitForExit(ms) 既能设上限，
+# ExitCode 也可靠，还能从 BaseStream 拿**原始字节**（保住上面那条按字节认编码的做法）。
 function Invoke-WslCapture {
     param(
         [Parameter(Mandatory = $true)][string]$WslPath,
         [Parameter(Mandatory = $true)][string[]]$WslArguments,
-        [string]$StandardInput
+        [string]$StandardInput,
+        [int]$TimeoutSeconds = 120
     )
-    $outFile = [System.IO.Path]::GetTempFileName()
-    $errFile = [System.IO.Path]::GetTempFileName()
-    $inFile = ''
-    $saved = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
+    $proc = $null
+    $outMs = New-Object System.IO.MemoryStream
+    $errMs = New-Object System.IO.MemoryStream
     try {
-        $startArgs = @{
-            FilePath               = $WslPath
-            ArgumentList           = $WslArguments
-            RedirectStandardOutput = $outFile
-            RedirectStandardError  = $errFile
-            NoNewWindow            = $true
-            Wait                   = $true
-            PassThru               = $true
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $WslPath
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.RedirectStandardError = $true
+        $psi.RedirectStandardInput = $true
+        # 参数只传简单 token（-d / -e / bash / -s / 一个 Linux 路径）；带空格的加引号。
+        $psi.Arguments = (($WslArguments | ForEach-Object {
+            if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+        }) -join ' ')
+        $proc = New-Object System.Diagnostics.Process
+        $proc.StartInfo = $psi
+        $null = $proc.Start()
+        # 异步读完 stdout/stderr（不读的话，输出超过管道缓冲区会把子进程堵死）。
+        $outTask = $proc.StandardOutput.BaseStream.CopyToAsync($outMs)
+        $errTask = $proc.StandardError.BaseStream.CopyToAsync($errMs)
+        # 脚本以 UTF-8 字节直接写进 stdin（PS 5.1 的 StandardInput.Write 会按控制台编码走）。
+        $inBytes = (New-Object System.Text.UTF8Encoding($false)).GetBytes([string]$StandardInput)
+        if ($inBytes.Length -gt 0) { $proc.StandardInput.BaseStream.Write($inBytes, 0, $inBytes.Length) }
+        $proc.StandardInput.BaseStream.Flush()
+        $proc.StandardInput.Close()
+        $timedOut = -not $proc.WaitForExit([int]($TimeoutSeconds * 1000))
+        if ($timedOut) {
+            try { $proc.Kill() } catch { }
+            try { $null = $proc.WaitForExit(5000) } catch { }
         }
-        if ($PSBoundParameters.ContainsKey('StandardInput')) {
-            $inFile = [System.IO.Path]::GetTempFileName()
-            [System.IO.File]::WriteAllText($inFile, [string]$StandardInput, (New-Object System.Text.UTF8Encoding($false)))
-            $startArgs['RedirectStandardInput'] = $inFile
-        }
-        $proc = Start-Process @startArgs
+        try { $null = $outTask.Wait(10000) } catch { }
+        try { $null = $errTask.Wait(10000) } catch { }
         $code = -1
-        if ($null -ne $proc) { $code = $proc.ExitCode }
-        $text = (Read-WslStreamFile $outFile) + (Read-WslStreamFile $errFile)
-        return [pscustomobject]@{ ExitCode = $code; Text = $text.Trim() }
+        if ($proc.HasExited) { try { $code = $proc.ExitCode } catch { $code = -1 } }
+        $text = ((Read-WslBytes $outMs.ToArray()) + (Read-WslBytes $errMs.ToArray())).Trim()
+        return [pscustomobject]@{ ExitCode = $code; Text = $text; TimedOut = $timedOut }
     } catch {
-        return [pscustomobject]@{ ExitCode = -1; Text = "$($_.Exception.Message)" }
+        return [pscustomobject]@{ ExitCode = -1; Text = "$($_.Exception.Message)"; TimedOut = $false }
     } finally {
-        $ErrorActionPreference = $saved
-        foreach ($f in @($outFile, $errFile, $inFile)) {
-            if ($f -and (Test-Path -LiteralPath $f)) {
-                Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue
-            }
-        }
+        foreach ($stream in @($outMs, $errMs)) { if ($null -ne $stream) { try { $stream.Dispose() } catch { } } }
+        if ($null -ne $proc) { try { $proc.Dispose() } catch { } }
     }
 }
 
@@ -150,18 +167,35 @@ function Invoke-WslCapture {
 function Invoke-WslScript {
     param(
         [Parameter(Mandatory = $true)][string]$Script,
-        [string]$Label = "bash"
+        [string]$Label = "bash",
+        [int]$TimeoutSeconds = 120
     )
     $distroArgs = @($script:DistroArgs) + @('-e', 'bash', '-s')
     # 不能直接把原生程序的 stderr 2>&1 重定向进来（$ErrorActionPreference = 'Stop'
     # 时会抛 NativeCommandError），也不能用默认代码页解 —— 交给 Invoke-WslCapture，
     # 它按实际字节认 UTF-16LE / UTF-8。
-    $capture = Invoke-WslCapture -WslPath $script:WslPath -WslArguments $distroArgs -StandardInput $Script
+    $capture = Invoke-WslCapture -WslPath $script:WslPath -WslArguments $distroArgs `
+        -StandardInput $Script -TimeoutSeconds $TimeoutSeconds
     return [pscustomobject]@{
         ExitCode = $capture.ExitCode
         Text     = $capture.Text
+        TimedOut = $capture.TimedOut
         Label    = $Label
     }
+}
+
+# 直接跑一条 wsl.exe 命令（不喂 stdin），把 stdout/stderr 原样打到屏幕上，
+# 同时带超时、把退出码和原文拿回来（第 4 步的 --version / --help 用它）。
+function Invoke-WslDirect {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$WslArguments,
+        [int]$TimeoutSeconds = 120
+    )
+    $capture = Invoke-WslCapture -WslPath $script:WslPath -WslArguments $WslArguments -TimeoutSeconds $TimeoutSeconds
+    if ($capture.Text.Length -gt 0) {
+        foreach ($line in ($capture.Text -split "`r?`n")) { Write-Host "      $line" -ForegroundColor DarkGray }
+    }
+    return $capture
 }
 
 function Show-Captured($Result) {
@@ -206,6 +240,9 @@ if ($Distro -ne "") {
 Write-Step "2/5 确认 WSL 里的 Linux 能跑"
 
 $probe = Invoke-WslScript -Script 'printf "WSL_OK:%s\n" "$(uname -s)"' -Label "uname"
+if ($probe.TimedOut) {
+    Fail "探测 WSL 里的 Linux 超时：120 秒没返回，已经把它停掉。这是『没等到结果』，不等于 WSL 不在（第一次启动可能很慢）—— 先手动跑一次 wsl.exe -e echo hello 看看。"
+}
 if ($probe.ExitCode -ne 0 -or $probe.Text -notlike "*WSL_OK:*") {
     Show-Captured $probe
     Fail "WSL 里没跑起来 Linux。先手动跑一次 wsl.exe -e echo hello 看看（第一次启动可能要等一会儿，或者要你先设置 Linux 用户名）。"
@@ -213,12 +250,80 @@ if ($probe.ExitCode -ne 0 -or $probe.Text -notlike "*WSL_OK:*") {
 Write-Ok ($probe.Text.Trim())
 
 $homeProbe = Invoke-WslScript -Script 'printf "HOME:%s" "$HOME"' -Label "home"
+if ($homeProbe.TimedOut) {
+    Fail "读 WSL 里的家目录超时：120 秒没返回（『没等到结果』，不等于拿不到）—— 先手动跑一次 wsl.exe -e echo $HOME 看看。"
+}
 if ($homeProbe.ExitCode -ne 0 -or $homeProbe.Text -notlike "HOME:/*") {
     Show-Captured $homeProbe
     Fail "拿不到 WSL 里的 HOME 目录。"
 }
 $wslHome = $homeProbe.Text.Substring(5).Trim()
 Write-Ok "WSL 里的家目录：$wslHome"
+
+# ---------------------------------------------------------------------------
+# 2.5 修 WSL 的 DNS（入口自己写，不赌持久化）
+# ---------------------------------------------------------------------------
+#
+# 为什么要有这一步（2026-09-21 实况）：WSL NAT 的默认 DNS 指向那个自动生成的
+# systemd 存根——/etc/resolv.conf 里只有一行 nameserver 10.255.255.254，而
+# **下次 wsl 实例重启它会被打回原样**。改 /etc/wsl.conf 让它持久化的做法在真机上
+# 没调通（改完 wsl --shutdown，第二个脚本神秘退出 1），所以不赌持久化：
+# **每次进来先自己写一遍**，两行 nameserver，比持久化还稳。
+#
+# 探针分两层，别把两种失败混成一句「检查网络」（那会给出错的出路）：
+#   1) 下载域名解析不了、但别的域名能解析 → 这个名字/下载源的问题，不是 WSL 没网；
+#   2) 别的域名也解析不了             → 写了 resolv.conf 还是不通 = 这台机器真没网。
+# 注意直接 `getent ... | head -1 && echo OK` 是错的：管道会把 getent 的退出码
+# 换掉，解析失败也会报 OK（现场那个“DNS_OK”就是这么来的）。这里一律看退出码。
+
+Write-Step "2.5/5 修 WSL 的 DNS（入口自己写 /etc/resolv.conf，不赌持久化）"
+
+$dnsScript = @'
+dns_host="cante.run"
+rm -f /etc/resolv.conf 2>/dev/null || true
+if printf 'nameserver 223.5.5.5\nnameserver 1.1.1.1\n' > /etc/resolv.conf 2>/dev/null; then
+  printf 'CANTE_DNS_WRITTEN\n'
+else
+  printf 'CANTE_DNS_UNWRITABLE\n'
+fi
+printf 'CANTE_DNS_FIRST:%s\n' "$(head -n 1 /etc/resolv.conf 2>/dev/null)"
+if getent hosts "$dns_host" >/dev/null 2>&1; then
+  printf 'CANTE_DNS_RESOLVED:%s\n' "$dns_host"
+else
+  printf 'CANTE_DNS_UNRESOLVED:%s\n' "$dns_host"
+  for other in example.com www.baidu.com; do
+    if getent hosts "$other" >/dev/null 2>&1; then
+      printf 'CANTE_DNS_FALLBACK_OK:%s\n' "$other"
+      break
+    fi
+  done
+fi
+'@
+$dns = Invoke-WslScript -Script $dnsScript -Label "dns" -TimeoutSeconds 180
+Show-Captured $dns
+$dnsWritten = ($dns.Text -like "*CANTE_DNS_WRITTEN*")
+$dnsResolved = ($dns.Text -like "*CANTE_DNS_RESOLVED:*")
+$dnsFallbackOk = ($dns.Text -like "*CANTE_DNS_FALLBACK_OK:*")
+
+if ($dns.TimedOut) {
+    Fail "改 WSL 的 DNS 超时：180 秒没返回，已经把它停掉。这是『没等到结果』，不等于改失败——先手动跑一次 wsl.exe -e cat /etc/resolv.conf 看看 WSL 是不是卡住了。"
+} elseif ($dnsResolved) {
+    Write-Ok "已写入 /etc/resolv.conf（223.5.5.5 / 1.1.1.1），并能解析 cante.run"
+} elseif (-not $dnsWritten) {
+    if ($CheckOnly) {
+        Write-Note "写不进 /etc/resolv.conf（多半不是 root 用户）。-CheckOnly 不下载，继续自检。"
+    } else {
+        Fail "写不进 WSL 的 /etc/resolv.conf（这步要 root；现在这个 Linux 用户多半不是）。先手动验证：wsl.exe -e bash -lc 'id -u; cat /etc/resolv.conf'。"
+    }
+} elseif ($dnsFallbackOk) {
+    Write-Note "DNS 现在是通的（example.com 这类名字能解析），但下载域名 cante.run 解析不了——这是这个名字/下载源的问题，不是 WSL 没网。"
+} else {
+    if ($CheckOnly) {
+        Write-Note "WSL 的 DNS 写了还是不通（可连备用的例子域名也解析不了）。-CheckOnly 不下载，继续自检。"
+    } else {
+        Fail "WSL 的 DNS 写了还是不通 = 这台机器真没网。脚本已经自己写了 /etc/resolv.conf（223.5.5.5 / 1.1.1.1）并且重试过别的域名，所以不是 WSL 存根那件事。先手动确认：wsl.exe -e bash -lc 'cat /etc/resolv.conf; getent hosts example.com; ping -c 1 223.5.5.5'。"
+    }
+}
 
 # ---------------------------------------------------------------------------
 # 3. 解析安装目录
@@ -292,12 +397,21 @@ printf 'STATE:INSTALLED\n'
     if ($Force) { $forceFlag = "1" }
     $payload = $template.Replace("__INSTALL_DIR__", $InstallDir).Replace("__VERSION__", $Version).Replace("__FORCE__", $forceFlag)
 
-    Write-Host "  正在下载并解包（从 cante.run/install.sh，可能需要一两分钟）…" -ForegroundColor DarkGray
-    $install = Invoke-WslScript -Script $payload -Label "install"
+    Write-Host "  正在下载并解包（从 cante.run/install.sh；大版本要几分钟，这一条最多等 30 分钟）…" -ForegroundColor DarkGray
+    $install = Invoke-WslScript -Script $payload -Label "install" -TimeoutSeconds 1800
+    if ($install.TimedOut) {
+        Fail "下载/安装超过 30 分钟还没结束，已经把它停掉。这是『没等到结果』，不等于下载失败 —— 先手动跑一次 wsl.exe -e bash -lc 'curl -fsSL https://cante.run/install.sh | bash' 看它到底卡在哪。"
+    }
     if ($install.ExitCode -ne 0 -or $install.Text -notlike "*BINARY:*") {
         Show-Captured $install
         if ($install.Text -like "*FAILED:download*") {
-            Fail "下载失败。确认这台机器的网络能访问 https://cante.run（或先在 WSL 里手动试一次：wsl.exe -e bash -lc 'curl -fsSL https://cante.run/install.sh | bash'）。"
+            # 不要张口就说「检查网络」：脚本开头已经自己写过 resolv.conf，先把 DNS 这一层排掉，
+            # 剩下的才是真的下载源 / 域名 / HTTP 问题（2026-09-21 现场就是这两层混在一起）。
+            $dnsHint = "脚本开头已经在 WSL 里自己写过 /etc/resolv.conf（223.5.5.5 / 1.1.1.1）"
+            if ($dnsResolved) { $dnsHint += "，而且当时 cante.run 能解析" }
+            elseif ($dnsFallbackOk) { $dnsHint += "，而且当时别的域名能解析（只是 cante.run 这个名字解析不了）" }
+            else { $dnsHint += "，而且当时别的域名也解析不了" }
+            Fail "下载失败。$dnsHint。所以先别怀疑 WSL 的 DNS：手动跑一次 wsl.exe -e bash -lc 'curl -fsSv https://cante.run/install.sh -o /dev/null'，看 curl 报的是名字解析不了（域名/下载源的问题），还是连上了但 HTTP 报错（版本号不存在 / 服务器问题）。"
         }
         if ($install.Text -like "*FAILED:no-binary*") {
             Fail "装完了但 $InstallDir 里没有可执行的 ante/cante。可能这个版本号不存在——试试 -Version nightly。"
@@ -341,16 +455,22 @@ if ($probeBin.Text -like "*BINARY:*") {
 Write-Ok "用这个二进制：$binPath"
 
 Write-Host "  $ wsl.exe $($script:DistroArgs -join ' ') -e $binPath --version" -ForegroundColor DarkGray
-& $script:WslPath @distroArgs -e $binPath --version
-if ($LASTEXITCODE -ne 0) {
-    Fail "ante --version 失败（退出码 $LASTEXITCODE）。上面那行就是应用的守护进程；它跑不起来，应用里就不会有会话。"
+$versionResult = Invoke-WslDirect -WslArguments (@($distroArgs) + @('-e', $binPath, '--version')) -TimeoutSeconds 120
+if ($versionResult.TimedOut) {
+    Fail "ante --version 超时：120 秒没返回，已经把它停掉。这是『没等到结果』，不等于它坏了。"
+}
+if ($versionResult.ExitCode -ne 0) {
+    Fail "ante --version 失败（退出码 $($versionResult.ExitCode)）。上面那行就是应用的守护进程；它跑不起来，应用里就不会有会话。"
 }
 Write-Ok "ante --version 正常"
 
 Write-Host "  $ wsl.exe $($script:DistroArgs -join ' ') -e $binPath --help" -ForegroundColor DarkGray
-& $script:WslPath @distroArgs -e $binPath --help
-if ($LASTEXITCODE -ne 0) {
-    Fail "ante --help 失败（退出码 $LASTEXITCODE）。"
+$helpResult = Invoke-WslDirect -WslArguments (@($distroArgs) + @('-e', $binPath, '--help')) -TimeoutSeconds 120
+if ($helpResult.TimedOut) {
+    Fail "ante --help 超时：120 秒没返回，已经把它停掉。"
+}
+if ($helpResult.ExitCode -ne 0) {
+    Fail "ante --help 失败（退出码 $($helpResult.ExitCode)）。"
 }
 Write-Ok "ante --help 正常"
 
@@ -404,8 +524,10 @@ if (-not $gwSource) {
 } elseif ($CheckOnly) {
     Write-Note "-CheckOnly：只确认有网关来源（$gwSource），不写入 WSL。"
 } else {
-    # 掩码：只报主机形状，绝不打印值本身。
+    # 掩码：只报主机形状，绝不打印值本身。内网 IP 也不打全（只留前两段 + x）：
+    # 这份输出经常被贴进验收报告，把 10.x / 192.168.x 整个写进去等于把内网拓扑带出去。
     $maskedHost = $gwBase -replace '^\w+://([^/:]+).*$', '$1'
+    if ($maskedHost -match '^(\d{1,3}\.\d{1,3})\.\d{1,3}\.\d{1,3}$') { $maskedHost = "$($Matches[1]).x.x" }
     $gwScript = @'
 set -euo pipefail
 dir="$HOME/.ante"

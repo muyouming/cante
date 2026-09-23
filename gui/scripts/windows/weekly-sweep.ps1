@@ -242,6 +242,8 @@ if ($Distro -ne '') { $probeArgs += @('-d', $Distro) }
 $probeArgs += @('-e', 'bash', '-s')
 # 探针超时：WSL 第一次启动可能慢，给的比普通命令宽一点。
 $probeTimeout = 120
+# DNS 探针：写 resolv.conf + 两条 getent；单条不超过 3 分钟（AGENTS.md §5）。
+$dnsTimeout = 180
 
 $wslProbe = Invoke-WslCapture -WslPath 'wsl.exe' -WslArguments $probeArgs `
     -StandardInput 'echo cante-wsl-ok' -TimeoutSeconds $probeTimeout
@@ -273,6 +275,53 @@ if (-not $wslOk) {
     Write-Line "==> WSL 不可用，已把原因写进报告：$rp0"
     Write-Line "==> 这不是产品结论 —— 是环境缺了 WSL。"
     exit 3
+}
+
+# --- -0.5) WSL 的 DNS：入口自己写一遍（不赌持久化）------------------------
+#
+# 同一个理由（同 wsl-ante-setup.ps1 的第 2.5 步）：WSL NAT 的默认 DNS 指向那个
+# 自动生成的 systemd 存根（/etc/resolv.conf 里只有 nameserver 10.255.255.254），
+# 而下次 wsl 实例重启会被打回原样；改 /etc/wsl.conf 让它持久化在真机上没调通。
+# 所以不赌持久化：**每次驱动 WSL 前先自己写一遍**。
+#
+# 为什么这一步不改退出码：这台机器上守护进程用的是 IP 形式的网关（不需要 DNS），
+# DNS 不通最多是下载不了东西。所以只把结果记进证据（报告里看得见），不把一次
+# 本来能跑完的普查按死。探针分两层：下载域名解析不了、但别的域名能解析 = 这个名字
+# / 下载源的问题；连别的域名也解析不了 = 这台机器真没网。
+# 注意：直接 `getent ... | head -1 && echo OK` 是错的（管道会把 getent 的退出码换掉，
+# 解析失败也会报 OK），这里一律看退出码。
+$dnsScript = @'
+dns_host="cante.run"
+rm -f /etc/resolv.conf 2>/dev/null || true
+if printf 'nameserver 223.5.5.5\nnameserver 1.1.1.1\n' > /etc/resolv.conf 2>/dev/null; then
+  printf 'CANTE_DNS_WRITTEN\n'
+else
+  printf 'CANTE_DNS_UNWRITABLE\n'
+fi
+printf 'CANTE_DNS_FIRST:%s\n' "$(head -n 1 /etc/resolv.conf 2>/dev/null)"
+if getent hosts "$dns_host" >/dev/null 2>&1; then
+  printf 'CANTE_DNS_RESOLVED:%s\n' "$dns_host"
+else
+  printf 'CANTE_DNS_UNRESOLVED:%s\n' "$dns_host"
+  for other in example.com www.baidu.com; do
+    if getent hosts "$other" >/dev/null 2>&1; then
+      printf 'CANTE_DNS_FALLBACK_OK:%s\n' "$other"
+      break
+    fi
+  done
+fi
+'@
+$dnsProbe = Invoke-WslCapture -WslPath 'wsl.exe' -WslArguments $probeArgs -TimeoutSeconds $dnsTimeout -StandardInput $dnsScript
+$dnsResolved = (-not $dnsProbe.TimedOut) -and ($dnsProbe.Text -match 'CANTE_DNS_RESOLVED')
+$dnsFallbackOk = $dnsProbe.Text -match 'CANTE_DNS_FALLBACK_OK'
+if ($dnsProbe.TimedOut) {
+    Write-Line "==> WSL DNS 探针超时：$dnsTimeout 秒没跑完（『没等到结果』，不等于改失败）"
+} elseif ($dnsResolved) {
+    Write-Line '==> WSL DNS：入口已自写 /etc/resolv.conf，域名解析正常'
+} elseif ($dnsFallbackOk) {
+    Write-Line '==> WSL DNS：域名解析是通的，但下载域名 cante.run 这个名字解析不了（下载源/域名问题，不是没网）'
+} else {
+    Write-Line '==> WSL DNS：写了 /etc/resolv.conf 还是解析不了 —— 这台机器真没网'
 }
 
 # --- 0) 目录 ----------------------------------------------------------------
@@ -359,6 +408,9 @@ $anteProbe = Invoke-WslCapture -WslPath 'wsl.exe' -WslArguments $probeArgs -Time
 $bunOk = (-not $bunProbe.TimedOut) -and ($bunProbe.Text -match 'CANTE_BUN_OK')
 $anteOk = (-not $anteProbe.TimedOut) -and ($anteProbe.Text -match 'CANTE_ANTE_OK')
 $prereqEvidence = @(
+    "DNS 探针（退出码 $($dnsProbe.ExitCode)$(if ($dnsProbe.TimedOut) { "；超时 —— $dnsTimeout 秒没跑完，不等于改失败" })）：",
+    $dnsProbe.Text,
+    '',
     "bun 探针（退出码 $($bunProbe.ExitCode)$(if ($bunProbe.TimedOut) { "；超时 —— $probeTimeout 秒没跑完，不等于没有" })）：",
     $bunProbe.Text,
     '',
